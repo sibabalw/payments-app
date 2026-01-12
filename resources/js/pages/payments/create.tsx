@@ -12,7 +12,7 @@ import { Head, Link, useForm } from '@inertiajs/react';
 import { isBusinessDay } from '@/lib/sa-holidays';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
+    { title: 'Payments', href: payments.index().url },
     { title: 'Create', href: '#' },
 ];
 

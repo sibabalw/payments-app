@@ -7,7 +7,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
+    { title: 'Payments', href: payments.index().url },
 ];
 
 interface PaymentSchedule {
