@@ -29,6 +29,8 @@ export interface SharedData {
     auth: Auth;
     sidebarOpen: boolean;
     businessesCount?: number;
+    currentBusiness?: { id: number; name: string; status: string; logo?: string | null } | null;
+    userBusinesses?: Array<{ id: number; name: string; status: string; logo?: string | null }>;
     [key: string]: unknown;
 }
 

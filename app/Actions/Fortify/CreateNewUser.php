@@ -2,7 +2,9 @@
 
 namespace App\Actions\Fortify;
 
+use App\Mail\WelcomeEmail;
 use App\Models\User;
+use App\Services\EmailService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Laravel\Fortify\Contracts\CreatesNewUsers;
@@ -30,10 +32,16 @@ class CreateNewUser implements CreatesNewUsers
             'password' => $this->passwordRules(),
         ])->validate();
 
-        return User::create([
+        $user = User::create([
             'name' => $input['name'],
             'email' => $input['email'],
             'password' => $input['password'],
         ]);
+
+        // Send welcome email
+        $emailService = app(EmailService::class);
+        $emailService->send($user, new WelcomeEmail($user), 'welcome');
+
+        return $user;
     }
 }

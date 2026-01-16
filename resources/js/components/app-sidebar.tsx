@@ -7,14 +7,13 @@ import {
     SidebarFooter,
     SidebarHeader,
     SidebarMenu,
-    SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
-import { Link, usePage } from '@inertiajs/react';
+import { usePage } from '@inertiajs/react';
 import { BookOpen, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign } from 'lucide-react';
-import AppLogo from './app-logo';
+import { BusinessSwitcher } from './business-switcher';
 
 const footerNavItems: NavItem[] = [
     {
@@ -71,11 +70,7 @@ export function AppSidebar() {
             <SidebarHeader>
                 <SidebarMenu>
                     <SidebarMenuItem>
-                        <SidebarMenuButton size="lg" asChild>
-                            <Link href={dashboard()} prefetch>
-                                <AppLogo />
-                            </Link>
-                        </SidebarMenuButton>
+                        <BusinessSwitcher />
                     </SidebarMenuItem>
                 </SidebarMenu>
             </SidebarHeader>

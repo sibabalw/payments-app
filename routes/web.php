@@ -36,10 +36,43 @@ Route::get('/terms', function () {
 Route::get('/auth/google', [\App\Http\Controllers\Auth\GoogleAuthController::class, 'redirect'])->name('google.redirect');
 Route::get('/auth/google/callback', [\App\Http\Controllers\Auth\GoogleAuthController::class, 'callback'])->name('google.callback');
 
+// Email verification route (override Fortify's default)
+Route::middleware(['auth', 'signed', 'throttle:6,1'])->group(function () {
+    Route::get('/email/verify/{id}/{hash}', \App\Http\Controllers\Auth\EmailVerificationController::class)
+        ->name('verification.verify');
+});
+
 Route::middleware(['auth', 'verified'])->group(function () {
+    // Onboarding routes
+    Route::get('/onboarding', [\App\Http\Controllers\OnboardingController::class, 'index'])->name('onboarding.index');
+    Route::post('/onboarding', [\App\Http\Controllers\OnboardingController::class, 'store'])->name('onboarding.store');
+    Route::post('/onboarding/skip', [\App\Http\Controllers\OnboardingController::class, 'skip'])->name('onboarding.skip');
+    
     Route::get('dashboard', function () {
         $user = auth()->user();
-        $businessId = session('current_business_id');
+        
+        // If user hasn't completed onboarding, redirect to onboarding
+        if (!$user->onboarding_completed_at) {
+            // Check if user has businesses, if so mark onboarding as completed
+            $hasBusinesses = $user->businesses()->count() > 0 || $user->ownedBusinesses()->count() > 0;
+            
+            if ($hasBusinesses) {
+                $user->update(['onboarding_completed_at' => now()]);
+            } else {
+                return redirect()->route('onboarding.index');
+            }
+        }
+        
+        // Auto-select business if user has businesses but no current_business_id set
+        if (!$user->current_business_id) {
+            $firstBusiness = $user->ownedBusinesses()->first() ?? $user->businesses()->first();
+            if ($firstBusiness) {
+                $user->update(['current_business_id' => $firstBusiness->id]);
+                $user->refresh();
+            }
+        }
+
+        $businessId = $user->current_business_id ?? session('current_business_id'); // Fallback to session for compatibility
         
         $userBusinessIds = $user->businesses()->pluck('businesses.id');
         
@@ -138,6 +171,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     
     // Business routes
     Route::resource('businesses', \App\Http\Controllers\BusinessController::class)->except(['show', 'create', 'edit']);
+    Route::get('businesses/create', [\App\Http\Controllers\BusinessController::class, 'create'])->name('businesses.create');
     Route::post('businesses/{business}/switch', [\App\Http\Controllers\BusinessController::class, 'switch'])->name('businesses.switch');
     Route::post('businesses/{business}/status', [\App\Http\Controllers\BusinessController::class, 'updateStatus'])->name('businesses.status');
     

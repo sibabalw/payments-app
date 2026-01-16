@@ -7,6 +7,7 @@ use App\Models\Receiver;
 use App\Services\AuditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -22,7 +23,7 @@ class ReceiverController extends Controller
      */
     public function index(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         
         $query = Receiver::query();
 
@@ -46,7 +47,7 @@ class ReceiverController extends Controller
      */
     public function create(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $businesses = Auth::user()->businesses()->get();
 
         return Inertia::render('receivers/create', [
@@ -76,9 +77,12 @@ class ReceiverController extends Controller
                 ->withInput();
         }
 
-        $receiver = Receiver::create($validated);
-
-        $this->auditService->log('receiver.created', $receiver, $receiver->getAttributes());
+        // Wrap all database operations in a transaction
+        $receiver = DB::transaction(function () use ($validated) {
+            $receiver = Receiver::create($validated);
+            $this->auditService->log('receiver.created', $receiver, $receiver->getAttributes());
+            return $receiver;
+        });
 
         return redirect()->route('receivers.index')
             ->with('success', 'Receiver created successfully.');
@@ -118,12 +122,14 @@ class ReceiverController extends Controller
                 ->withInput();
         }
 
-        $receiver->update($validated);
-
-        $this->auditService->log('receiver.updated', $receiver, [
-            'old' => $receiver->getOriginal(),
-            'new' => $receiver->getChanges(),
-        ]);
+        // Wrap all database operations in a transaction
+        DB::transaction(function () use ($validated, $receiver) {
+            $receiver->update($validated);
+            $this->auditService->log('receiver.updated', $receiver, [
+                'old' => $receiver->getOriginal(),
+                'new' => $receiver->getChanges(),
+            ]);
+        });
 
         return redirect()->route('receivers.index')
             ->with('success', 'Receiver updated successfully.');

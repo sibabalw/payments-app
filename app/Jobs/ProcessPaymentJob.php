@@ -2,7 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Mail\PaymentFailedEmail;
+use App\Mail\PaymentSuccessEmail;
 use App\Models\PaymentJob;
+use App\Services\EmailService;
 use App\Services\PaymentService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -41,7 +44,15 @@ class ProcessPaymentJob implements ShouldQueue
         try {
             $success = $paymentService->processPaymentJob($this->paymentJob);
 
-            if (! $success) {
+            if ($success) {
+                // Refresh to get updated status
+                $this->paymentJob->refresh();
+                
+                // Send success email
+                $user = $this->paymentJob->paymentSchedule->business->owner;
+                $emailService = app(EmailService::class);
+                $emailService->send($user, new PaymentSuccessEmail($user, $this->paymentJob), 'payment_success');
+            } else {
                 Log::warning('Payment job failed', [
                     'payment_job_id' => $this->paymentJob->id,
                     'attempt' => $this->attempts(),
@@ -90,5 +101,10 @@ class ProcessPaymentJob implements ShouldQueue
             'payment_job_id' => $this->paymentJob->id,
             'exception' => $exception->getMessage(),
         ]);
+
+        // Send failure email
+        $user = $this->paymentJob->paymentSchedule->business->owner;
+        $emailService = app(EmailService::class);
+        $emailService->send($user, new PaymentFailedEmail($user, $this->paymentJob), 'payment_failed');
     }
 }

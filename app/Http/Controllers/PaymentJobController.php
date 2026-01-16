@@ -16,7 +16,7 @@ class PaymentJobController extends Controller
      */
     public function index(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $scheduleId = $request->get('schedule_id');
         $status = $request->get('status');
 

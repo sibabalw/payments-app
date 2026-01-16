@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -39,8 +40,48 @@ class HandleInertiaRequests extends Middleware
         [$message, $author] = str(Inspiring::quotes()->random())->explode('-');
 
         $businessesCount = 0;
+        $currentBusiness = null;
+        $userBusinesses = [];
+
         if ($user = $request->user()) {
             $businessesCount = $user->businesses()->count() + $user->ownedBusinesses()->count();
+
+            // Get all businesses user has access to
+            $owned = $user->ownedBusinesses()->get();
+            $associated = $user->businesses()->get();
+            $allBusinesses = $owned->merge($associated)->unique('id');
+
+            $userBusinesses = $allBusinesses->map(function ($business) {
+                $logoUrl = null;
+                if ($business->logo) {
+                    $logoUrl = Storage::disk('public')->url($business->logo);
+                }
+                
+                return [
+                    'id' => $business->id,
+                    'name' => $business->name,
+                    'status' => $business->status,
+                    'logo' => $logoUrl,
+                ];
+            })->values()->toArray();
+
+            // Get current business
+            if ($user->current_business_id) {
+                $current = $allBusinesses->firstWhere('id', $user->current_business_id);
+                if ($current) {
+                    $logoUrl = null;
+                    if ($current->logo) {
+                        $logoUrl = Storage::disk('public')->url($current->logo);
+                    }
+                    
+                    $currentBusiness = [
+                        'id' => $current->id,
+                        'name' => $current->name,
+                        'status' => $current->status,
+                        'logo' => $logoUrl,
+                    ];
+                }
+            }
         }
 
         return [
@@ -52,6 +93,8 @@ class HandleInertiaRequests extends Middleware
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
             'businessesCount' => $businessesCount,
+            'currentBusiness' => $currentBusiness,
+            'userBusinesses' => $userBusinesses,
         ];
     }
 }

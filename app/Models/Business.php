@@ -15,6 +15,7 @@ class Business extends Model
     protected $fillable = [
         'user_id',
         'name',
+        'logo',
         'business_type',
         'status',
         'status_reason',
@@ -26,6 +27,7 @@ class Business extends Model
         'website',
         'street_address',
         'city',
+        'province',
         'postal_code',
         'country',
         'description',

@@ -115,65 +115,109 @@ class EscrowService
     /**
      * Get available balance for a business.
      * Calculated from confirmed deposits minus used amounts.
+     * Uses shared lock for consistent reads within transaction.
      */
     public function getAvailableBalance(Business $business): float
     {
-        // Sum of authorized amounts from confirmed deposits
-        $totalAuthorized = EscrowDeposit::where('business_id', $business->id)
-            ->where('status', 'confirmed')
-            ->sum('authorized_amount');
+        return DB::transaction(function () use ($business) {
+            // Use shared lock for consistent reads
+            // Sum of authorized amounts from confirmed deposits
+            $totalAuthorized = EscrowDeposit::where('business_id', $business->id)
+                ->where('status', 'confirmed')
+                ->sharedLock()
+                ->sum('authorized_amount');
 
-        // Sum of amounts from payment jobs that used escrow funds
-        $totalUsed = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-        ->whereNotNull('escrow_deposit_id')
-        ->whereIn('status', ['succeeded', 'processing'])
-        ->sum('amount');
+            // Sum of amounts from payment jobs that used escrow funds
+            $totalUsed = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
+                $query->where('business_id', $business->id);
+            })
+            ->whereNotNull('escrow_deposit_id')
+            ->whereIn('status', ['succeeded', 'processing'])
+            ->sharedLock()
+            ->sum('amount');
 
-        // Funds returned manually
-        $totalReturned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-        ->whereNotNull('funds_returned_manually_at')
-        ->sum('amount');
+            // Funds returned manually
+            $totalReturned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
+                $query->where('business_id', $business->id);
+            })
+            ->whereNotNull('funds_returned_manually_at')
+            ->sharedLock()
+            ->sum('amount');
 
-        return (float) ($totalAuthorized - $totalUsed + $totalReturned);
+            return (float) ($totalAuthorized - $totalUsed + $totalReturned);
+        });
     }
 
     /**
      * Reserve funds for a payment.
+     * Uses row-level locks and transactions to prevent race conditions.
      */
     public function reserveFunds(Business $business, float $amount, PaymentJob $paymentJob): bool
     {
-        $availableBalance = $this->getAvailableBalance($business);
+        return DB::transaction(function () use ($business, $amount, $paymentJob) {
+            $paymentJobId = $paymentJob->id;
+            
+            // Lock the payment job to prevent concurrent processing
+            $paymentJob = PaymentJob::where('id', $paymentJobId)
+                ->lockForUpdate()
+                ->first();
 
-        if ($availableBalance < $amount) {
-            return false;
-        }
+            if (!$paymentJob) {
+                Log::warning('Payment job not found during fund reservation', [
+                    'payment_job_id' => $paymentJobId,
+                ]);
+                return false;
+            }
 
-        // Find available deposit to use (FIFO - first in, first out)
-        $deposit = EscrowDeposit::where('business_id', $business->id)
-            ->where('status', 'confirmed')
-            ->orderBy('deposited_at', 'asc')
-            ->first();
+            // Check if already reserved
+            if ($paymentJob->escrow_deposit_id) {
+                Log::info('Payment job already has escrow deposit assigned', [
+                    'payment_job_id' => $paymentJob->id,
+                    'escrow_deposit_id' => $paymentJob->escrow_deposit_id,
+                ]);
+                return true;
+            }
 
-        if (!$deposit) {
-            return false;
-        }
+            // Get available balance with lock
+            $availableBalance = $this->getAvailableBalance($business);
 
-        // Link payment to deposit
-        $paymentJob->update([
-            'escrow_deposit_id' => $deposit->id,
-        ]);
+            if ($availableBalance < $amount) {
+                Log::warning('Insufficient balance for reservation', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+                return false;
+            }
 
-        Log::info('Funds reserved for payment', [
-            'payment_job_id' => $paymentJob->id,
-            'deposit_id' => $deposit->id,
-            'amount' => $amount,
-        ]);
+            // Find available deposit to use (FIFO - first in, first out)
+            // Lock the deposit row to prevent concurrent reservations
+            $deposit = EscrowDeposit::where('business_id', $business->id)
+                ->where('status', 'confirmed')
+                ->orderBy('deposited_at', 'asc')
+                ->lockForUpdate()
+                ->first();
 
-        return true;
+            if (!$deposit) {
+                Log::warning('No available deposit found for reservation', [
+                    'business_id' => $business->id,
+                ]);
+                return false;
+            }
+
+            // Link payment to deposit
+            $paymentJob->update([
+                'escrow_deposit_id' => $deposit->id,
+            ]);
+
+            Log::info('Funds reserved for payment', [
+                'payment_job_id' => $paymentJob->id,
+                'deposit_id' => $deposit->id,
+                'amount' => $amount,
+            ]);
+
+            return true;
+        });
     }
 
     /**

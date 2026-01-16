@@ -6,6 +6,7 @@ use App\Models\Business;
 use App\Services\EscrowService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,7 +22,7 @@ class EscrowDepositController extends Controller
      */
     public function index(): Response
     {
-        $businessId = session('current_business_id');
+        $businessId = Auth::user()->current_business_id ?? session('current_business_id');
         $user = Auth::user();
 
         $businesses = $user->businesses()->get();
@@ -66,12 +67,15 @@ class EscrowDepositController extends Controller
         }
 
         try {
-            $deposit = $this->escrowService->createDeposit(
-                $business,
-                $validated['amount'],
-                $validated['currency'],
-                Auth::user()
-            );
+            // Wrap service call in transaction for future-proofing
+            $deposit = DB::transaction(function () use ($business, $validated) {
+                return $this->escrowService->createDeposit(
+                    $business,
+                    $validated['amount'],
+                    $validated['currency'],
+                    Auth::user()
+                );
+            });
 
             return redirect()->route('escrow.deposit.index')
                 ->with('success', 'Deposit recorded successfully. Status: Pending bank confirmation. Authorized amount: ' . number_format($deposit->authorized_amount, 2) . ' (after 1.5% fee)');

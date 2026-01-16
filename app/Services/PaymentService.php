@@ -2,10 +2,14 @@
 
 namespace App\Services;
 
+use App\Mail\EscrowBalanceLowEmail;
 use App\Models\PaymentJob;
 use App\Models\Receiver;
+use App\Services\EmailService;
+use App\Services\IdempotencyService;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
 use App\Services\PaymentGateway\PaymentGatewayInterface;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class PaymentService
@@ -21,78 +25,120 @@ class PaymentService
 
     /**
      * Process a payment job.
+     * Uses idempotency, database locks, and transactions for safety.
      */
     public function processPaymentJob(PaymentJob $paymentJob): bool
     {
-        try {
-            $business = $paymentJob->paymentSchedule->business;
+        // Generate idempotency key
+        $idempotencyKey = 'payment_job_' . $paymentJob->id . '_' . ($paymentJob->transaction_id ?? 'new');
 
-            // Check escrow balance before processing
-            $availableBalance = $this->escrowService->getAvailableBalance($business);
-            if ($availableBalance < $paymentJob->amount) {
-                $paymentJob->update([
-                    'status' => 'failed',
-                    'error_message' => 'Insufficient escrow balance. Available: ' . number_format($availableBalance, 2) . ', Required: ' . number_format($paymentJob->amount, 2),
-                ]);
+        $idempotencyService = app(IdempotencyService::class);
 
-                Log::warning('Payment rejected due to insufficient escrow balance', [
-                    'payment_job_id' => $paymentJob->id,
-                    'available_balance' => $availableBalance,
-                    'required_amount' => $paymentJob->amount,
-                ]);
+        return $idempotencyService->execute($idempotencyKey, function () use ($paymentJob) {
+            return DB::transaction(function () use ($paymentJob) {
+                try {
+                    $paymentJobId = $paymentJob->id;
+                    
+                    // Lock the payment job row to prevent concurrent processing
+                    $paymentJob = PaymentJob::where('id', $paymentJobId)
+                        ->lockForUpdate()
+                        ->first();
 
-                return false;
-            }
+                    if (!$paymentJob) {
+                        Log::error('Payment job not found', [
+                            'payment_job_id' => $paymentJobId,
+                        ]);
+                        return false;
+                    }
 
-            // Reserve funds from escrow
-            $fundsReserved = $this->escrowService->reserveFunds($business, $paymentJob->amount, $paymentJob);
-            if (!$fundsReserved) {
-                $paymentJob->update([
-                    'status' => 'failed',
-                    'error_message' => 'Failed to reserve funds from escrow account',
-                ]);
+                    // Check if already processed
+                    if (in_array($paymentJob->status, ['succeeded', 'processing'])) {
+                        Log::info('Payment job already processed', [
+                            'payment_job_id' => $paymentJob->id,
+                            'status' => $paymentJob->status,
+                        ]);
+                        return $paymentJob->status === 'succeeded';
+                    }
 
-                Log::error('Failed to reserve escrow funds', [
-                    'payment_job_id' => $paymentJob->id,
-                ]);
+                    $business = $paymentJob->paymentSchedule->business;
 
-                return false;
-            }
+                    // Check escrow balance before processing
+                    $availableBalance = $this->escrowService->getAvailableBalance($business);
+                    if ($availableBalance < $paymentJob->amount) {
+                        $paymentJob->update([
+                            'status' => 'failed',
+                            'error_message' => 'Insufficient escrow balance. Available: ' . number_format($availableBalance, 2) . ', Required: ' . number_format($paymentJob->amount, 2),
+                        ]);
 
-            $paymentJob->update(['status' => 'processing']);
+                        Log::warning('Payment rejected due to insufficient escrow balance', [
+                            'payment_job_id' => $paymentJob->id,
+                            'available_balance' => $availableBalance,
+                            'required_amount' => $paymentJob->amount,
+                        ]);
 
-            // Skip real payment processing - just create database record
-            // Mark as succeeded immediately without calling payment gateway
-            $paymentJob->update([
-                'status' => 'succeeded',
-                'processed_at' => now(),
-                'error_message' => null,
-                'transaction_id' => 'SKIPPED-' . now()->format('YmdHis') . '-' . $paymentJob->id,
-            ]);
+                        // Send escrow balance low email
+                        $user = $business->owner;
+                        $emailService = app(EmailService::class);
+                        $emailService->send(
+                            $user,
+                            new EscrowBalanceLowEmail($user, $business, $availableBalance, $paymentJob->amount),
+                            'escrow_balance_low'
+                        );
 
-            Log::info('Payment record created (real payment skipped)', [
-                'payment_job_id' => $paymentJob->id,
-                'amount' => $paymentJob->amount,
-                'currency' => $paymentJob->currency,
-                'receiver_id' => $paymentJob->receiver_id,
-            ]);
+                        return false;
+                    }
 
-            return true;
-        } catch (\Exception $e) {
-            // Bank will handle fund returns - admin will record manually
+                    // Reserve funds from escrow (already has transaction and locks)
+                    $fundsReserved = $this->escrowService->reserveFunds($business, $paymentJob->amount, $paymentJob);
+                    if (!$fundsReserved) {
+                        $paymentJob->update([
+                            'status' => 'failed',
+                            'error_message' => 'Failed to reserve funds from escrow account',
+                        ]);
 
-            $paymentJob->update([
-                'status' => 'failed',
-                'error_message' => $e->getMessage(),
-            ]);
+                        Log::error('Failed to reserve escrow funds', [
+                            'payment_job_id' => $paymentJob->id,
+                        ]);
 
-            Log::error('Payment processing exception', [
-                'payment_job_id' => $paymentJob->id,
-                'exception' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+                        return false;
+                    }
 
-            return false;
-        }
+                    $paymentJob->update(['status' => 'processing']);
+
+                    // Skip real payment processing - just create database record
+                    // Mark as succeeded immediately without calling payment gateway
+                    $paymentJob->update([
+                        'status' => 'succeeded',
+                        'processed_at' => now(),
+                        'error_message' => null,
+                        'transaction_id' => 'SKIPPED-' . now()->format('YmdHis') . '-' . $paymentJob->id,
+                    ]);
+
+                    Log::info('Payment record created (real payment skipped)', [
+                        'payment_job_id' => $paymentJob->id,
+                        'amount' => $paymentJob->amount,
+                        'currency' => $paymentJob->currency,
+                        'receiver_id' => $paymentJob->receiver_id,
+                    ]);
+
+                    return true;
+                } catch (\Exception $e) {
+                    // Bank will handle fund returns - admin will record manually
+
+                    $paymentJob->update([
+                        'status' => 'failed',
+                        'error_message' => $e->getMessage(),
+                    ]);
+
+                    Log::error('Payment processing exception', [
+                        'payment_job_id' => $paymentJob->id,
+                        'exception' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+
+                    return false;
+                }
+            });
+        });
     }
 }

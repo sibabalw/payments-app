@@ -15,7 +15,7 @@ class PayrollController extends PaymentScheduleController
      */
     public function index(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $status = $request->get('status');
 
         $query = PaymentSchedule::query()
@@ -49,7 +49,7 @@ class PayrollController extends PaymentScheduleController
      */
     public function create(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $businesses = Auth::user()->businesses()->get();
         
         $receivers = [];
@@ -119,7 +119,7 @@ class PayrollController extends PaymentScheduleController
      */
     public function jobs(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $status = $request->get('status');
 
         $query = \App\Models\PaymentJob::query()

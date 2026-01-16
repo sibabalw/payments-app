@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Request;
 
 class AuditService
@@ -62,6 +63,7 @@ class AuditService
     protected function getBusinessFromRequest(): ?Business
     {
         $businessId = Request::header('X-Business-Id') 
+            ?? (Auth::check() ? Auth::user()->current_business_id : null)
             ?? session('current_business_id')
             ?? Request::input('business_id');
 

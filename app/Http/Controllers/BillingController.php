@@ -21,7 +21,7 @@ class BillingController extends Controller
      */
     public function index(): Response
     {
-        $businessId = session('current_business_id');
+        $businessId = Auth::user()->current_business_id ?? session('current_business_id');
         $user = Auth::user();
 
         $businesses = $user->businesses()->get();
