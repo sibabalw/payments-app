@@ -9,12 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DatePicker } from '@/components/ui/date-picker';
 import InputError from '@/components/input-error';
 
-export default function PayrollEdit({ schedule, businesses, receivers }: any) {
+export default function PayrollEdit({ schedule, businesses, employees, employeeTaxBreakdowns }: any) {
     // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
-    const scheduledDate = schedule.scheduled_date 
+    const initialScheduledDate = schedule.scheduled_date 
         ? new Date(schedule.scheduled_date + 'T' + (schedule.scheduled_time || '00:00'))
         : undefined;
-    const scheduledTime = schedule.scheduled_time || '09:00';
+    const initialScheduledTime = schedule.scheduled_time || '09:00';
     const parsedFrequency = schedule.parsed_frequency || 'monthly';
 
     const { data, setData, put, processing, errors } = useForm({
@@ -22,12 +22,15 @@ export default function PayrollEdit({ schedule, businesses, receivers }: any) {
         name: schedule.name,
         schedule_type: schedule.schedule_type || 'recurring',
         scheduled_date: schedule.scheduled_date || '',
-        scheduled_time: scheduledTime,
+        scheduled_time: initialScheduledTime,
         frequency: parsedFrequency,
-        amount: String(schedule.amount),
-        currency: schedule.currency,
-        receiver_ids: schedule.receivers?.map((r: any) => r.id) || [],
+        employee_ids: schedule.employees?.map((e: any) => e.id) || [],
     });
+
+    // Derive current date from form data (so it updates when user changes it)
+    const scheduledDate = data.scheduled_date 
+        ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00'))
+        : initialScheduledDate;
 
     const isReadOnly = schedule.status === 'cancelled';
 
@@ -93,7 +96,7 @@ export default function PayrollEdit({ schedule, businesses, receivers }: any) {
                                 {isReadOnly ? (
                                     <div className="mt-2">
                                         <p className="text-sm text-muted-foreground">
-                                            {scheduledDate ? scheduledDate.toLocaleDateString() : 'N/A'} at {scheduledTime}
+                                            {scheduledDate ? scheduledDate.toLocaleDateString() : 'N/A'} at {data.scheduled_time}
                                         </p>
                                     </div>
                                 ) : (
@@ -103,7 +106,8 @@ export default function PayrollEdit({ schedule, businesses, receivers }: any) {
                                             onDateChange={(date) => {
                                                 if (date) {
                                                     setData('scheduled_date', date.toISOString().split('T')[0]);
-                                                    setData('scheduled_time', date.toTimeString().slice(0, 5));
+                                                } else {
+                                                    setData('scheduled_date', '');
                                                 }
                                             }}
                                             time={data.scheduled_time}
@@ -148,61 +152,66 @@ export default function PayrollEdit({ schedule, businesses, receivers }: any) {
                             )}
 
                             <div>
-                                <Label htmlFor="amount">Amount (ZAR)</Label>
-                                <Input
-                                    id="amount"
-                                    type="number"
-                                    step="0.01"
-                                    value={data.amount}
-                                    onChange={(e) => setData('amount', e.target.value)}
-                                    required
-                                />
-                                <InputError message={errors.amount} />
-                            </div>
-
-                            <div>
-                                <Label>Receivers</Label>
+                                <Label>Employees</Label>
                                 {isReadOnly ? (
                                     <div className="mt-2">
                                         <div className="space-y-1">
-                                            {schedule.receivers && schedule.receivers.length > 0 ? (
-                                                schedule.receivers.map((receiver: any) => (
-                                                    <p key={receiver.id} className="text-sm text-muted-foreground">
-                                                        {receiver.name}
+                                            {schedule.employees && schedule.employees.length > 0 ? (
+                                                schedule.employees.map((employee: any) => (
+                                                    <div key={employee.id} className="p-2 border rounded">
+                                                        <p className="text-sm font-medium">{employee.name}</p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            Gross: ZAR {parseFloat(employee.gross_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                        {employeeTaxBreakdowns && employeeTaxBreakdowns[employee.id] && (
+                                                            <p className="text-xs text-green-600 mt-1">
+                                                                Net: ZAR {parseFloat(employeeTaxBreakdowns[employee.id].net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </p>
+                                                        )}
+                                                    </div>
                                                 ))
                                             ) : (
-                                                <p className="text-sm text-muted-foreground">No receivers assigned</p>
+                                                <p className="text-sm text-muted-foreground">No employees assigned</p>
                                             )}
                                         </div>
                                     </div>
                                 ) : (
                                     <>
                                         <div className="space-y-2 mt-2">
-                                            {receivers.length === 0 ? (
+                                            {employees.length === 0 ? (
                                                 <p className="text-sm text-muted-foreground">
-                                                    No receivers found for this business. <Link href="/receivers/create" className="text-primary underline">Create a receiver</Link> first.
+                                                    No employees found for this business. <Link href="/employees/create" className="text-primary underline">Create an employee</Link> first.
                                                 </p>
                                             ) : (
-                                                receivers.map((receiver: any) => (
-                                                    <label key={receiver.id} className="flex items-center space-x-2">
+                                                employees.map((employee: any) => (
+                                                    <label key={employee.id} className="flex items-center space-x-2 p-2 border rounded">
                                                         <input
                                                             type="checkbox"
-                                                            checked={data.receiver_ids.includes(receiver.id)}
+                                                            checked={data.employee_ids.includes(employee.id)}
                                                             onChange={(e) => {
                                                                 if (e.target.checked) {
-                                                                    setData('receiver_ids', [...data.receiver_ids, receiver.id]);
+                                                                    setData('employee_ids', [...data.employee_ids, employee.id]);
                                                                 } else {
-                                                                    setData('receiver_ids', data.receiver_ids.filter((id: number) => id !== receiver.id));
+                                                                    setData('employee_ids', data.employee_ids.filter((id: number) => id !== employee.id));
                                                                 }
                                                             }}
                                                         />
-                                                        <span>{receiver.name}</span>
+                                                        <div className="flex-1">
+                                                            <span className="font-medium">{employee.name}</span>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                Gross: ZAR {parseFloat(employee.gross_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </p>
+                                                            {employeeTaxBreakdowns && employeeTaxBreakdowns[employee.id] && (
+                                                                <p className="text-xs text-green-600 mt-1">
+                                                                    Net: ZAR {parseFloat(employeeTaxBreakdowns[employee.id].net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                </p>
+                                                            )}
+                                                        </div>
                                                     </label>
                                                 ))
                                             )}
                                         </div>
-                                        <InputError message={errors.receiver_ids} />
+                                        <InputError message={errors.employee_ids} />
                                     </>
                                 )}
                             </div>

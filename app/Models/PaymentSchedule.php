@@ -40,15 +40,20 @@ class PaymentSchedule extends Model
         return $this->belongsTo(Business::class);
     }
 
-    public function receivers(): BelongsToMany
+    public function recipients(): BelongsToMany
     {
-        return $this->belongsToMany(Receiver::class, 'payment_schedule_receiver')
+        return $this->belongsToMany(Recipient::class, 'payment_schedule_recipient')
             ->withTimestamps();
     }
 
     public function paymentJobs(): HasMany
     {
         return $this->hasMany(PaymentJob::class);
+    }
+
+    public function executedPayments(): HasMany
+    {
+        return $this->hasMany(ExecutedPayment::class, 'payment_schedule_id');
     }
 
     public function scopeActive(Builder $query): Builder

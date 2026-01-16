@@ -9,4 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('payments:process-scheduled')->everyMinute();
+Schedule::command('payroll:process-scheduled')->everyMinute();
 Schedule::command('payments:send-reminders')->everyFifteenMinutes();

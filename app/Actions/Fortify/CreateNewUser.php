@@ -38,9 +38,7 @@ class CreateNewUser implements CreatesNewUsers
             'password' => $input['password'],
         ]);
 
-        // Send welcome email
-        $emailService = app(EmailService::class);
-        $emailService->send($user, new WelcomeEmail($user), 'welcome');
+        // Welcome email will be sent after email verification
 
         return $user;
     }

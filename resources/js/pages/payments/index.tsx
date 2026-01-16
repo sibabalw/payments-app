@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
+import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
@@ -20,7 +20,8 @@ interface PaymentSchedule {
     currency: string;
     frequency: string;
     next_run_at: string | null;
-    receivers: Array<{ id: number; name: string }>;
+    receivers?: Array<{ id: number; name: string }>;
+    recipients?: Array<{ id: number; name: string }>;
 }
 
 interface PaymentsIndexProps {
@@ -56,12 +57,20 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold">Payment Schedules</h1>
+                    <div className="flex gap-2">
+                        <Link href="/recipients/create">
+                            <Button variant="outline">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add Recipient
+                            </Button>
+                        </Link>
                     <Link href="/payments/create">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Create Schedule
                         </Button>
                     </Link>
+                    </div>
                 </div>
 
                 <div className="grid gap-4">
@@ -72,7 +81,7 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                     <div>
                                         <CardTitle>{schedule.name}</CardTitle>
                                         <p className="text-sm text-muted-foreground mt-1">
-                                            {schedule.receivers.length} receiver(s) • {schedule.frequency}
+                                            {(schedule.recipients?.length || schedule.receivers?.length || 0)} recipient(s) • {schedule.frequency}
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2">

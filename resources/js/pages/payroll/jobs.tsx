@@ -20,14 +20,17 @@ export default function PayrollJobs({ jobs }: any) {
                         {jobs.data.map((job: any) => (
                             <Card key={job.id}>
                                 <CardHeader>
-                                    <CardTitle>{job.payment_schedule?.name}</CardTitle>
+                                    <CardTitle>{job.payroll_schedule?.name || 'Payroll Schedule'}</CardTitle>
                                 </CardHeader>
                                 <CardContent>
+                                    <div className="space-y-3">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <p className="font-medium">{job.receiver?.name}</p>
-                                            <p className="text-sm text-muted-foreground">
-                                                {job.currency} {job.amount}
+                                                <p className="font-medium">{job.employee?.name}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {job.pay_period_start && job.pay_period_end 
+                                                        ? `${new Date(job.pay_period_start).toLocaleDateString()} - ${new Date(job.pay_period_end).toLocaleDateString()}`
+                                                        : 'Pay period not specified'}
                                             </p>
                                         </div>
                                         <span
@@ -41,6 +44,36 @@ export default function PayrollJobs({ jobs }: any) {
                                         >
                                             {job.status}
                                         </span>
+                                        </div>
+
+                                        <div className="border-t pt-3 space-y-2">
+                                            <div className="flex justify-between text-sm">
+                                                <span>Gross Salary:</span>
+                                                <span className="font-medium">ZAR {parseFloat(job.gross_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-red-600">
+                                                <span>PAYE:</span>
+                                                <span>- ZAR {parseFloat(job.paye_amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-red-600">
+                                                <span>UIF:</span>
+                                                <span>- ZAR {parseFloat(job.uif_amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-red-600">
+                                                <span>SDL:</span>
+                                                <span>- ZAR {parseFloat(job.sdl_amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                            <div className="border-t pt-2 flex justify-between font-bold">
+                                                <span>Net Salary (Paid):</span>
+                                                <span className="text-green-600">ZAR {parseFloat(job.net_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            </div>
+                                        </div>
+
+                                        {job.error_message && (
+                                            <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-sm text-red-600">
+                                                {job.error_message}
+                                            </div>
+                                        )}
                                     </div>
                                 </CardContent>
                             </Card>

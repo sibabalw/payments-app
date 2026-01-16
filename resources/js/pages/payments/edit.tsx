@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DatePicker } from '@/components/ui/date-picker';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
+import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
 
@@ -18,10 +18,10 @@ const breadcrumbs: BreadcrumbItem[] = [
 interface PaymentsEditProps {
     schedule: any;
     businesses: Array<{ id: number; name: string }>;
-    receivers: Array<{ id: number; name: string }>;
+    recipients: Array<{ id: number; name: string }>;
 }
 
-export default function PaymentsEdit({ schedule, businesses, receivers }: PaymentsEditProps) {
+export default function PaymentsEdit({ schedule, businesses, recipients }: PaymentsEditProps) {
     // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
     const scheduledDate = schedule.scheduled_date 
         ? new Date(schedule.scheduled_date + 'T' + (schedule.scheduled_time || '00:00'))
@@ -38,7 +38,7 @@ export default function PaymentsEdit({ schedule, businesses, receivers }: Paymen
         frequency: parsedFrequency,
         amount: String(schedule.amount),
         currency: schedule.currency,
-        receiver_ids: schedule.receivers?.map((r: any) => r.id) || [],
+        recipient_ids: schedule.recipients?.map((r: any) => r.id) || schedule.receivers?.map((r: any) => r.id) || [],
     });
 
     const isReadOnly = schedule.status === 'cancelled';
@@ -193,26 +193,32 @@ export default function PaymentsEdit({ schedule, businesses, receivers }: Paymen
                             </div>
 
                             <div>
-                                <Label>Receivers</Label>
+                                <Label>Recipients</Label>
                                 <div className="space-y-2 mt-2">
-                                    {receivers.map((receiver) => (
-                                        <label key={receiver.id} className="flex items-center space-x-2">
+                                    {recipients.length > 0 ? (
+                                        recipients.map((recipient: { id: number; name: string }) => (
+                                            <label key={recipient.id} className="flex items-center space-x-2">
                                             <input
                                                 type="checkbox"
-                                                checked={data.receiver_ids.includes(receiver.id)}
+                                                    checked={data.recipient_ids.includes(recipient.id)}
                                                 onChange={(e) => {
                                                     if (e.target.checked) {
-                                                        setData('receiver_ids', [...data.receiver_ids, receiver.id]);
+                                                            setData('recipient_ids', [...data.recipient_ids, recipient.id]);
                                                     } else {
-                                                        setData('receiver_ids', data.receiver_ids.filter(id => id !== receiver.id));
+                                                            setData('recipient_ids', data.recipient_ids.filter((id: number) => id !== recipient.id));
                                                     }
                                                 }}
                                             />
-                                            <span>{receiver.name}</span>
+                                                <span>{recipient.name}</span>
                                         </label>
-                                    ))}
+                                        ))
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground">
+                                            No recipients found. <Link href="/recipients/create" className="text-primary underline">Create one</Link>
+                                        </p>
+                                    )}
                                 </div>
-                                <InputError message={errors.receiver_ids} />
+                                <InputError message={errors.recipient_ids} />
                             </div>
 
                             <div className="flex gap-2">

@@ -221,6 +221,78 @@ class EscrowService
     }
 
     /**
+     * Reserve funds for a payroll job.
+     * Uses row-level locks and transactions to prevent race conditions.
+     */
+    public function reserveFundsForPayroll(Business $business, float $amount, \App\Models\PayrollJob $payrollJob): bool
+    {
+        return DB::transaction(function () use ($business, $amount, $payrollJob) {
+            $payrollJobId = $payrollJob->id;
+            
+            // Lock the payroll job to prevent concurrent processing
+            $payrollJob = \App\Models\PayrollJob::where('id', $payrollJobId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$payrollJob) {
+                Log::warning('Payroll job not found during fund reservation', [
+                    'payroll_job_id' => $payrollJobId,
+                ]);
+                return false;
+            }
+
+            // Check if already reserved
+            if ($payrollJob->escrow_deposit_id) {
+                Log::info('Payroll job already has escrow deposit assigned', [
+                    'payroll_job_id' => $payrollJob->id,
+                    'escrow_deposit_id' => $payrollJob->escrow_deposit_id,
+                ]);
+                return true;
+            }
+
+            // Get available balance with lock
+            $availableBalance = $this->getAvailableBalance($business);
+
+            if ($availableBalance < $amount) {
+                Log::warning('Insufficient balance for payroll reservation', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+                return false;
+            }
+
+            // Find available deposit to use (FIFO - first in, first out)
+            // Lock the deposit row to prevent concurrent reservations
+            $deposit = EscrowDeposit::where('business_id', $business->id)
+                ->where('status', 'confirmed')
+                ->orderBy('deposited_at', 'asc')
+                ->lockForUpdate()
+                ->first();
+
+            if (!$deposit) {
+                Log::warning('No available deposit found for payroll reservation', [
+                    'business_id' => $business->id,
+                ]);
+                return false;
+            }
+
+            // Link payroll job to deposit
+            $payrollJob->update([
+                'escrow_deposit_id' => $deposit->id,
+            ]);
+
+            Log::info('Funds reserved for payroll', [
+                'payroll_job_id' => $payrollJob->id,
+                'deposit_id' => $deposit->id,
+                'amount' => $amount,
+            ]);
+
+            return true;
+        });
+    }
+
+    /**
      * Manually record that bank released fee for a payment.
      */
     public function recordFeeRelease(PaymentJob $paymentJob, User $recordedBy): void

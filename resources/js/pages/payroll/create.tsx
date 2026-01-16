@@ -10,7 +10,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import InputError from '@/components/input-error';
 import { isBusinessDay } from '@/lib/sa-holidays';
 
-export default function PayrollCreate({ businesses, receivers, selectedBusinessId }: any) {
+export default function PayrollCreate({ businesses, employees, selectedBusinessId, escrowBalance }: any) {
     // Get next business day as default date
     const getDefaultDate = () => {
         const tomorrow = new Date();
@@ -30,15 +30,12 @@ export default function PayrollCreate({ businesses, receivers, selectedBusinessI
 
     const { data, setData, post, processing, errors } = useForm({
         business_id: selectedBusinessId || businesses[0]?.id || '',
-        type: 'payroll',
         name: '',
         schedule_type: 'recurring',
         scheduled_date: defaultDate.toISOString().split('T')[0],
         scheduled_time: defaultTime,
         frequency: 'monthly',
-        amount: '',
-        currency: 'ZAR',
-        receiver_ids: [] as number[],
+        employee_ids: [] as number[],
     });
 
     const submit = (e: React.FormEvent) => {
@@ -136,46 +133,59 @@ export default function PayrollCreate({ businesses, receivers, selectedBusinessI
                             )}
 
                             <div>
-                                <Label htmlFor="amount">Amount (ZAR)</Label>
-                                <Input
-                                    id="amount"
-                                    type="number"
-                                    step="0.01"
-                                    value={data.amount}
-                                    onChange={(e) => setData('amount', e.target.value)}
-                                    required
-                                />
-                                <InputError message={errors.amount} />
-                            </div>
-
-                            <div>
-                                <Label>Receivers</Label>
+                                <Label>Employees</Label>
                                 <div className="space-y-2 mt-2">
-                                    {receivers.length === 0 ? (
+                                    {employees.length === 0 ? (
                                         <p className="text-sm text-muted-foreground">
-                                            No receivers found for this business. <Link href="/receivers/create" className="text-primary underline">Create a receiver</Link> first.
+                                            No employees found for this business. <Link href="/employees/create" className="text-primary underline">Create an employee</Link> first.
                                         </p>
                                     ) : (
-                                        receivers.map((receiver: any) => (
-                                            <label key={receiver.id} className="flex items-center space-x-2">
+                                        employees.map((employee: any) => (
+                                            <label key={employee.id} className="flex items-center space-x-2 p-2 border rounded">
                                                 <input
                                                     type="checkbox"
-                                                    checked={data.receiver_ids.includes(receiver.id)}
+                                                    checked={data.employee_ids.includes(employee.id)}
                                                     onChange={(e) => {
                                                         if (e.target.checked) {
-                                                            setData('receiver_ids', [...data.receiver_ids, receiver.id]);
+                                                            setData('employee_ids', [...data.employee_ids, employee.id]);
                                                         } else {
-                                                            setData('receiver_ids', data.receiver_ids.filter((id: number) => id !== receiver.id));
+                                                            setData('employee_ids', data.employee_ids.filter((id: number) => id !== employee.id));
                                                         }
                                                     }}
                                                 />
-                                                <span>{receiver.name}</span>
+                                                <div className="flex-1">
+                                                    <span className="font-medium">{employee.name}</span>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Gross: ZAR {parseFloat(employee.gross_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </p>
+                                                </div>
                                             </label>
                                         ))
                                     )}
                                 </div>
-                                <InputError message={errors.receiver_ids} />
+                                <InputError message={errors.employee_ids} />
                             </div>
+
+                            {data.employee_ids.length > 0 && (
+                                <Card className="bg-muted">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg">Total Payroll Summary</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-sm text-muted-foreground">
+                                            {data.employee_ids.length} employee(s) selected. Tax calculations will be performed automatically for each employee when the payroll runs.
+                                        </p>
+                                        {escrowBalance !== null && escrowBalance !== undefined && (
+                                            <p className="text-sm mt-2">
+                                                Available Escrow Balance: {new Intl.NumberFormat('en-ZA', {
+                                                    style: 'currency',
+                                                    currency: 'ZAR',
+                                                }).format(escrowBalance)}
+                                            </p>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
 
                             <div className="flex gap-2">
                                 <Button type="submit" disabled={processing}>

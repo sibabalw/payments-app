@@ -21,7 +21,7 @@ class EmailService
                 return false;
             }
 
-            // Queue the email
+            // Queue the email (after commit to ensure user is saved - configured in queue.php)
             Mail::to($user->email)->queue($mailable);
 
             Log::info("Email queued: {$emailType} to user {$user->id}");

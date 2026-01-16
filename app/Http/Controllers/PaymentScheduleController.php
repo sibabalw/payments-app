@@ -6,7 +6,7 @@ use App\Mail\PaymentScheduleCancelledEmail;
 use App\Mail\PaymentScheduleCreatedEmail;
 use App\Models\Business;
 use App\Models\PaymentSchedule;
-use App\Models\Receiver;
+use App\Models\Recipient;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
 use App\Services\CronExpressionService;
@@ -40,7 +40,7 @@ class PaymentScheduleController extends Controller
         $type = $request->get('type'); // 'generic' or 'payroll'
         $status = $request->get('status'); // 'active', 'paused', 'cancelled'
 
-        $query = PaymentSchedule::query()->with(['business', 'receivers']);
+        $query = PaymentSchedule::query()->with(['business', 'recipients']);
 
         if ($businessId) {
             $query->where('business_id', $businessId);
@@ -49,8 +49,12 @@ class PaymentScheduleController extends Controller
             $query->whereIn('business_id', $userBusinessIds);
         }
 
-        if ($type) {
-            $query->ofType($type);
+        // Only show generic payment schedules (not payroll)
+        $query->ofType('generic');
+
+        if ($type && $type !== 'generic') {
+            // If type is specified and not generic, return empty (payroll uses separate controller)
+            $query->whereRaw('1 = 0');
         }
 
         if ($status) {
@@ -78,10 +82,10 @@ class PaymentScheduleController extends Controller
         $type = $request->get('type', 'generic');
         $businesses = Auth::user()->businesses()->get();
         
-        $receivers = [];
+        $recipients = [];
         $escrowBalance = null;
         if ($businessId) {
-            $receivers = Receiver::where('business_id', $businessId)->get();
+            $recipients = Recipient::where('business_id', $businessId)->get();
             $business = Business::find($businessId);
             if ($business) {
                 $escrowBalance = $this->escrowService->getAvailableBalance($business);
@@ -90,9 +94,9 @@ class PaymentScheduleController extends Controller
 
         return Inertia::render('payments/create', [
             'businesses' => $businesses,
-            'receivers' => $receivers,
+            'recipients' => $recipients,
             'selectedBusinessId' => $businessId,
-            'type' => $type,
+            'type' => 'generic',
             'escrowBalance' => $escrowBalance,
         ]);
     }
@@ -105,12 +109,11 @@ class PaymentScheduleController extends Controller
         // Accept both old format (frequency as cron) and new format (scheduled_date/scheduled_time)
         $rules = [
             'business_id' => 'required|exists:businesses,id',
-            'type' => 'required|in:generic,payroll',
             'name' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0.01',
             'schedule_type' => 'required|in:one_time,recurring',
-            'receiver_ids' => 'required|array|min:1',
-            'receiver_ids.*' => 'exists:receivers,id',
+            'recipient_ids' => 'required|array|min:1',
+            'recipient_ids.*' => 'exists:recipients,id',
         ];
 
         // If scheduled_date is provided, use new format; otherwise use old format for backward compatibility
@@ -159,7 +162,7 @@ class PaymentScheduleController extends Controller
         $schedule = DB::transaction(function () use ($validated, $frequency) {
             $schedule = PaymentSchedule::create([
                 'business_id' => $validated['business_id'],
-                'type' => $validated['type'],
+                'type' => 'generic',
                 'name' => $validated['name'],
                 'frequency' => $frequency,
                 'amount' => $validated['amount'],
@@ -177,21 +180,21 @@ class PaymentScheduleController extends Controller
                 // If calculation fails, set to null (will be handled by scheduler)
             }
 
-            // Attach receivers
-            $schedule->receivers()->attach($validated['receiver_ids']);
-
-            // Log audit trail
-            $this->auditService->log('payment_schedule.created', $schedule, $schedule->getAttributes());
-
             return $schedule;
         });
+
+        // Attach recipients outside transaction to avoid lock timeout
+        $schedule->recipients()->attach($validated['recipient_ids']);
+
+        // Log audit trail outside transaction (non-critical)
+        $this->auditService->log('payment_schedule.created', $schedule, $schedule->getAttributes());
 
         // Send payment schedule created email (non-critical, happens after transaction)
         $user = $business->owner;
         $emailService = app(EmailService::class);
         $emailService->send($user, new PaymentScheduleCreatedEmail($user, $schedule), 'payment_schedule_created');
 
-        $route = $validated['type'] === 'payroll' ? 'payroll.index' : 'payments.index';
+        $route = 'payments.index';
 
         return redirect()->route($route)
             ->with('success', 'Payment schedule created successfully.');
@@ -202,13 +205,18 @@ class PaymentScheduleController extends Controller
      */
     public function edit(PaymentSchedule $paymentSchedule): Response
     {
+        // Only allow editing generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
+
         $businesses = Auth::user()->businesses()->get();
-        $receivers = Receiver::where('business_id', $paymentSchedule->business_id)->get();
+        $recipients = Recipient::where('business_id', $paymentSchedule->business_id)->get();
 
         // Parse cron expression to extract date/time for editing
         $parsed = $this->cronParser->parse($paymentSchedule->frequency);
         
-        $schedule = $paymentSchedule->load(['business', 'receivers']);
+        $schedule = $paymentSchedule->load(['business', 'recipients']);
         if ($parsed) {
             $schedule->scheduled_date = $parsed['date'];
             $schedule->scheduled_time = $parsed['time'];
@@ -218,7 +226,7 @@ class PaymentScheduleController extends Controller
         return Inertia::render('payments/edit', [
             'schedule' => $schedule,
             'businesses' => $businesses,
-            'receivers' => $receivers,
+            'recipients' => $recipients,
         ]);
     }
 
@@ -227,6 +235,11 @@ class PaymentScheduleController extends Controller
      */
     public function update(Request $request, PaymentSchedule $paymentSchedule)
     {
+        // Only allow updating generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
+
         // Accept both old format (frequency as cron) and new format (scheduled_date/scheduled_time)
         $rules = [
             'business_id' => 'required|exists:businesses,id',
@@ -234,8 +247,8 @@ class PaymentScheduleController extends Controller
             'amount' => 'required|numeric|min:0.01',
             'currency' => 'required|string|size:3',
             'schedule_type' => 'required|in:one_time,recurring',
-            'receiver_ids' => 'required|array|min:1',
-            'receiver_ids.*' => 'exists:receivers,id',
+            'recipient_ids' => 'required|array|min:1',
+            'recipient_ids.*' => 'exists:recipients,id',
         ];
 
         // If scheduled_date is provided, use new format; otherwise use old format for backward compatibility
@@ -302,8 +315,8 @@ class PaymentScheduleController extends Controller
                 }
             }
 
-            // Sync receivers
-            $paymentSchedule->receivers()->sync($validated['receiver_ids']);
+            // Sync recipients
+            $paymentSchedule->recipients()->sync($validated['recipient_ids']);
 
             // Log audit trail
             $this->auditService->log('payment_schedule.updated', $paymentSchedule, [
@@ -312,7 +325,7 @@ class PaymentScheduleController extends Controller
             ]);
         });
 
-        $route = $paymentSchedule->type === 'payroll' ? 'payroll.index' : 'payments.index';
+        $route = 'payments.index';
 
         return redirect()->route($route)
             ->with('success', 'Payment schedule updated successfully.');
@@ -323,6 +336,11 @@ class PaymentScheduleController extends Controller
      */
     public function destroy(PaymentSchedule $paymentSchedule)
     {
+        // Only allow deleting generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
+
         $business = $paymentSchedule->business;
         $user = $business->owner;
 
@@ -334,7 +352,7 @@ class PaymentScheduleController extends Controller
 
         $paymentSchedule->delete();
 
-        $route = $paymentSchedule->type === 'payroll' ? 'payroll.index' : 'payments.index';
+        $route = 'payments.index';
 
         return redirect()->route($route)
             ->with('success', 'Payment schedule deleted successfully.');

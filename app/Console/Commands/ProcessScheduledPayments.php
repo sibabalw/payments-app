@@ -29,7 +29,11 @@ class ProcessScheduledPayments extends Command
      */
     public function handle(): int
     {
-        $dueSchedules = PaymentSchedule::due()->with(['receivers', 'business'])->get();
+        // Only process generic payment schedules (not payroll)
+        $dueSchedules = PaymentSchedule::due()
+            ->ofType('generic')
+            ->with(['recipients', 'business'])
+            ->get();
 
         if ($dueSchedules->isEmpty()) {
             $this->info('No due payment schedules found.');
@@ -48,23 +52,40 @@ class ProcessScheduledPayments extends Command
                 continue;
             }
 
-            $receivers = $schedule->receivers;
+            $recipients = $schedule->recipients;
 
-            if ($receivers->isEmpty()) {
-                $this->warn("Schedule #{$schedule->id} has no receivers assigned. Skipping.");
+            if ($recipients->isEmpty()) {
+                $this->warn("Schedule #{$schedule->id} has no recipients assigned. Skipping.");
                 continue;
             }
 
-            foreach ($receivers as $receiver) {
+            // Create payment jobs for each recipient (only when schedule executes, not during creation)
+            foreach ($recipients as $recipient) {
                 $paymentJob = $schedule->paymentJobs()->create([
-                    'receiver_id' => $receiver->id,
+                    'recipient_id' => $recipient->id,
                     'amount' => $schedule->amount,
                     'currency' => $schedule->currency,
                     'status' => 'pending',
                 ]);
 
-                ProcessPaymentJob::dispatch($paymentJob);
-                $totalJobs++;
+                // Dispatch job to queue (will be stored in jobs table)
+                try {
+                    ProcessPaymentJob::dispatch($paymentJob);
+                    $totalJobs++;
+                    
+                    Log::info('Payment job dispatched to queue', [
+                        'payment_job_id' => $paymentJob->id,
+                        'recipient_id' => $recipient->id,
+                        'schedule_id' => $schedule->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to dispatch payment job to queue', [
+                        'payment_job_id' => $paymentJob->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    
+                    $this->error("Failed to dispatch payment job #{$paymentJob->id}: {$e->getMessage()}");
+                }
             }
 
             // Handle one-time vs recurring schedules

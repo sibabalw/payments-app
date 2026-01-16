@@ -48,8 +48,8 @@ export function AppSidebar() {
             icon: DollarSign,
         },
         {
-            title: 'Receivers',
-            href: '/receivers',
+            title: 'Recipients',
+            href: '/recipients',
             icon: Users,
         },
         {

@@ -50,11 +50,6 @@ class Business extends Model
             ->withTimestamps();
     }
 
-    public function receivers(): HasMany
-    {
-        return $this->hasMany(Receiver::class);
-    }
-
     public function paymentSchedules(): HasMany
     {
         return $this->hasMany(PaymentSchedule::class);

@@ -175,8 +175,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('businesses/{business}/switch', [\App\Http\Controllers\BusinessController::class, 'switch'])->name('businesses.switch');
     Route::post('businesses/{business}/status', [\App\Http\Controllers\BusinessController::class, 'updateStatus'])->name('businesses.status');
     
-    // Receiver routes
-    Route::resource('receivers', \App\Http\Controllers\ReceiverController::class);
+    // Recipient routes (for payments)
+    Route::resource('recipients', \App\Http\Controllers\RecipientController::class);
+    
+    // Employee routes (for payroll)
+    Route::resource('employees', \App\Http\Controllers\EmployeeController::class);
+    Route::post('employees/calculate-tax', [\App\Http\Controllers\EmployeeController::class, 'calculateTax'])->name('employees.calculate-tax');
+    Route::post('employees/{employee}/calculate-tax', [\App\Http\Controllers\EmployeeController::class, 'calculateTax'])->name('employees.calculate-tax.existing');
     
     // Payment schedule routes
     Route::resource('payments', \App\Http\Controllers\PaymentScheduleController::class);
@@ -192,13 +197,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('payroll', [\App\Http\Controllers\PayrollController::class, 'index'])->name('payroll.index');
     Route::get('payroll/create', [\App\Http\Controllers\PayrollController::class, 'create'])->name('payroll.create');
     Route::post('payroll', [\App\Http\Controllers\PayrollController::class, 'store'])->name('payroll.store');
-    Route::get('payroll/{paymentSchedule}/edit', [\App\Http\Controllers\PayrollController::class, 'edit'])->name('payroll.edit');
-    Route::put('payroll/{paymentSchedule}', [\App\Http\Controllers\PayrollController::class, 'update'])->name('payroll.update');
-    Route::delete('payroll/{paymentSchedule}', [\App\Http\Controllers\PayrollController::class, 'destroy'])->name('payroll.destroy');
-    Route::post('payroll/{paymentSchedule}/pause', [\App\Http\Controllers\PayrollController::class, 'pause'])->name('payroll.pause');
-    Route::post('payroll/{paymentSchedule}/resume', [\App\Http\Controllers\PayrollController::class, 'resume'])->name('payroll.resume');
-    Route::post('payroll/{paymentSchedule}/cancel', [\App\Http\Controllers\PayrollController::class, 'cancel'])->name('payroll.cancel');
+    Route::get('payroll/{payrollSchedule}/edit', [\App\Http\Controllers\PayrollController::class, 'edit'])->name('payroll.edit');
+    Route::put('payroll/{payrollSchedule}', [\App\Http\Controllers\PayrollController::class, 'update'])->name('payroll.update');
+    Route::delete('payroll/{payrollSchedule}', [\App\Http\Controllers\PayrollController::class, 'destroy'])->name('payroll.destroy');
+    Route::post('payroll/{payrollSchedule}/pause', [\App\Http\Controllers\PayrollController::class, 'pause'])->name('payroll.pause');
+    Route::post('payroll/{payrollSchedule}/resume', [\App\Http\Controllers\PayrollController::class, 'resume'])->name('payroll.resume');
+    Route::post('payroll/{payrollSchedule}/cancel', [\App\Http\Controllers\PayrollController::class, 'cancel'])->name('payroll.cancel');
     Route::get('payroll/jobs', [\App\Http\Controllers\PayrollController::class, 'jobs'])->name('payroll.jobs');
+    Route::get('payroll/jobs/{payrollJob}', [\App\Http\Controllers\PayrollJobController::class, 'show'])->name('payroll.jobs.show');
     
     // Audit log routes
     Route::get('audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index'])->name('audit-logs.index');

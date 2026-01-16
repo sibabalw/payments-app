@@ -24,12 +24,20 @@ export default function PayrollIndex({ schedules, filters }: any) {
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold">Payroll Schedules</h1>
+                    <div className="flex gap-2">
+                        <Link href="/employees/create">
+                            <Button variant="outline">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add Employee
+                            </Button>
+                        </Link>
                     <Link href="/payroll/create">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Create Payroll
                         </Button>
                     </Link>
+                    </div>
                 </div>
 
                 {schedules?.data && schedules.data.length > 0 ? (
@@ -41,7 +49,7 @@ export default function PayrollIndex({ schedules, filters }: any) {
                                         <div>
                                             <CardTitle>{schedule.name}</CardTitle>
                                             <p className="text-sm text-muted-foreground mt-1">
-                                                {schedule.receivers?.length || 0} employee(s) • {schedule.frequency}
+                                                {schedule.employees?.length || 0} employee(s) • {schedule.frequency}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-2">

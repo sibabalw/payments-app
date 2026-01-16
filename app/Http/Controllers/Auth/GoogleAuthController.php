@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Mail\WelcomeEmail;
 use App\Models\User;
+use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Socialite\Facades\Socialite;
@@ -28,6 +30,8 @@ class GoogleAuthController extends Controller
 
             $user = User::where('email', $googleUser->getEmail())->first();
 
+            $isNewUser = false;
+            
             if ($user) {
                 // Update existing user with Google info and verify email if not already verified
                 $user->update([
@@ -37,6 +41,7 @@ class GoogleAuthController extends Controller
                 ]);
             } else {
                 // Create new user
+                $isNewUser = true;
                 $user = User::create([
                     'name' => $googleUser->getName(),
                     'email' => $googleUser->getEmail(),
@@ -45,6 +50,10 @@ class GoogleAuthController extends Controller
                     'email_verified_at' => now(),
                     'password' => bcrypt(str()->random(32)), // Random password since OAuth
                 ]);
+                
+                // Send welcome email for new users
+                $emailService = app(EmailService::class);
+                $emailService->send($user, new WelcomeEmail($user), 'welcome');
             }
 
             // Refresh user to ensure we have the latest data

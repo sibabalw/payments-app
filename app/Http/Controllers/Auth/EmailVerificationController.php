@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Mail\WelcomeEmail;
+use App\Services\EmailService;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\RedirectResponse;
@@ -18,11 +20,15 @@ class EmailVerificationController extends Controller
             return redirect()->intended('/dashboard')->with('verified', true);
         }
 
-        if ($request->user()->markEmailAsVerified()) {
-            event(new Verified($request->user()));
-        }
-
         $user = $request->user();
+
+        if ($user->markEmailAsVerified()) {
+            event(new Verified($user));
+            
+            // Send welcome email after verification
+            $emailService = app(EmailService::class);
+            $emailService->send($user, new WelcomeEmail($user), 'welcome');
+        }
 
         // Auto-select business if user has businesses but no current_business_id
         if (!$user->current_business_id) {
