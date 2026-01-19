@@ -4,10 +4,24 @@ import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
+import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Payroll', href: '/payroll' },
 ];
+
+function formatNextRunDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    };
+    return date.toLocaleDateString('en-US', options);
+}
 
 export default function PayrollIndex({ schedules, filters }: any) {
     const handlePause = (id: number) => {
@@ -49,7 +63,7 @@ export default function PayrollIndex({ schedules, filters }: any) {
                                         <div>
                                             <CardTitle>{schedule.name}</CardTitle>
                                             <p className="text-sm text-muted-foreground mt-1">
-                                                {schedule.employees?.length || 0} employee(s) • {schedule.frequency}
+                                                {schedule.employees?.length || 0} employee(s) • {cronToHumanReadable(schedule.frequency)}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -86,7 +100,7 @@ export default function PayrollIndex({ schedules, filters }: any) {
                                             </p>
                                             {schedule.next_run_at && (
                                                 <p className="text-sm text-muted-foreground">
-                                                    Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                                                    Next run: {formatNextRunDate(schedule.next_run_at)}
                                                 </p>
                                             )}
                                         </div>

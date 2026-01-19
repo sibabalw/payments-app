@@ -5,10 +5,24 @@ import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
+import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Payments', href: payments.index().url },
 ];
+
+function formatNextRunDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    };
+    return date.toLocaleDateString('en-US', options);
+}
 
 interface PaymentSchedule {
     id: number;
@@ -81,7 +95,7 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                     <div>
                                         <CardTitle>{schedule.name}</CardTitle>
                                         <p className="text-sm text-muted-foreground mt-1">
-                                            {(schedule.recipients?.length || schedule.receivers?.length || 0)} recipient(s) • {schedule.frequency}
+                                            {(schedule.recipients?.length || schedule.receivers?.length || 0)} recipient(s) • {cronToHumanReadable(schedule.frequency)}
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -118,7 +132,7 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                         </p>
                                         {schedule.next_run_at && (
                                             <p className="text-sm text-muted-foreground">
-                                                Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                                                Next run: {formatNextRunDate(schedule.next_run_at)}
                                             </p>
                                         )}
                                     </div>

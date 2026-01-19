@@ -37,6 +37,7 @@ class ProcessScheduledPayments extends Command
 
         if ($dueSchedules->isEmpty()) {
             $this->info('No due payment schedules found.');
+
             return Command::SUCCESS;
         }
 
@@ -47,8 +48,9 @@ class ProcessScheduledPayments extends Command
         foreach ($dueSchedules as $schedule) {
             // Skip if business is banned or suspended
             $business = $schedule->business;
-            if ($business && !$business->canPerformActions()) {
+            if ($business && ! $business->canPerformActions()) {
                 $this->warn("Schedule #{$schedule->id} belongs to a {$business->status} business. Skipping.");
+
                 continue;
             }
 
@@ -56,6 +58,7 @@ class ProcessScheduledPayments extends Command
 
             if ($recipients->isEmpty()) {
                 $this->warn("Schedule #{$schedule->id} has no recipients assigned. Skipping.");
+
                 continue;
             }
 
@@ -72,7 +75,7 @@ class ProcessScheduledPayments extends Command
                 try {
                     ProcessPaymentJob::dispatch($paymentJob);
                     $totalJobs++;
-                    
+
                     Log::info('Payment job dispatched to queue', [
                         'payment_job_id' => $paymentJob->id,
                         'recipient_id' => $recipient->id,
@@ -83,7 +86,7 @@ class ProcessScheduledPayments extends Command
                         'payment_job_id' => $paymentJob->id,
                         'error' => $e->getMessage(),
                     ]);
-                    
+
                     $this->error("Failed to dispatch payment job #{$paymentJob->id}: {$e->getMessage()}");
                 }
             }
@@ -106,8 +109,8 @@ class ProcessScheduledPayments extends Command
                 // Calculate next run time for recurring schedules
                 try {
                     $cron = CronExpression::factory($schedule->frequency);
-                    $nextRun = $cron->getNextRunDate(now());
-                    
+                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+
                     $schedule->update([
                         'next_run_at' => $nextRun,
                         'last_run_at' => now(),

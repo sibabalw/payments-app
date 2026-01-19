@@ -21,9 +21,14 @@ export default function EmployeesCreate({ businesses, selectedBusinessId }: any)
         id_number: '',
         tax_number: '',
         employment_type: 'full_time',
+        hours_worked_per_month: '',
         department: '',
         start_date: '',
         gross_salary: '',
+        hourly_rate: '',
+        overtime_rate_multiplier: 1.5,
+        weekend_rate_multiplier: 1.5,
+        holiday_rate_multiplier: 2.0,
         bank_account_details: {},
         tax_status: '',
         notes: '',
@@ -139,6 +144,23 @@ export default function EmployeesCreate({ businesses, selectedBusinessId }: any)
                             </div>
 
                             <div>
+                                <Label htmlFor="hours_worked_per_month">Hours Worked Per Month</Label>
+                                <Input
+                                    id="hours_worked_per_month"
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    max="744"
+                                    value={data.hours_worked_per_month}
+                                    onChange={(e) => setData('hours_worked_per_month', e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Leave empty for full-time. If less than 24 hours/month, employee is exempt from UIF.
+                                </p>
+                                <InputError message={errors.hours_worked_per_month} />
+                            </div>
+
+                            <div>
                                 <Label htmlFor="start_date">Start Date</Label>
                                 <Input
                                     id="start_date"
@@ -158,9 +180,75 @@ export default function EmployeesCreate({ businesses, selectedBusinessId }: any)
                                     min="0"
                                     value={data.gross_salary}
                                     onChange={(e) => setData('gross_salary', e.target.value)}
-                                    required
                                 />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Used for fixed salary employees. Leave empty if using hourly rate.
+                                </p>
                                 <InputError message={errors.gross_salary} />
+                            </div>
+
+                            <div className="border-t pt-4">
+                                <h3 className="text-lg font-semibold mb-4">Hourly Rate Settings</h3>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    If set, salary will be calculated from time entries. Leave empty to use fixed gross salary.
+                                </p>
+                                
+                                <div>
+                                    <Label htmlFor="hourly_rate">Hourly Rate (ZAR)</Label>
+                                    <Input
+                                        id="hourly_rate"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={data.hourly_rate}
+                                        onChange={(e) => setData('hourly_rate', e.target.value)}
+                                    />
+                                    <InputError message={errors.hourly_rate} />
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-4 mt-4">
+                                    <div>
+                                        <Label htmlFor="overtime_rate_multiplier">Overtime Multiplier</Label>
+                                        <Input
+                                            id="overtime_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.overtime_rate_multiplier}
+                                            onChange={(e) => setData('overtime_rate_multiplier', parseFloat(e.target.value) || 1.5)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 1.5x</p>
+                                        <InputError message={errors.overtime_rate_multiplier} />
+                                    </div>
+
+                                    <div>
+                                        <Label htmlFor="weekend_rate_multiplier">Weekend Multiplier</Label>
+                                        <Input
+                                            id="weekend_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.weekend_rate_multiplier}
+                                            onChange={(e) => setData('weekend_rate_multiplier', parseFloat(e.target.value) || 1.5)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 1.5x</p>
+                                        <InputError message={errors.weekend_rate_multiplier} />
+                                    </div>
+
+                                    <div>
+                                        <Label htmlFor="holiday_rate_multiplier">Holiday Multiplier</Label>
+                                        <Input
+                                            id="holiday_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.holiday_rate_multiplier}
+                                            onChange={(e) => setData('holiday_rate_multiplier', parseFloat(e.target.value) || 2.0)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 2.0x</p>
+                                        <InputError message={errors.holiday_rate_multiplier} />
+                                    </div>
+                                </div>
                             </div>
 
                             <div>

@@ -28,7 +28,13 @@ class SouthAfricanTaxService
     private const UIF_RATE = 0.01;
 
     /**
-     * UIF maximum contribution per month
+     * UIF earnings ceiling per month (as of 1 June 2021)
+     * Contributions are calculated only on remuneration up to this amount
+     */
+    private const UIF_EARNINGS_CEILING = 17712.00;
+
+    /**
+     * UIF maximum contribution per month (1% of earnings ceiling)
      */
     private const UIF_MAX_MONTHLY = 177.12;
 
@@ -45,8 +51,8 @@ class SouthAfricanTaxService
     /**
      * Calculate PAYE (Pay As You Earn) tax for a given gross salary
      *
-     * @param float $grossSalary Monthly gross salary
-     * @param int|null $taxYear Tax year (defaults to current year)
+     * @param  float  $grossSalary  Monthly gross salary
+     * @param  int|null  $taxYear  Tax year (defaults to current year)
      * @return float Monthly PAYE amount
      */
     public function calculatePAYE(float $grossSalary, ?int $taxYear = null): float
@@ -85,23 +91,40 @@ class SouthAfricanTaxService
 
     /**
      * Calculate UIF (Unemployment Insurance Fund) contribution
+     * According to SARS: 1% of remuneration, capped at R17,712/month earnings ceiling
+     * Maximum employee contribution is R177.12/month (1% of R17,712)
      *
-     * @param float $grossSalary Monthly gross salary
-     * @return float Monthly UIF amount (capped at maximum)
+     * Exemptions: Employees working fewer than 24 hours per month are exempt from UIF
+     *
+     * @param  float  $grossSalary  Monthly gross salary
+     * @param  bool  $isExempt  Whether employee is exempt from UIF (e.g., works < 24 hours/month)
+     * @return float Monthly UIF amount (0 if exempt, otherwise capped at maximum)
      */
-    public function calculateUIF(float $grossSalary): float
+    public function calculateUIF(float $grossSalary, bool $isExempt = false): float
     {
-        $uifAmount = $grossSalary * self::UIF_RATE;
-        return round(min($uifAmount, self::UIF_MAX_MONTHLY), 2);
+        // If employee is exempt (e.g., works < 24 hours/month), no UIF contribution
+        if ($isExempt) {
+            return 0;
+        }
+
+        // UIF is calculated on remuneration up to the earnings ceiling only
+        $uifBase = min($grossSalary, self::UIF_EARNINGS_CEILING);
+        $uifAmount = $uifBase * self::UIF_RATE;
+
+        return round($uifAmount, 2);
     }
 
     /**
      * Calculate SDL (Skills Development Levy)
+     * According to SARS: 1% of leviable payroll, paid ENTIRELY by employer (NOT deducted from employee)
+     * Only applies if annual payroll exceeds R500,000
      *
-     * @param float $grossSalary Monthly gross salary
-     * @param bool $employerPays Whether employer pays SDL (default true)
-     * @param float|null $annualPayroll Total annual payroll for the business (to check threshold)
+     * @param  float  $grossSalary  Monthly gross salary
+     * @param  bool  $employerPays  Whether employer pays SDL (default true)
+     * @param  float|null  $annualPayroll  Total annual payroll for the business (to check threshold)
      * @return float Monthly SDL amount (0 if below threshold)
+     *
+     * @note SDL is NOT deducted from employee salary - it's an employer cost only
      */
     public function calculateSDL(float $grossSalary, bool $employerPays = true, ?float $annualPayroll = null): float
     {
@@ -115,44 +138,85 @@ class SouthAfricanTaxService
             // Default to applying SDL
         }
 
-        if (!$employerPays) {
+        if (! $employerPays) {
             return 0;
         }
 
         $sdlAmount = $grossSalary * self::SDL_RATE;
+
         return round($sdlAmount, 2);
     }
 
     /**
      * Calculate net salary with full tax breakdown
      *
-     * @param float $grossSalary Monthly gross salary
-     * @param array $options Additional options:
-     *   - 'tax_year' (int): Tax year for PAYE calculation
-     *   - 'employer_pays_sdl' (bool): Whether employer pays SDL
-     *   - 'annual_payroll' (float): Total annual payroll for SDL threshold check
-     * @return array Breakdown with gross, paye, uif, sdl, net, and total_deductions
+     * @param  float  $grossSalary  Monthly gross salary
+     * @param  array  $options  Additional options:
+     *                          - 'tax_year' (int): Tax year for PAYE calculation
+     *                          - 'employer_pays_sdl' (bool): Whether employer pays SDL
+     *                          - 'annual_payroll' (float): Total annual payroll for SDL threshold check
+     *                          - 'custom_deductions' (array): Array of CustomDeduction models or deduction data
+     * @return array Breakdown with gross, paye, uif, sdl, custom_deductions, net, and total_deductions
      */
     public function calculateNetSalary(float $grossSalary, array $options = []): array
     {
         $taxYear = $options['tax_year'] ?? null;
         $employerPaysSDL = $options['employer_pays_sdl'] ?? true;
         $annualPayroll = $options['annual_payroll'] ?? null;
+        $customDeductions = $options['custom_deductions'] ?? [];
+        $uifExempt = $options['uif_exempt'] ?? false;
 
         $paye = $this->calculatePAYE($grossSalary, $taxYear);
-        $uif = $this->calculateUIF($grossSalary);
+        $uif = $this->calculateUIF($grossSalary, $uifExempt);
         $sdl = $this->calculateSDL($grossSalary, $employerPaysSDL, $annualPayroll);
 
-        $totalDeductions = $paye + $uif + $sdl;
-        $netSalary = $grossSalary - $totalDeductions;
+        // Calculate custom deductions
+        $customDeductionsTotal = 0;
+        $customDeductionsBreakdown = [];
+
+        foreach ($customDeductions as $deduction) {
+            if (is_object($deduction) && method_exists($deduction, 'calculateAmount')) {
+                $amount = $deduction->calculateAmount($grossSalary);
+                $type = $deduction->type;
+                $originalAmount = $deduction->amount;
+                $name = $deduction->name;
+            } elseif (is_array($deduction)) {
+                // Handle array format
+                $type = $deduction['type'] ?? 'fixed';
+                $originalAmount = $deduction['amount'] ?? 0;
+                $amount = $type === 'percentage'
+                    ? round($grossSalary * ($originalAmount / 100), 2)
+                    : round($originalAmount, 2);
+                $name = $deduction['name'] ?? 'Custom Deduction';
+            } else {
+                continue;
+            }
+
+            $customDeductionsTotal += $amount;
+
+            $customDeductionsBreakdown[] = [
+                'name' => $name,
+                'amount' => $amount,
+                'type' => $type,
+                'original_amount' => $originalAmount, // The configured percentage or fixed amount
+            ];
+        }
+
+        // SDL is NOT deducted from employee salary - it's paid entirely by the employer
+        // Only PAYE, UIF, and custom deductions reduce the employee's net salary
+        $totalEmployeeDeductions = $paye + $uif + $customDeductionsTotal;
+        $netSalary = $grossSalary - $totalEmployeeDeductions;
 
         return [
             'gross' => round($grossSalary, 2),
             'paye' => $paye,
             'uif' => $uif,
-            'sdl' => $sdl,
+            'sdl' => $sdl, // Employer cost only - NOT deducted from employee
+            'custom_deductions' => $customDeductionsBreakdown,
+            'custom_deductions_total' => round($customDeductionsTotal, 2),
             'net' => round($netSalary, 2),
-            'total_deductions' => round($totalDeductions, 2),
+            'total_deductions' => round($totalEmployeeDeductions, 2), // Only employee deductions
+            'total_employer_costs' => round($sdl, 2), // SDL is employer cost
         ];
     }
 }

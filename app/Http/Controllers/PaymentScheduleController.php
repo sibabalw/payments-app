@@ -9,8 +9,8 @@ use App\Models\PaymentSchedule;
 use App\Models\Recipient;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
-use App\Services\CronExpressionService;
 use App\Services\CronExpressionParser;
+use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
 use Carbon\Carbon;
@@ -28,8 +28,7 @@ class PaymentScheduleController extends Controller
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
         protected CronExpressionParser $cronParser
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of the resource.
@@ -81,7 +80,7 @@ class PaymentScheduleController extends Controller
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $type = $request->get('type', 'generic');
         $businesses = Auth::user()->businesses()->get();
-        
+
         $recipients = [];
         $escrowBalance = null;
         if ($businessId) {
@@ -131,7 +130,7 @@ class PaymentScheduleController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot create payment schedule. Business is {$business->status}."])
                 ->withInput();
@@ -139,11 +138,12 @@ class PaymentScheduleController extends Controller
 
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            // Parse in app timezone to ensure consistency
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -174,7 +174,9 @@ class PaymentScheduleController extends Controller
             // Calculate next run time
             try {
                 $cron = CronExpression::factory($frequency);
-                $schedule->next_run_at = $cron->getNextRunDate(now());
+                // Use current time in app timezone for consistent calculation
+                $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
                 // If calculation fails, set to null (will be handled by scheduler)
@@ -215,7 +217,7 @@ class PaymentScheduleController extends Controller
 
         // Parse cron expression to extract date/time for editing
         $parsed = $this->cronParser->parse($paymentSchedule->frequency);
-        
+
         $schedule = $paymentSchedule->load(['business', 'recipients']);
         if ($parsed) {
             $schedule->scheduled_date = $parsed['date'];
@@ -266,7 +268,7 @@ class PaymentScheduleController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot update payment schedule. Business is {$business->status}."])
                 ->withInput();
@@ -274,11 +276,12 @@ class PaymentScheduleController extends Controller
 
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            // Parse in app timezone to ensure consistency
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -308,7 +311,8 @@ class PaymentScheduleController extends Controller
             if ($paymentSchedule->wasChanged('frequency')) {
                 try {
                     $cron = CronExpression::factory($frequency);
-                    $paymentSchedule->next_run_at = $cron->getNextRunDate(now());
+                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $paymentSchedule->next_run_at = $nextRun;
                     $paymentSchedule->save();
                 } catch (\Exception $e) {
                     // If calculation fails, set to null
@@ -381,7 +385,7 @@ class PaymentScheduleController extends Controller
         // Recalculate next run time when resuming
         try {
             $cron = CronExpression::factory($paymentSchedule->frequency);
-            $nextRun = $cron->getNextRunDate(now());
+            $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
             $paymentSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,

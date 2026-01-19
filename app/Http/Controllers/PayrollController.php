@@ -3,14 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Mail\PayrollScheduleCancelledEmail;
-use App\Mail\PayrollScheduleCreatedEmail;
 use App\Models\Business;
 use App\Models\Employee;
 use App\Models\PayrollSchedule;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
-use App\Services\CronExpressionService;
 use App\Services\CronExpressionParser;
+use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
 use App\Services\SouthAfricanTaxService;
@@ -30,8 +29,7 @@ class PayrollController extends Controller
         protected CronExpressionService $cronService,
         protected CronExpressionParser $cronParser,
         protected SouthAfricanTaxService $taxService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of payroll schedules.
@@ -73,7 +71,7 @@ class PayrollController extends Controller
     {
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $businesses = Auth::user()->businesses()->get();
-        
+
         $employees = [];
         $escrowBalance = null;
         if ($businessId) {
@@ -121,7 +119,7 @@ class PayrollController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot create payroll schedule. Business is {$business->status}."])
                 ->withInput();
@@ -129,11 +127,11 @@ class PayrollController extends Controller
 
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -161,7 +159,9 @@ class PayrollController extends Controller
             // Calculate next run time
             try {
                 $cron = CronExpression::factory($frequency);
-                $schedule->next_run_at = $cron->getNextRunDate(now());
+                // Use current time in app timezone for consistent calculation
+                $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
                 // If calculation fails, set to null (will be handled by scheduler)
@@ -195,7 +195,7 @@ class PayrollController extends Controller
 
         // Parse cron expression to extract date/time for editing
         $parsed = $this->cronParser->parse($payrollSchedule->frequency);
-        
+
         $schedule = $payrollSchedule->load(['business', 'employees']);
         if ($parsed) {
             $schedule->scheduled_date = $parsed['date'];
@@ -206,7 +206,11 @@ class PayrollController extends Controller
         // Calculate tax breakdowns for all employees in the schedule
         $employeeTaxBreakdowns = [];
         foreach ($schedule->employees as $employee) {
-            $employeeTaxBreakdowns[$employee->id] = $this->taxService->calculateNetSalary($employee->gross_salary);
+            $customDeductions = $employee->getAllDeductions();
+            $employeeTaxBreakdowns[$employee->id] = $this->taxService->calculateNetSalary($employee->gross_salary, [
+                'custom_deductions' => $customDeductions,
+                'uif_exempt' => $employee->isUIFExempt(),
+            ]);
         }
 
         return Inertia::render('payroll/edit', [
@@ -246,7 +250,7 @@ class PayrollController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot update payroll schedule. Business is {$business->status}."])
                 ->withInput();
@@ -254,11 +258,11 @@ class PayrollController extends Controller
 
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -286,7 +290,8 @@ class PayrollController extends Controller
             if ($payrollSchedule->wasChanged('frequency')) {
                 try {
                     $cron = CronExpression::factory($frequency);
-                    $payrollSchedule->next_run_at = $cron->getNextRunDate(now());
+                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $payrollSchedule->next_run_at = $nextRun;
                     $payrollSchedule->save();
                 } catch (\Exception $e) {
                     // If calculation fails, set to null
@@ -325,7 +330,7 @@ class PayrollController extends Controller
 
         return redirect()->route('payroll.index')
             ->with('success', 'Payroll schedule deleted successfully.');
-        }
+    }
 
     /**
      * Pause a payroll schedule.
@@ -350,7 +355,7 @@ class PayrollController extends Controller
         // Recalculate next run time when resuming
         try {
             $cron = CronExpression::factory($payrollSchedule->frequency);
-            $nextRun = $cron->getNextRunDate(now());
+            $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
             $payrollSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,

@@ -2,8 +2,9 @@
 
 namespace App\Jobs;
 
-use App\Mail\PaymentFailedEmail;
-use App\Mail\PaymentSuccessEmail;
+use App\Mail\PayrollFailedEmail;
+use App\Mail\PayrollSuccessEmail;
+use App\Mail\PayslipEmail;
 use App\Models\PayrollJob;
 use App\Services\EmailService;
 use App\Services\PaymentService;
@@ -13,6 +14,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class ProcessPayrollJob implements ShouldQueue
 {
@@ -33,8 +35,7 @@ class ProcessPayrollJob implements ShouldQueue
      */
     public function __construct(
         public PayrollJob $payrollJob
-    ) {
-    }
+    ) {}
 
     /**
      * Execute the job.
@@ -47,11 +48,37 @@ class ProcessPayrollJob implements ShouldQueue
             if ($success) {
                 // Refresh to get updated status
                 $this->payrollJob->refresh();
-                
-                // Send success email
+
+                // Send success email to business owner
                 $user = $this->payrollJob->payrollSchedule->business->owner;
                 $emailService = app(EmailService::class);
-                $emailService->send($user, new PaymentSuccessEmail($user, $this->payrollJob), 'payroll_success');
+                $emailService->send($user, new PayrollSuccessEmail($user, $this->payrollJob), 'payroll_success');
+
+                // Send payslip email to employee if they have an email address
+                $employee = $this->payrollJob->employee;
+                if ($employee && $employee->email) {
+                    try {
+                        Mail::to($employee->email)->queue(new PayslipEmail($employee, $this->payrollJob));
+                        Log::info('Payslip email sent to employee', [
+                            'employee_id' => $employee->id,
+                            'employee_email' => $employee->email,
+                            'payroll_job_id' => $this->payrollJob->id,
+                        ]);
+                    } catch (\Exception $e) {
+                        // Log error but don't fail the job
+                        Log::error('Failed to send payslip email to employee', [
+                            'employee_id' => $employee->id,
+                            'employee_email' => $employee->email,
+                            'payroll_job_id' => $this->payrollJob->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                } else {
+                    Log::info('Skipping payslip email - employee has no email address', [
+                        'employee_id' => $employee?->id,
+                        'payroll_job_id' => $this->payrollJob->id,
+                    ]);
+                }
             } else {
                 Log::warning('Payroll job failed', [
                     'payroll_job_id' => $this->payrollJob->id,
@@ -105,6 +132,6 @@ class ProcessPayrollJob implements ShouldQueue
         // Send failure email
         $user = $this->payrollJob->payrollSchedule->business->owner;
         $emailService = app(EmailService::class);
-        $emailService->send($user, new PaymentFailedEmail($user, $this->payrollJob), 'payroll_failed');
+        $emailService->send($user, new PayrollFailedEmail($user, $this->payrollJob), 'payroll_failed');
     }
 }

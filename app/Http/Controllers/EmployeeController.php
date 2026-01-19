@@ -17,8 +17,7 @@ class EmployeeController extends Controller
     public function __construct(
         protected AuditService $auditService,
         protected SouthAfricanTaxService $taxService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of the resource.
@@ -26,7 +25,7 @@ class EmployeeController extends Controller
     public function index(Request $request): Response
     {
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
-        
+
         $query = Employee::query();
 
         if ($businessId) {
@@ -72,15 +71,26 @@ class EmployeeController extends Controller
             'employment_type' => 'required|in:full_time,part_time,contract',
             'department' => 'nullable|string|max:255',
             'start_date' => 'nullable|date',
-            'gross_salary' => 'required|numeric|min:0.01',
+            'gross_salary' => 'nullable|numeric|min:0.01',
+            'hourly_rate' => 'nullable|numeric|min:0.01',
+            'overtime_rate_multiplier' => 'nullable|numeric|min:1',
+            'weekend_rate_multiplier' => 'nullable|numeric|min:1',
+            'holiday_rate_multiplier' => 'nullable|numeric|min:1',
             'bank_account_details' => 'nullable|array',
             'tax_status' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
         ]);
 
+        // Ensure either gross_salary or hourly_rate is provided
+        if (empty($validated['gross_salary']) && empty($validated['hourly_rate'])) {
+            return back()
+                ->withErrors(['gross_salary' => 'Either gross salary or hourly rate must be provided.'])
+                ->withInput();
+        }
+
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot create employee. Business is {$business->status}."])
                 ->withInput();
@@ -90,6 +100,7 @@ class EmployeeController extends Controller
         $employee = DB::transaction(function () use ($validated) {
             $employee = Employee::create($validated);
             $this->auditService->log('employee.created', $employee, $employee->getAttributes());
+
             return $employee;
         });
 
@@ -104,13 +115,21 @@ class EmployeeController extends Controller
     {
         $businesses = Auth::user()->businesses()->get();
 
-        // Calculate tax breakdown for preview
-        $taxBreakdown = $this->taxService->calculateNetSalary($employee->gross_salary);
+        // Get all deductions for this employee (company-wide + employee-specific)
+        $customDeductions = $employee->getAllDeductions();
+
+        // Calculate tax breakdown for preview with custom deductions
+        // Check if employee is exempt from UIF (works < 24 hours/month)
+        $taxBreakdown = $this->taxService->calculateNetSalary($employee->gross_salary, [
+            'custom_deductions' => $customDeductions,
+            'uif_exempt' => $employee->isUIFExempt(),
+        ]);
 
         return Inertia::render('employees/edit', [
             'employee' => $employee->load('business'),
             'businesses' => $businesses,
             'taxBreakdown' => $taxBreakdown,
+            'customDeductions' => $customDeductions,
         ]);
     }
 
@@ -126,17 +145,29 @@ class EmployeeController extends Controller
             'id_number' => 'nullable|string|max:255',
             'tax_number' => 'nullable|string|max:255',
             'employment_type' => 'required|in:full_time,part_time,contract',
+            'hours_worked_per_month' => 'nullable|numeric|min:0|max:744', // Max 24 hours/day * 31 days
             'department' => 'nullable|string|max:255',
             'start_date' => 'nullable|date',
-            'gross_salary' => 'required|numeric|min:0.01',
+            'gross_salary' => 'nullable|numeric|min:0.01',
+            'hourly_rate' => 'nullable|numeric|min:0.01',
+            'overtime_rate_multiplier' => 'nullable|numeric|min:1',
+            'weekend_rate_multiplier' => 'nullable|numeric|min:1',
+            'holiday_rate_multiplier' => 'nullable|numeric|min:1',
             'bank_account_details' => 'nullable|array',
             'tax_status' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
         ]);
 
+        // Ensure either gross_salary or hourly_rate is provided
+        if (empty($validated['gross_salary']) && empty($validated['hourly_rate'])) {
+            return back()
+                ->withErrors(['gross_salary' => 'Either gross salary or hourly rate must be provided.'])
+                ->withInput();
+        }
+
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot update employee. Business is {$business->status}."])
                 ->withInput();
@@ -163,18 +194,49 @@ class EmployeeController extends Controller
         // If employee is provided, use their gross_salary; otherwise get it from request
         if ($employee) {
             $grossSalary = $employee->gross_salary;
+            $customDeductions = $employee->getAllDeductions();
         } else {
             // Get gross_salary from request (works with both JSON and form data)
             $grossSalary = $request->input('gross_salary') ?? $request->json('gross_salary');
-            
-            if (!$grossSalary || !is_numeric($grossSalary) || $grossSalary <= 0) {
+
+            if (! $grossSalary || ! is_numeric($grossSalary) || $grossSalary <= 0) {
                 return response()->json(['error' => 'Gross salary is required and must be greater than 0'], 400);
             }
-            
+
             $grossSalary = (float) $grossSalary;
+
+            // Get business_id to fetch company-wide deductions
+            $businessId = $request->input('business_id') ?? $request->json('business_id');
+            $employeeId = $request->input('employee_id') ?? $request->json('employee_id');
+
+            $customDeductions = collect();
+            if ($businessId) {
+                // Company-wide deductions
+                $companyDeductions = \App\Models\CustomDeduction::where('business_id', $businessId)
+                    ->whereNull('employee_id')
+                    ->where('is_active', true)
+                    ->get();
+                $customDeductions = $customDeductions->merge($companyDeductions);
+
+                // Employee-specific deductions and UIF exemption check
+                if ($employeeId) {
+                    $employee = \App\Models\Employee::find($employeeId);
+                    if ($employee) {
+                        $uifExempt = $employee->isUIFExempt();
+                        $employeeDeductions = \App\Models\CustomDeduction::where('business_id', $businessId)
+                            ->where('employee_id', $employeeId)
+                            ->where('is_active', true)
+                            ->get();
+                        $customDeductions = $customDeductions->merge($employeeDeductions);
+                    }
+                }
+            }
         }
 
-        $breakdown = $this->taxService->calculateNetSalary($grossSalary);
+        $breakdown = $this->taxService->calculateNetSalary($grossSalary, [
+            'custom_deductions' => $customDeductions,
+            'uif_exempt' => $uifExempt ?? false,
+        ]);
 
         return response()->json($breakdown);
     }

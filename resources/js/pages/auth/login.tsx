@@ -142,6 +142,13 @@ export default function Login({
                                 </TextLink>
                             </div>
                         )}
+
+                        <div className="text-center text-sm text-muted-foreground">
+                            Are you an employee?{' '}
+                            <TextLink href="/employee/sign-in" tabIndex={6}>
+                                Click here to sign in
+                            </TextLink>
+                        </div>
                     </>
                 )}
             </Form>

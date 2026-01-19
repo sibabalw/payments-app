@@ -47,11 +47,6 @@ class PayrollSchedule extends Model
         return $this->hasMany(PayrollJob::class);
     }
 
-    public function executedPayroll(): HasMany
-    {
-        return $this->hasMany(ExecutedPayroll::class, 'payroll_schedule_id');
-    }
-
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', 'active');

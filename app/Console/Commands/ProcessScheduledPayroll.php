@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Jobs\ProcessPayrollJob;
 use App\Models\PayrollSchedule;
+use App\Services\SalaryCalculationService;
+use App\Services\SouthAfricanTaxService;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +26,13 @@ class ProcessScheduledPayroll extends Command
      */
     protected $description = 'Process all due payroll schedules';
 
+    public function __construct(
+        protected SouthAfricanTaxService $taxService,
+        protected SalaryCalculationService $salaryCalculationService
+    ) {
+        parent::__construct();
+    }
+
     /**
      * Execute the console command.
      */
@@ -35,6 +44,7 @@ class ProcessScheduledPayroll extends Command
 
         if ($dueSchedules->isEmpty()) {
             $this->info('No due payroll schedules found.');
+
             return Command::SUCCESS;
         }
 
@@ -45,8 +55,9 @@ class ProcessScheduledPayroll extends Command
         foreach ($dueSchedules as $schedule) {
             // Skip if business is banned or suspended
             $business = $schedule->business;
-            if ($business && !$business->canPerformActions()) {
+            if ($business && ! $business->canPerformActions()) {
                 $this->warn("Schedule #{$schedule->id} belongs to a {$business->status} business. Skipping.");
+
                 continue;
             }
 
@@ -54,6 +65,7 @@ class ProcessScheduledPayroll extends Command
 
             if ($employees->isEmpty()) {
                 $this->warn("Schedule #{$schedule->id} has no employees assigned. Skipping.");
+
                 continue;
             }
 
@@ -62,15 +74,57 @@ class ProcessScheduledPayroll extends Command
             $payPeriodEnd = now()->endOfMonth();
 
             // Create payroll jobs for each employee (only when schedule executes, not during creation)
-            // No tax calculations - just record gross salary
+            // Calculate taxes and custom deductions
             foreach ($employees as $employee) {
+                // Calculate gross salary: use time entries if hourly, otherwise use fixed salary
+                if ($employee->hourly_rate) {
+                    // Calculate salary from time entries
+                    $salaryResult = $this->salaryCalculationService->calculateMonthlySalary(
+                        $employee,
+                        $payPeriodStart,
+                        $payPeriodEnd
+                    );
+                    $grossSalary = $salaryResult['gross_salary'];
+                } else {
+                    // Use fixed gross salary
+                    $grossSalary = $employee->gross_salary;
+                }
+
+                // Get all deductions for this employee (company-wide + employee-specific)
+                $customDeductions = $employee->getAllDeductions();
+
+                // Calculate net salary with all deductions
+                // Check if employee is exempt from UIF (works < 24 hours/month)
+                $uifExempt = $employee->isUIFExempt();
+                $breakdown = $this->taxService->calculateNetSalary($grossSalary, [
+                    'custom_deductions' => $customDeductions,
+                    'uif_exempt' => $uifExempt,
+                ]);
+
+                // Log the calculation details for verification
+                Log::info('Payroll job calculation', [
+                    'employee_id' => $employee->id,
+                    'employee_name' => $employee->name,
+                    'gross_salary' => $grossSalary,
+                    'paye_amount' => $breakdown['paye'],
+                    'uif_amount' => $breakdown['uif'],
+                    'uif_exempt' => $uifExempt,
+                    'sdl_amount' => $breakdown['sdl'],
+                    'custom_deductions_count' => count($breakdown['custom_deductions'] ?? []),
+                    'custom_deductions_total' => $breakdown['custom_deductions_total'] ?? 0,
+                    'net_salary' => $breakdown['net'],
+                    'company_wide_deductions' => $customDeductions->filter(fn ($d) => $d->employee_id === null)->count(),
+                    'employee_specific_deductions' => $customDeductions->filter(fn ($d) => $d->employee_id !== null)->count(),
+                ]);
+
                 $payrollJob = $schedule->payrollJobs()->create([
                     'employee_id' => $employee->id,
-                    'gross_salary' => $employee->gross_salary,
-                    'paye_amount' => 0,
-                    'uif_amount' => 0,
-                    'sdl_amount' => 0,
-                    'net_salary' => $employee->gross_salary, // For now, net equals gross (no deductions)
+                    'gross_salary' => $grossSalary,
+                    'paye_amount' => $breakdown['paye'],
+                    'uif_amount' => $breakdown['uif'],
+                    'sdl_amount' => $breakdown['sdl'],
+                    'custom_deductions' => $breakdown['custom_deductions'] ?? [],
+                    'net_salary' => $breakdown['net'],
                     'currency' => 'ZAR',
                     'status' => 'pending',
                     'pay_period_start' => $payPeriodStart,
@@ -81,7 +135,7 @@ class ProcessScheduledPayroll extends Command
                 try {
                     ProcessPayrollJob::dispatch($payrollJob);
                     $totalJobs++;
-                    
+
                     Log::info('Payroll job dispatched to queue', [
                         'payroll_job_id' => $payrollJob->id,
                         'employee_id' => $employee->id,
@@ -92,7 +146,7 @@ class ProcessScheduledPayroll extends Command
                         'payroll_job_id' => $payrollJob->id,
                         'error' => $e->getMessage(),
                     ]);
-                    
+
                     $this->error("Failed to dispatch payroll job #{$payrollJob->id}: {$e->getMessage()}");
                 }
             }
@@ -115,8 +169,8 @@ class ProcessScheduledPayroll extends Command
                 // Calculate next run time for recurring schedules
                 try {
                     $cron = CronExpression::factory($schedule->frequency);
-                    $nextRun = $cron->getNextRunDate(now());
-                    
+                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+
                     $schedule->update([
                         'next_run_at' => $nextRun,
                         'last_run_at' => now(),

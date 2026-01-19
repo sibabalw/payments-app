@@ -18,8 +18,7 @@ class BusinessController extends Controller
 {
     public function __construct(
         protected AuditService $auditService
-    ) {
-    }
+    ) {}
 
     /**
      * Display a listing of the resource.
@@ -27,7 +26,7 @@ class BusinessController extends Controller
     public function index(): Response
     {
         $user = Auth::user();
-        
+
         // Get all businesses user has access to (owned + associated)
         $owned = $user->ownedBusinesses()->with('owner')->get();
         $associated = $user->businesses()->with('owner')->get();
@@ -78,12 +77,12 @@ class BusinessController extends Controller
 
         // Remove logo from validated array since we handle it separately
         unset($validated['logo']);
-        
+
         try {
             // Wrap all database operations in a transaction
             DB::transaction(function () use ($logoPath, $validated, &$business, &$user) {
                 $user = Auth::user();
-                
+
                 // Create business
                 $business = Business::create([
                     'user_id' => $user->id,
@@ -95,7 +94,7 @@ class BusinessController extends Controller
                 $business->users()->attach($user->id, ['role' => 'owner']);
 
                 // If this is user's first business or they have no current business, set it as current
-                if (!$user->current_business_id) {
+                if (! $user->current_business_id) {
                     $user->update(['current_business_id' => $business->id]);
                 }
 
@@ -110,13 +109,13 @@ class BusinessController extends Controller
 
             return redirect()->route('businesses.index')
                 ->with('success', 'Business created successfully.');
-                
+
         } catch (\Exception $e) {
             // If transaction failed, clean up uploaded file
             if ($logoPath && Storage::disk('public')->exists($logoPath)) {
                 Storage::disk('public')->delete($logoPath);
             }
-            
+
             // Re-throw the exception to show error to user
             throw $e;
         }
@@ -148,7 +147,7 @@ class BusinessController extends Controller
         // Store old logo path for cleanup
         $oldLogoPath = $business->logo;
         $newLogoPath = null;
-        
+
         // Handle new logo upload first (outside transaction)
         if ($request->hasFile('logo')) {
             $logo = $request->file('logo');
@@ -174,13 +173,13 @@ class BusinessController extends Controller
 
             return redirect()->route('businesses.index')
                 ->with('success', 'Business updated successfully.');
-                
+
         } catch (\Exception $e) {
             // If transaction failed, clean up newly uploaded file (keep old one)
             if ($newLogoPath && Storage::disk('public')->exists($newLogoPath)) {
                 Storage::disk('public')->delete($newLogoPath);
             }
-            
+
             // Re-throw the exception to show error to user
             throw $e;
         }
@@ -210,13 +209,13 @@ class BusinessController extends Controller
         $hasAccess = $user->ownedBusinesses()->where('businesses.id', $business->id)->exists()
             || $user->businesses()->where('businesses.id', $business->id)->exists();
 
-        if (!$hasAccess) {
+        if (! $hasAccess) {
             return redirect()->back()
                 ->with('error', 'You do not have access to this business.');
         }
 
         // Prevent switching to banned or suspended businesses
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return redirect()->back()
                 ->with('error', "Cannot switch to this business. Status: {$business->status}.");
         }
@@ -267,5 +266,43 @@ class BusinessController extends Controller
 
         return redirect()->back()
             ->with('success', "Business status updated to {$validated['status']}.");
+    }
+
+    /**
+     * Show the form for editing bank account details.
+     */
+    public function editBankAccount(Business $business): Response
+    {
+        $this->authorize('update', $business);
+
+        return Inertia::render('businesses/bank-account', [
+            'business' => [
+                'id' => $business->id,
+                'name' => $business->name,
+                'bank_account_details' => $business->bank_account_details,
+            ],
+        ]);
+    }
+
+    /**
+     * Update the business bank account details.
+     */
+    public function updateBankAccount(\App\Http\Requests\UpdateBusinessBankAccountRequest $request, Business $business)
+    {
+        $validated = $request->validated();
+
+        DB::transaction(function () use ($validated, $business) {
+            $business->update([
+                'bank_account_details' => $validated['bank_account_details'],
+            ]);
+
+            $this->auditService->log('business.bank_account_updated', $business, [
+                'old' => $business->getOriginal('bank_account_details'),
+                'new' => $validated['bank_account_details'],
+            ]);
+        });
+
+        return redirect()->route('businesses.bank-account.edit', $business)
+            ->with('success', 'Bank account details updated successfully.');
     }
 }

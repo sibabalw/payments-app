@@ -14,7 +14,7 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Edit', href: '#' },
 ];
 
-export default function EmployeesEdit({ employee, businesses, taxBreakdown: initialTaxBreakdown }: any) {
+export default function EmployeesEdit({ employee, businesses, taxBreakdown: initialTaxBreakdown, customDeductions }: any) {
     const [taxBreakdown, setTaxBreakdown] = useState<any>(initialTaxBreakdown);
 
     const { data, setData, put, processing, errors } = useForm({
@@ -24,9 +24,14 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
         id_number: employee.id_number || '',
         tax_number: employee.tax_number || '',
         employment_type: employee.employment_type,
+        hours_worked_per_month: employee.hours_worked_per_month || '',
         department: employee.department || '',
         start_date: employee.start_date || '',
         gross_salary: employee.gross_salary,
+        hourly_rate: employee.hourly_rate || '',
+        overtime_rate_multiplier: employee.overtime_rate_multiplier || 1.5,
+        weekend_rate_multiplier: employee.weekend_rate_multiplier || 1.5,
+        holiday_rate_multiplier: employee.holiday_rate_multiplier || 2.0,
         bank_account_details: employee.bank_account_details || {},
         tax_status: employee.tax_status || '',
         notes: employee.notes || '',
@@ -50,13 +55,17 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
                     body.gross_salary = parseFloat(data.gross_salary);
                 }
 
+                // Always include business_id and employee_id for custom deductions
+                body.business_id = data.business_id;
+                body.employee_id = employee.id;
+
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
                     },
-                    body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
+                    body: JSON.stringify(body),
                 });
 
                 if (response.ok) {
@@ -73,7 +82,7 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
         }, 500);
 
         return () => clearTimeout(timeoutId);
-    }, [data.gross_salary, employee.id, employee.gross_salary]);
+    }, [data.gross_salary, data.business_id, employee.id, employee.gross_salary]);
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -204,37 +213,155 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
                                     min="0"
                                     value={data.gross_salary}
                                     onChange={(e) => setData('gross_salary', e.target.value)}
-                                    required
                                 />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Used for fixed salary employees. Leave empty if using hourly rate.
+                                </p>
                                 <InputError message={errors.gross_salary} />
+                            </div>
+
+                            <div className="border-t pt-4">
+                                <h3 className="text-lg font-semibold mb-4">Hourly Rate Settings</h3>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    If set, salary will be calculated from time entries. Leave empty to use fixed gross salary.
+                                </p>
+                                
+                                <div>
+                                    <Label htmlFor="hourly_rate">Hourly Rate (ZAR)</Label>
+                                    <Input
+                                        id="hourly_rate"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={data.hourly_rate}
+                                        onChange={(e) => setData('hourly_rate', e.target.value)}
+                                    />
+                                    <InputError message={errors.hourly_rate} />
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-4 mt-4">
+                                    <div>
+                                        <Label htmlFor="overtime_rate_multiplier">Overtime Multiplier</Label>
+                                        <Input
+                                            id="overtime_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.overtime_rate_multiplier}
+                                            onChange={(e) => setData('overtime_rate_multiplier', e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 1.5x</p>
+                                        <InputError message={errors.overtime_rate_multiplier} />
+                                    </div>
+
+                                    <div>
+                                        <Label htmlFor="weekend_rate_multiplier">Weekend Multiplier</Label>
+                                        <Input
+                                            id="weekend_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.weekend_rate_multiplier}
+                                            onChange={(e) => setData('weekend_rate_multiplier', e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 1.5x</p>
+                                        <InputError message={errors.weekend_rate_multiplier} />
+                                    </div>
+
+                                    <div>
+                                        <Label htmlFor="holiday_rate_multiplier">Holiday Multiplier</Label>
+                                        <Input
+                                            id="holiday_rate_multiplier"
+                                            type="number"
+                                            step="0.1"
+                                            min="1"
+                                            value={data.holiday_rate_multiplier}
+                                            onChange={(e) => setData('holiday_rate_multiplier', e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Default: 2.0x</p>
+                                        <InputError message={errors.holiday_rate_multiplier} />
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 flex gap-2">
+                                    <Link href={`/employees/${employee.id}/schedule`}>
+                                        <Button type="button" variant="outline">
+                                            Manage Work Schedule
+                                        </Button>
+                                    </Link>
+                                    <Link href={`/employees/${employee.id}/payslips`}>
+                                        <Button type="button" variant="outline">
+                                            View Payslips
+                                        </Button>
+                                    </Link>
+                                </div>
                             </div>
 
                             {taxBreakdown && (
                                 <Card className="bg-muted">
                                     <CardHeader>
-                                        <CardTitle className="text-lg">Tax Calculation Preview</CardTitle>
+                                        <CardTitle className="text-lg">Deduction Calculation Preview</CardTitle>
                                     </CardHeader>
                                     <CardContent className="space-y-2">
                                         <div className="flex justify-between">
                                             <span>Gross Salary:</span>
                                             <span className="font-medium">ZAR {parseFloat(taxBreakdown.gross).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                         </div>
-                                        <div className="flex justify-between text-red-600">
-                                            <span>PAYE:</span>
-                                            <span>- ZAR {parseFloat(taxBreakdown.paye).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        </div>
-                                        <div className="flex justify-between text-red-600">
-                                            <span>UIF:</span>
-                                            <span>- ZAR {parseFloat(taxBreakdown.uif).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        </div>
-                                        <div className="flex justify-between text-red-600">
-                                            <span>SDL:</span>
-                                            <span>- ZAR {parseFloat(taxBreakdown.sdl).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                        </div>
+                                        {(() => {
+                                            const gross = parseFloat(taxBreakdown.gross);
+                                            const calculatePercentage = (amount: number) => {
+                                                if (gross === 0) return 0;
+                                                return (amount / gross) * 100;
+                                            };
+                                            
+                                            return (
+                                                <>
+                                                    <div className="flex justify-between text-red-600">
+                                                        <span>PAYE:</span>
+                                                        <span>
+                                                            - ZAR {parseFloat(taxBreakdown.paye).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
+                                                            <span className="text-muted-foreground ml-2">({calculatePercentage(parseFloat(taxBreakdown.paye)).toFixed(2)}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between text-red-600">
+                                                        <span>UIF:</span>
+                                                        <span>
+                                                            - ZAR {parseFloat(taxBreakdown.uif).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
+                                                            <span className="text-muted-foreground ml-2">({calculatePercentage(parseFloat(taxBreakdown.uif)).toFixed(2)}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    {taxBreakdown.custom_deductions && taxBreakdown.custom_deductions.length > 0 && (
+                                                        <>
+                                                            {taxBreakdown.custom_deductions.map((deduction: any, index: number) => (
+                                                                <div key={index} className="flex justify-between text-red-600">
+                                                                    <span>{deduction.name}:</span>
+                                                                    <span>
+                                                                        - ZAR {parseFloat(deduction.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
+                                                                        {deduction.type === 'percentage' ? (
+                                                                            <span className="text-muted-foreground ml-2">({parseFloat(deduction.original_amount).toFixed(2)}%)</span>
+                                                                        ) : (
+                                                                            <span className="text-muted-foreground ml-2">({calculatePercentage(parseFloat(deduction.amount)).toFixed(2)}%)</span>
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
                                         <div className="border-t pt-2 flex justify-between font-bold">
                                             <span>Net Salary:</span>
                                             <span className="text-green-600">ZAR {parseFloat(taxBreakdown.net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                         </div>
+                                        {parseFloat(taxBreakdown.sdl) > 0 && (
+                                            <div className="border-t pt-2 mt-2">
+                                                <div className="flex justify-between text-sm text-muted-foreground">
+                                                    <span>SDL (Employer Cost - not deducted from employee):</span>
+                                                    <span>ZAR {parseFloat(taxBreakdown.sdl).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                </div>
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
                             )}
@@ -260,6 +387,102 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
                                 </Link>
                             </div>
                         </form>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <CardTitle>Custom Deductions</CardTitle>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    Company-wide deductions apply to all employees. Employee-specific deductions override or supplement company-wide ones.
+                                </p>
+                            </div>
+                            <Link href={`/deductions/create?business_id=${data.business_id}&employee_id=${employee.id}`}>
+                                <Button size="sm">Add Employee Deduction</Button>
+                            </Link>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {customDeductions && customDeductions.length > 0 ? (
+                            <div className="space-y-3">
+                                {/* Company-wide deductions */}
+                                {customDeductions.filter((d: any) => d.employee_id === null).length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Company-wide Deductions</h4>
+                                        <div className="space-y-2">
+                                            {customDeductions
+                                                .filter((d: any) => d.employee_id === null)
+                                                .map((deduction: any) => (
+                                                    <div key={deduction.id} className="flex justify-between items-center p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+                                                        <div>
+                                                            <div className="font-medium">{deduction.name}</div>
+                                                            <div className="text-sm text-muted-foreground">
+                                                                {deduction.type === 'percentage' 
+                                                                    ? `${deduction.amount}% of gross salary`
+                                                                    : `ZAR ${parseFloat(deduction.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                                }
+                                                                <span className="ml-2 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded">Company-wide</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {/* Employee-specific deductions */}
+                                {customDeductions.filter((d: any) => d.employee_id === employee.id).length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Employee-specific Deductions</h4>
+                                        <div className="space-y-2">
+                                            {customDeductions
+                                                .filter((d: any) => d.employee_id === employee.id)
+                                                .map((deduction: any) => (
+                                                    <div key={deduction.id} className="flex justify-between items-center p-3 border rounded-lg">
+                                                        <div>
+                                                            <div className="font-medium">{deduction.name}</div>
+                                                            <div className="text-sm text-muted-foreground">
+                                                                {deduction.type === 'percentage' 
+                                                                    ? `${deduction.amount}% of gross salary`
+                                                                    : `ZAR ${parseFloat(deduction.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                                }
+                                                                <span className="ml-2 text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-0.5 rounded">Employee-specific</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Link href={`/deductions/${deduction.id}/edit`}>
+                                                                <Button variant="outline" size="sm">Edit</Button>
+                                                            </Link>
+                                                            <Link
+                                                                href={`/deductions/${deduction.id}`}
+                                                                method="delete"
+                                                                as="button"
+                                                                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3"
+                                                            >
+                                                                Delete
+                                                            </Link>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <p className="text-sm text-muted-foreground">No custom deductions configured for this employee.</p>
+                                <div className="flex gap-2">
+                                    <Link href={`/deductions/create?business_id=${data.business_id}&employee_id=${employee.id}`}>
+                                        <Button size="sm" variant="outline">Add Employee Deduction</Button>
+                                    </Link>
+                                    <Link href={`/deductions?business_id=${data.business_id}`}>
+                                        <Button size="sm" variant="outline">Manage Company-wide Deductions</Button>
+                                    </Link>
+                                </div>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>

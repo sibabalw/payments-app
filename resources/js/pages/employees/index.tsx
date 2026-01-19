@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/react';
-import { Plus } from 'lucide-react';
+import { Plus, FileText } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Employees', href: '/employees' },
@@ -39,11 +39,19 @@ export default function EmployeesIndex({ employees }: any) {
                                     <p className="text-xs text-muted-foreground mt-1">
                                         {employee.employment_type} • {employee.department || 'No department'}
                                     </p>
-                                    <Link href={`/employees/${employee.id}/edit`} className="mt-4 inline-block">
-                                        <Button variant="outline" size="sm">
-                                            Edit
-                                        </Button>
-                                    </Link>
+                                    <div className="mt-4 flex gap-2">
+                                        <Link href={`/employees/${employee.id}/edit`}>
+                                            <Button variant="outline" size="sm">
+                                                Edit
+                                            </Button>
+                                        </Link>
+                                        <Link href={`/employees/${employee.id}/payslips`}>
+                                            <Button variant="outline" size="sm">
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Payslips
+                                            </Button>
+                                        </Link>
+                                    </div>
                                 </CardContent>
                             </Card>
                         ))}

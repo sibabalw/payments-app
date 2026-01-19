@@ -51,11 +51,6 @@ class PaymentSchedule extends Model
         return $this->hasMany(PaymentJob::class);
     }
 
-    public function executedPayments(): HasMany
-    {
-        return $this->hasMany(ExecutedPayment::class, 'payment_schedule_id');
-    }
-
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', 'active');

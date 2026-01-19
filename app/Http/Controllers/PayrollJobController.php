@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\PayrollJob;
-use App\Models\PayrollSchedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -19,6 +18,7 @@ class PayrollJobController extends Controller
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $scheduleId = $request->get('schedule_id');
         $status = $request->get('status');
+        $employeeId = $request->get('employee_id');
 
         $query = PayrollJob::query()->with(['payrollSchedule.business', 'employee']);
 
@@ -28,6 +28,10 @@ class PayrollJobController extends Controller
 
         if ($status) {
             $query->where('status', $status);
+        }
+
+        if ($employeeId) {
+            $query->where('employee_id', $employeeId);
         }
 
         if ($businessId) {
@@ -43,12 +47,20 @@ class PayrollJobController extends Controller
 
         $jobs = $query->latest()->paginate(20);
 
+        $employees = \App\Models\Employee::query()
+            ->when($businessId, function ($q) use ($businessId) {
+                $q->where('business_id', $businessId);
+            })
+            ->get();
+
         return Inertia::render('payroll/jobs', [
             'jobs' => $jobs,
+            'employees' => $employees,
             'filters' => [
                 'schedule_id' => $scheduleId,
                 'status' => $status,
                 'business_id' => $businessId,
+                'employee_id' => $employeeId,
             ],
         ]);
     }
