@@ -1,14 +1,30 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
+import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
+import { useState } from 'react';
+import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
+    { title: 'Payments', href: payments.index().url },
 ];
+
+function formatNextRunDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    };
+    return date.toLocaleDateString('en-US', options);
+}
 
 interface PaymentSchedule {
     id: number;
@@ -20,7 +36,8 @@ interface PaymentSchedule {
     currency: string;
     frequency: string;
     next_run_at: string | null;
-    receivers: Array<{ id: number; name: string }>;
+    receivers?: Array<{ id: number; name: string }>;
+    recipients?: Array<{ id: number; name: string }>;
 }
 
 interface PaymentsIndexProps {
@@ -36,6 +53,9 @@ interface PaymentsIndexProps {
 }
 
 export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps) {
+    const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+    const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
+
     const handlePause = (id: number) => {
         router.post(`/payments/${id}/pause`);
     };
@@ -45,8 +65,18 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
     };
 
     const handleCancel = (id: number) => {
-        if (confirm('Are you sure you want to cancel this schedule?')) {
-            router.post(`/payments/${id}/cancel`);
+        setScheduleToCancel(id);
+        setCancelConfirmOpen(true);
+    };
+
+    const confirmCancel = () => {
+        if (scheduleToCancel) {
+            router.post(`/payments/${scheduleToCancel}/cancel`, {
+                onSuccess: () => {
+                    setCancelConfirmOpen(false);
+                    setScheduleToCancel(null);
+                },
+            });
         }
     };
 
@@ -56,12 +86,20 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold">Payment Schedules</h1>
+                    <div className="flex gap-2">
+                        <Link href="/recipients/create">
+                            <Button variant="outline">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add Recipient
+                            </Button>
+                        </Link>
                     <Link href="/payments/create">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Create Schedule
                         </Button>
                     </Link>
+                    </div>
                 </div>
 
                 <div className="grid gap-4">
@@ -72,7 +110,7 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                     <div>
                                         <CardTitle>{schedule.name}</CardTitle>
                                         <p className="text-sm text-muted-foreground mt-1">
-                                            {schedule.receivers.length} receiver(s) • {schedule.frequency}
+                                            {(schedule.recipients?.length || schedule.receivers?.length || 0)} recipient(s) • {cronToHumanReadable(schedule.frequency)}
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -109,7 +147,7 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                         </p>
                                         {schedule.next_run_at && (
                                             <p className="text-sm text-muted-foreground">
-                                                Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                                                Next run: {formatNextRunDate(schedule.next_run_at)}
                                             </p>
                                         )}
                                     </div>
@@ -152,6 +190,16 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                     </Card>
                 )}
             </div>
+
+            <ConfirmationDialog
+                open={cancelConfirmOpen}
+                onOpenChange={setCancelConfirmOpen}
+                onConfirm={confirmCancel}
+                title="Are you sure you want to cancel this schedule?"
+                description="This action cannot be undone. The payment schedule will be cancelled and no further payments will be processed."
+                confirmText="Cancel Schedule"
+                variant="destructive"
+            />
         </AppLayout>
     );
 }

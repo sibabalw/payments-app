@@ -3,50 +3,27 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, router, useForm } from '@inertiajs/react';
-import { AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import InputError from '@/components/input-error';
+import { Head, Link } from '@inertiajs/react';
+import { AlertCircle, CheckCircle2, XCircle, Users, CreditCard, Receipt, UserCheck, Wallet, Mail, Phone, Building2, Pencil } from 'lucide-react';
+
+// Helper function to get business initials
+const getBusinessInitials = (name: string): string => {
+    if (!name) return '?';
+    
+    const words = name.trim().split(/\s+/);
+    if (words.length === 1) {
+        // Single word: take first 2 letters
+        return name.substring(0, 2).toUpperCase();
+    }
+    // Multiple words: take first letter of first two words
+    return (words[0][0] + words[1][0]).toUpperCase();
+};
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Businesses', href: '/businesses' },
 ];
 
 export default function BusinessesIndex({ businesses }: any) {
-    const { data, setData, post, processing, errors } = useForm({
-        name: '',
-        business_type: '',
-        registration_number: '',
-        tax_id: '',
-        email: '',
-        phone: '',
-        website: '',
-        street_address: '',
-        city: '',
-        postal_code: '',
-        country: '',
-        description: '',
-        contact_person_name: '',
-    });
-
-    const submit = (e: React.FormEvent) => {
-        e.preventDefault();
-        post('/businesses');
-    };
-
-    const switchBusiness = (id: number) => {
-        router.post(`/businesses/${id}/switch`);
-    };
-
-    const updateBusinessStatus = (businessId: number, status: string, reason?: string) => {
-        router.post(`/businesses/${businessId}/status`, {
-            status,
-            status_reason: reason || '',
-        });
-    };
-
     const getStatusBadge = (status: string) => {
         const statusConfig = {
             active: { label: 'Active', variant: 'default' as const, icon: CheckCircle2, className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
@@ -65,284 +42,180 @@ export default function BusinessesIndex({ businesses }: any) {
         );
     };
 
+    const formatCurrency = (amount: number) => {
+        return new Intl.NumberFormat('en-ZA', {
+            style: 'currency',
+            currency: 'ZAR',
+        }).format(amount);
+    };
+
+    const formatBusinessType = (type: string | null) => {
+        if (!type) return 'N/A';
+        return type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    };
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Businesses" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
-                <h1 className="text-2xl font-bold">Businesses</h1>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Create New Business</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={submit} className="space-y-6">
-                            {/* Basic Information */}
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-semibold">Basic Information</h3>
-                                
-                                <div>
-                                    <Label htmlFor="name">Business Name *</Label>
-                                    <Input
-                                        id="name"
-                                        value={data.name}
-                                        onChange={(e) => setData('name', e.target.value)}
-                                        required
-                                        placeholder="Enter business name"
-                                    />
-                                    <InputError message={errors.name} />
-                                </div>
-
-                                <div>
-                                    <Label htmlFor="business_type">Business Type</Label>
-                                    <Select
-                                        value={data.business_type}
-                                        onValueChange={(value) => setData('business_type', value)}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select business type" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="small_business">Small Business</SelectItem>
-                                            <SelectItem value="medium_business">Medium Business</SelectItem>
-                                            <SelectItem value="large_business">Large Business</SelectItem>
-                                            <SelectItem value="sole_proprietorship">Sole Proprietorship</SelectItem>
-                                            <SelectItem value="partnership">Partnership</SelectItem>
-                                            <SelectItem value="corporation">Corporation</SelectItem>
-                                            <SelectItem value="other">Other</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    <InputError message={errors.business_type} />
-                                </div>
-
-                                <div>
-                                    <Label htmlFor="description">Description</Label>
-                                    <textarea
-                                        id="description"
-                                        className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
-                                        value={data.description}
-                                        onChange={(e) => setData('description', e.target.value)}
-                                        placeholder="Brief description of your business"
-                                    />
-                                    <InputError message={errors.description} />
-                                </div>
-                            </div>
-
-                            {/* Registration & Tax Information */}
-                            <div className="space-y-4 border-t pt-6">
-                                <h3 className="text-lg font-semibold">Registration & Tax Information</h3>
-                                
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    <div>
-                                        <Label htmlFor="registration_number">Registration Number</Label>
-                                        <Input
-                                            id="registration_number"
-                                            value={data.registration_number}
-                                            onChange={(e) => setData('registration_number', e.target.value)}
-                                            placeholder="Company registration number"
-                                        />
-                                        <InputError message={errors.registration_number} />
-                                    </div>
-
-                                    <div>
-                                        <Label htmlFor="tax_id">Tax ID / VAT Number</Label>
-                                        <Input
-                                            id="tax_id"
-                                            value={data.tax_id}
-                                            onChange={(e) => setData('tax_id', e.target.value)}
-                                            placeholder="Tax identification number"
-                                        />
-                                        <InputError message={errors.tax_id} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Contact Information */}
-                            <div className="space-y-4 border-t pt-6">
-                                <h3 className="text-lg font-semibold">Contact Information</h3>
-                                
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    <div>
-                                        <Label htmlFor="email">Email</Label>
-                                        <Input
-                                            id="email"
-                                            type="email"
-                                            value={data.email}
-                                            onChange={(e) => setData('email', e.target.value)}
-                                            placeholder="business@example.com"
-                                        />
-                                        <InputError message={errors.email} />
-                                    </div>
-
-                                    <div>
-                                        <Label htmlFor="phone">Phone</Label>
-                                        <Input
-                                            id="phone"
-                                            type="tel"
-                                            value={data.phone}
-                                            onChange={(e) => setData('phone', e.target.value)}
-                                            placeholder="+27 12 345 6789"
-                                        />
-                                        <InputError message={errors.phone} />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <Label htmlFor="website">Website</Label>
-                                    <Input
-                                        id="website"
-                                        type="url"
-                                        value={data.website}
-                                        onChange={(e) => setData('website', e.target.value)}
-                                        placeholder="https://www.example.com"
-                                    />
-                                    <InputError message={errors.website} />
-                                </div>
-
-                                <div>
-                                    <Label htmlFor="contact_person_name">Contact Person Name</Label>
-                                    <Input
-                                        id="contact_person_name"
-                                        value={data.contact_person_name}
-                                        onChange={(e) => setData('contact_person_name', e.target.value)}
-                                        placeholder="Primary contact person"
-                                    />
-                                    <InputError message={errors.contact_person_name} />
-                                </div>
-                            </div>
-
-                            {/* Address Information */}
-                            <div className="space-y-4 border-t pt-6">
-                                <h3 className="text-lg font-semibold">Address Information</h3>
-                                
-                                <div>
-                                    <Label htmlFor="street_address">Street Address</Label>
-                                    <Input
-                                        id="street_address"
-                                        value={data.street_address}
-                                        onChange={(e) => setData('street_address', e.target.value)}
-                                        placeholder="123 Main Street"
-                                    />
-                                    <InputError message={errors.street_address} />
-                                </div>
-
-                                <div className="grid gap-4 md:grid-cols-3">
-                                    <div>
-                                        <Label htmlFor="city">City</Label>
-                                        <Input
-                                            id="city"
-                                            value={data.city}
-                                            onChange={(e) => setData('city', e.target.value)}
-                                            placeholder="City"
-                                        />
-                                        <InputError message={errors.city} />
-                                    </div>
-
-                                    <div>
-                                        <Label htmlFor="postal_code">Postal Code</Label>
-                                        <Input
-                                            id="postal_code"
-                                            value={data.postal_code}
-                                            onChange={(e) => setData('postal_code', e.target.value)}
-                                            placeholder="0000"
-                                        />
-                                        <InputError message={errors.postal_code} />
-                                    </div>
-
-                                    <div>
-                                        <Label htmlFor="country">Country</Label>
-                                        <Input
-                                            id="country"
-                                            value={data.country}
-                                            onChange={(e) => setData('country', e.target.value)}
-                                            placeholder="South Africa"
-                                        />
-                                        <InputError message={errors.country} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex gap-2 pt-4">
-                                <Button type="submit" disabled={processing}>
-                                    Create Business
-                                </Button>
-                                <Link href="/businesses">
-                                    <Button type="button" variant="outline">
-                                        Cancel
-                                    </Button>
-                                </Link>
-                            </div>
-                        </form>
-                    </CardContent>
-                </Card>
-
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {businesses?.map((business: any) => (
-                        <Card key={business.id} className={business.status !== 'active' ? 'opacity-75' : ''}>
-                            <CardHeader>
-                                <div className="flex items-center justify-between">
-                                    <CardTitle>{business.name}</CardTitle>
-                                    {getStatusBadge(business.status || 'active')}
-                                </div>
-                                {business.status_reason && (
-                                    <p className="text-xs text-muted-foreground mt-2">
-                                        Reason: {business.status_reason}
-                                    </p>
-                                )}
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                                {business.status === 'active' ? (
-                                    <Button 
-                                        onClick={() => switchBusiness(business.id)} 
-                                        variant="outline" 
-                                        size="sm"
-                                        className="w-full"
-                                    >
-                                        Switch to this business
-                                    </Button>
-                                ) : (
-                                    <p className="text-sm text-muted-foreground text-center py-2">
-                                        Business is {business.status}. Cannot switch.
-                                    </p>
-                                )}
-                                
-                                {/* Admin Status Controls */}
-                                <div className="border-t pt-3 space-y-2">
-                                    <Label className="text-xs text-muted-foreground">Admin: Change Status</Label>
-                                    <div className="flex gap-1">
-                                        <Button
-                                            onClick={() => updateBusinessStatus(business.id, 'active')}
-                                            variant={business.status === 'active' ? 'default' : 'outline'}
-                                            size="sm"
-                                            className="flex-1 text-xs"
-                                            disabled={business.status === 'active'}
-                                        >
-                                            Activate
-                                        </Button>
-                                        <Button
-                                            onClick={() => updateBusinessStatus(business.id, 'suspended', 'Suspended by admin')}
-                                            variant={business.status === 'suspended' ? 'default' : 'outline'}
-                                            size="sm"
-                                            className="flex-1 text-xs"
-                                            disabled={business.status === 'suspended'}
-                                        >
-                                            Suspend
-                                        </Button>
-                                        <Button
-                                            onClick={() => updateBusinessStatus(business.id, 'banned', 'Banned for fraud')}
-                                            variant={business.status === 'banned' ? 'default' : 'outline'}
-                                            size="sm"
-                                            className="flex-1 text-xs"
-                                            disabled={business.status === 'banned'}
-                                        >
-                                            Ban
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
+                <div className="flex items-center justify-between">
+                    <h1 className="text-2xl font-bold">Businesses</h1>
+                    <Link href="/businesses/create">
+                        <Button>Create New Business</Button>
+                    </Link>
                 </div>
+
+                {businesses && businesses.length > 0 ? (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {businesses.map((business: any) => (
+                            <Card key={business.id} className={business.status !== 'active' ? 'opacity-75' : ''}>
+                                <CardHeader>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        {business.logo && business.logo.trim() !== '' ? (
+                                            <div className="flex aspect-square size-12 items-center justify-center rounded-md overflow-hidden flex-shrink-0 border border-border bg-muted">
+                                                <img 
+                                                    src={business.logo} 
+                                                    alt={business.name}
+                                                    className="w-full h-full object-cover"
+                                                    onError={(e) => {
+                                                        // Fallback to initials if image fails to load
+                                                        const target = e.target as HTMLImageElement;
+                                                        const parent = target.parentElement;
+                                                        if (parent) {
+                                                            target.style.display = 'none';
+                                                            const initialsSpan = document.createElement('span');
+                                                            initialsSpan.className = 'text-sm font-semibold text-foreground';
+                                                            initialsSpan.textContent = getBusinessInitials(business.name);
+                                                            parent.appendChild(initialsSpan);
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="flex aspect-square size-12 items-center justify-center rounded-md bg-primary text-primary-foreground flex-shrink-0">
+                                                <span className="text-sm font-semibold">
+                                                    {getBusinessInitials(business.name)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <CardTitle className="flex-1 min-w-0 truncate" title={business.name}>
+                                                    {business.name}
+                                                </CardTitle>
+                                        {getStatusBadge(business.status || 'active')}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {business.status_reason && (
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                            Reason: {business.status_reason}
+                                        </p>
+                                    )}
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {/* Escrow Balance */}
+                                    <div className="flex items-center justify-between p-2 rounded-lg bg-primary/5">
+                                        <div className="flex items-center gap-2">
+                                            <Wallet className="h-4 w-4 text-primary" />
+                                            <span className="text-sm font-medium">Escrow Balance</span>
+                                        </div>
+                                        <span className="text-sm font-semibold text-primary">
+                                            {formatCurrency(business.escrow_balance || 0)}
+                                        </span>
+                                    </div>
+
+                                    {/* Statistics Grid */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <Users className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-muted-foreground">Employees:</span>
+                                            <span className="font-semibold">{business.employees_count || 0}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <CreditCard className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-muted-foreground">Payments:</span>
+                                            <span className="font-semibold">{business.payment_schedules_count || 0}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <Receipt className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-muted-foreground">Payroll:</span>
+                                            <span className="font-semibold">{business.payroll_schedules_count || 0}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <UserCheck className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-muted-foreground">Recipients:</span>
+                                            <span className="font-semibold">{business.recipients_count || 0}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Business Type */}
+                                    {business.business_type && (
+                                        <div className="flex items-center gap-2 text-sm pt-2 border-t">
+                                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                                            <span className="text-muted-foreground">Type:</span>
+                                            <span className="font-medium">{formatBusinessType(business.business_type)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Contact Information */}
+                                    <div className="space-y-1.5 pt-2 border-t">
+                                        {business.email && (
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                                                <span className="truncate" title={business.email}>{business.email}</span>
+                                            </div>
+                                        )}
+                                        {business.phone && (
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+                                                <span className="truncate">{business.phone}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Created Date */}
+                                    {business.created_at && (
+                                        <div className="text-xs text-muted-foreground pt-2 border-t">
+                                            Created: {new Date(business.created_at).toLocaleDateString('en-ZA', {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric'
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Actions */}
+                                    <div className="pt-2 border-t">
+                                        <Link href={`/businesses/${business.id}/edit`}>
+                                            <Button variant="outline" size="sm" className="w-full">
+                                                <Pencil className="mr-2 h-4 w-4" />
+                                                Edit Business
+                                            </Button>
+                                        </Link>
+                                    </div>
+
+                                    {business.status !== 'active' && (
+                                        <div className="pt-2 border-t">
+                                        <p className="text-sm text-muted-foreground text-center py-2">
+                                            Business is {business.status}. Cannot switch.
+                                        </p>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                ) : (
+                    <Card>
+                        <CardContent className="py-10 text-center">
+                            <p className="text-muted-foreground">No businesses found.</p>
+                            <Link href="/businesses/create" className="mt-4 inline-block">
+                                <Button>Create your first business</Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                )}
             </div>
         </AppLayout>
     );

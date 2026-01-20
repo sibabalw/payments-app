@@ -24,23 +24,34 @@ export default function ReceiversIndex({ receivers }: any) {
                     </Link>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {receivers?.data?.map((receiver: any) => (
-                        <Card key={receiver.id}>
-                            <CardHeader>
-                                <CardTitle>{receiver.name}</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-sm text-muted-foreground">{receiver.email}</p>
-                                <Link href={`/receivers/${receiver.id}/edit`} className="mt-4 inline-block">
-                                    <Button variant="outline" size="sm">
-                                        Edit
-                                    </Button>
-                                </Link>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                {receivers?.data && receivers.data.length > 0 ? (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {receivers.data.map((receiver: any) => (
+                            <Card key={receiver.id}>
+                                <CardHeader>
+                                    <CardTitle>{receiver.name}</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-muted-foreground">{receiver.email}</p>
+                                    <Link href={`/receivers/${receiver.id}/edit`} className="mt-4 inline-block">
+                                        <Button variant="outline" size="sm">
+                                            Edit
+                                        </Button>
+                                    </Link>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                ) : (
+                    <Card>
+                        <CardContent className="py-10 text-center">
+                            <p className="text-muted-foreground">No receivers found.</p>
+                            <Link href="/receivers/create" className="mt-4 inline-block">
+                                <Button>Add your first receiver</Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                )}
             </div>
         </AppLayout>
     );

@@ -7,14 +7,13 @@ import {
     SidebarFooter,
     SidebarHeader,
     SidebarMenu,
-    SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
-import { Link, usePage } from '@inertiajs/react';
-import { BookOpen, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign } from 'lucide-react';
-import AppLogo from './app-logo';
+import { usePage } from '@inertiajs/react';
+import { BookOpen, Bot, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
+import { BusinessSwitcher } from './business-switcher';
 
 const footerNavItems: NavItem[] = [
     {
@@ -39,6 +38,11 @@ export function AppSidebar() {
             icon: LayoutGrid,
         },
         {
+            title: 'AI Assistant',
+            href: '/chat',
+            icon: Bot,
+        },
+        {
             title: 'Payments',
             href: '/payments',
             icon: CreditCard,
@@ -49,14 +53,54 @@ export function AppSidebar() {
             icon: DollarSign,
         },
         {
-            title: 'Receivers',
-            href: '/receivers',
+            title: 'Payslips',
+            href: '/payslips',
+            icon: ReceiptText,
+        },
+        {
+            title: 'Reports',
+            href: '/reports',
+            icon: FileText,
+        },
+        {
+            title: 'Recipients',
+            href: '/recipients',
             icon: Users,
+        },
+        {
+            title: 'Employees',
+            href: '/employees',
+            icon: UserCheck,
+        },
+        {
+            title: 'Deductions',
+            href: '/deductions',
+            icon: Receipt,
+        },
+        {
+            title: 'Time Tracking',
+            href: '/time-tracking',
+            icon: Clock,
+        },
+        {
+            title: 'Leave',
+            href: '/leave',
+            icon: FileText,
         },
         {
             title: 'Audit Logs',
             href: '/audit-logs',
             icon: FileText,
+        },
+        {
+            title: 'Compliance',
+            href: '/compliance',
+            icon: Shield,
+        },
+        {
+            title: 'Templates',
+            href: '/templates',
+            icon: Palette,
         },
         {
             title: 'Businesses',
@@ -71,11 +115,7 @@ export function AppSidebar() {
             <SidebarHeader>
                 <SidebarMenu>
                     <SidebarMenuItem>
-                        <SidebarMenuButton size="lg" asChild>
-                            <Link href={dashboard()} prefetch>
-                                <AppLogo />
-                            </Link>
-                        </SidebarMenuButton>
+                        <BusinessSwitcher />
                     </SidebarMenuItem>
                 </SidebarMenu>
             </SidebarHeader>

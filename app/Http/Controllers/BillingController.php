@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Business;
 use App\Services\BillingService;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -13,26 +12,25 @@ class BillingController extends Controller
 {
     public function __construct(
         protected BillingService $billingService
-    ) {
-    }
+    ) {}
 
     /**
      * Display the billing dashboard.
      */
     public function index(): Response
     {
-        $businessId = session('current_business_id');
+        $businessId = Auth::user()->current_business_id ?? session('current_business_id');
         $user = Auth::user();
 
         $businesses = $user->businesses()->get();
-        
-        if (!$businessId && $businesses->isNotEmpty()) {
+
+        if (! $businessId && $businesses->isNotEmpty()) {
             $businessId = $businesses->first()->id;
         }
 
         $business = $businessId ? Business::find($businessId) : null;
 
-        if (!$business) {
+        if (! $business) {
             return Inertia::render('billing/index', [
                 'businesses' => $businesses,
                 'selectedBusinessId' => null,
@@ -47,7 +45,7 @@ class BillingController extends Controller
             ->where('billing_month', $currentMonth)
             ->first();
 
-        if (!$currentMonthBilling) {
+        if (! $currentMonthBilling) {
             // Generate if doesn't exist
             $currentMonthBilling = $this->billingService->generateMonthlyBilling($business, $currentMonth);
         }
@@ -59,17 +57,17 @@ class BillingController extends Controller
             ->get();
 
         // Get current month deposit fees
-        $startDate = $currentMonth . '-01';
+        $startDate = $currentMonth.'-01';
         $endDate = date('Y-m-t', strtotime($startDate));
         $currentMonthDepositFees = $business->escrowDeposits()
             ->where('status', 'completed')
-            ->whereBetween('completed_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+            ->whereBetween('completed_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])
             ->sum('fee_amount');
 
         return Inertia::render('billing/index', [
             'businesses' => $businesses,
             'selectedBusinessId' => $businessId,
-            'business' => $business,
+            'business' => $business->only(['id', 'name', 'business_type', 'bank_account_details']),
             'currentMonthBilling' => $currentMonthBilling,
             'currentMonthDepositFees' => (float) $currentMonthDepositFees,
             'billingHistory' => $billingHistory,
@@ -86,7 +84,7 @@ class BillingController extends Controller
             ->findOrFail($id);
 
         // Verify user has access
-        if (!Auth::user()->businesses()->where('businesses.id', $billing->business_id)->exists()) {
+        if (! Auth::user()->businesses()->where('businesses.id', $billing->business_id)->exists()) {
             abort(403);
         }
 

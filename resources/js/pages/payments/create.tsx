@@ -6,25 +6,25 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DatePicker } from '@/components/ui/date-picker';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
+import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { isBusinessDay } from '@/lib/sa-holidays';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
+    { title: 'Payments', href: payments.index().url },
     { title: 'Create', href: '#' },
 ];
 
 interface PaymentsCreateProps {
     businesses: Array<{ id: number; name: string }>;
-    receivers: Array<{ id: number; name: string }>;
+    recipients: Array<{ id: number; name: string }>;
     selectedBusinessId?: number;
     type?: string;
     escrowBalance?: number | null;
 }
 
-export default function PaymentsCreate({ businesses, receivers, selectedBusinessId, type = 'generic', escrowBalance }: PaymentsCreateProps) {
+export default function PaymentsCreate({ businesses, recipients, selectedBusinessId, type = 'generic', escrowBalance }: PaymentsCreateProps) {
     // Get next business day as default date
     const getDefaultDate = () => {
         const tomorrow = new Date();
@@ -52,7 +52,7 @@ export default function PaymentsCreate({ businesses, receivers, selectedBusiness
         frequency: 'daily',
         amount: '',
         currency: 'ZAR',
-        receiver_ids: [] as number[],
+        recipient_ids: [] as number[],
     });
 
     const submit = (e: React.FormEvent) => {
@@ -129,8 +129,14 @@ export default function PaymentsCreate({ businesses, receivers, selectedBusiness
                                     date={data.scheduled_date ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00')) : undefined}
                                     onDateChange={(date) => {
                                         if (date) {
-                                            setData('scheduled_date', date.toISOString().split('T')[0]);
-                                            setData('scheduled_time', date.toTimeString().slice(0, 5));
+                                            // Use local date components to avoid timezone shifts
+                                            const year = date.getFullYear();
+                                            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                                            const day = date.getDate().toString().padStart(2, '0');
+                                            const hours = date.getHours().toString().padStart(2, '0');
+                                            const minutes = date.getMinutes().toString().padStart(2, '0');
+                                            setData('scheduled_date', `${year}-${month}-${day}`);
+                                            setData('scheduled_time', `${hours}:${minutes}`);
                                         }
                                     }}
                                     time={data.scheduled_time}
@@ -198,26 +204,32 @@ export default function PaymentsCreate({ businesses, receivers, selectedBusiness
                             </div>
 
                             <div>
-                                <Label>Receivers</Label>
+                                <Label>Recipients</Label>
                                 <div className="space-y-2 mt-2">
-                                    {receivers.map((receiver) => (
-                                        <label key={receiver.id} className="flex items-center space-x-2">
+                                    {recipients.length > 0 ? (
+                                        recipients.map((recipient) => (
+                                            <label key={recipient.id} className="flex items-center space-x-2">
                                             <input
                                                 type="checkbox"
-                                                checked={data.receiver_ids.includes(receiver.id)}
+                                                    checked={data.recipient_ids.includes(recipient.id)}
                                                 onChange={(e) => {
                                                     if (e.target.checked) {
-                                                        setData('receiver_ids', [...data.receiver_ids, receiver.id]);
+                                                            setData('recipient_ids', [...data.recipient_ids, recipient.id]);
                                                     } else {
-                                                        setData('receiver_ids', data.receiver_ids.filter(id => id !== receiver.id));
+                                                            setData('recipient_ids', data.recipient_ids.filter(id => id !== recipient.id));
                                                     }
                                                 }}
                                             />
-                                            <span>{receiver.name}</span>
+                                                <span>{recipient.name}</span>
                                         </label>
-                                    ))}
+                                        ))
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground">
+                                            No recipients found. <Link href="/recipients/create" className="text-primary underline">Create one</Link>
+                                        </p>
+                                    )}
                                 </div>
-                                <InputError message={errors.receiver_ids} />
+                                <InputError message={errors.recipient_ids} />
                             </div>
 
                             <div className="flex gap-2">

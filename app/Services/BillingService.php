@@ -2,14 +2,24 @@
 
 namespace App\Services;
 
+use App\Models\BillingTransaction;
 use App\Models\Business;
 use App\Models\EscrowDeposit;
 use App\Models\MonthlyBilling;
+use App\Services\BillingGateway\BillingGatewayFactory;
+use App\Services\BillingGateway\BillingGatewayInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class BillingService
 {
+    protected BillingGatewayInterface $billingGateway;
+
+    public function __construct(?BillingGatewayInterface $billingGateway = null)
+    {
+        $this->billingGateway = $billingGateway ?? BillingGatewayFactory::make();
+    }
+
     /**
      * Get fixed subscription fee based on business type.
      */
@@ -51,12 +61,12 @@ class BillingService
             $subscriptionFee = $this->getSubscriptionFee($business);
 
             // Calculate total deposit fees for the month
-            $startDate = $month . '-01';
+            $startDate = $month.'-01';
             $endDate = date('Y-m-t', strtotime($startDate));
 
             $totalDepositFees = EscrowDeposit::where('business_id', $business->id)
                 ->where('status', 'completed')
-                ->whereBetween('completed_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+                ->whereBetween('completed_at', [$startDate.' 00:00:00', $endDate.' 23:59:59'])
                 ->sum('fee_amount');
 
             $billing = MonthlyBilling::create([
@@ -86,20 +96,70 @@ class BillingService
      */
     public function processSubscriptionFee(Business $business, MonthlyBilling $billing): bool
     {
-        // In a real implementation, this would charge the business via bank/payment gateway
-        // For now, we'll just mark it as paid (mock implementation)
-        
-        $billing->update([
-            'status' => 'paid',
-            'paid_at' => now(),
-        ]);
+        return DB::transaction(function () use ($business, $billing) {
+            // Check if business has bank account details
+            if (! $business->hasBankAccountDetails()) {
+                Log::warning('Cannot process subscription fee: business has no bank account details', [
+                    'billing_id' => $billing->id,
+                    'business_id' => $business->id,
+                ]);
 
-        Log::info('Subscription fee processed', [
-            'billing_id' => $billing->id,
-            'business_id' => $business->id,
-            'subscription_fee' => $billing->subscription_fee,
-        ]);
+                return false;
+            }
 
-        return true;
+            // Create billing transaction record
+            $transaction = BillingTransaction::create([
+                'business_id' => $business->id,
+                'monthly_billing_id' => $billing->id,
+                'type' => 'subscription_fee',
+                'amount' => $billing->subscription_fee,
+                'currency' => 'ZAR',
+                'description' => "Monthly subscription fee for {$billing->billing_month}",
+                'status' => 'pending',
+            ]);
+
+            // Charge via billing gateway
+            $result = $this->billingGateway->chargeSubscription(
+                (float) $billing->subscription_fee,
+                'ZAR',
+                $business,
+                [
+                    'billing_id' => $billing->id,
+                    'billing_month' => $billing->billing_month,
+                    'transaction_id' => $transaction->id,
+                ]
+            );
+
+            // Update transaction record
+            $transaction->update([
+                'status' => $result->success ? 'completed' : 'failed',
+                'bank_reference' => $result->transactionId,
+                'processed_at' => now(),
+            ]);
+
+            // Update monthly billing status
+            if ($result->success) {
+                $billing->update([
+                    'status' => 'paid',
+                    'paid_at' => now(),
+                ]);
+
+                Log::info('Subscription fee processed successfully', [
+                    'billing_id' => $billing->id,
+                    'business_id' => $business->id,
+                    'subscription_fee' => $billing->subscription_fee,
+                    'transaction_id' => $result->transactionId,
+                ]);
+            } else {
+                Log::error('Subscription fee processing failed', [
+                    'billing_id' => $billing->id,
+                    'business_id' => $business->id,
+                    'subscription_fee' => $billing->subscription_fee,
+                    'error' => $result->errorMessage,
+                ]);
+            }
+
+            return $result->success;
+        });
     }
 }

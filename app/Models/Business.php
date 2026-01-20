@@ -15,6 +15,7 @@ class Business extends Model
     protected $fillable = [
         'user_id',
         'name',
+        'logo',
         'business_type',
         'status',
         'status_reason',
@@ -26,14 +27,19 @@ class Business extends Model
         'website',
         'street_address',
         'city',
+        'province',
         'postal_code',
         'country',
         'description',
         'contact_person_name',
+        'escrow_balance',
+        'bank_account_details',
     ];
 
     protected $casts = [
         'status_changed_at' => 'datetime',
+        'escrow_balance' => 'decimal:2',
+        'bank_account_details' => 'array',
     ];
 
     public function owner(): BelongsTo
@@ -48,11 +54,6 @@ class Business extends Model
             ->withTimestamps();
     }
 
-    public function receivers(): HasMany
-    {
-        return $this->hasMany(Receiver::class);
-    }
-
     public function paymentSchedules(): HasMany
     {
         return $this->hasMany(PaymentSchedule::class);
@@ -63,7 +64,6 @@ class Business extends Model
         return $this->hasMany(AuditLog::class);
     }
 
-
     public function escrowDeposits(): HasMany
     {
         return $this->hasMany(EscrowDeposit::class);
@@ -72,6 +72,26 @@ class Business extends Model
     public function monthlyBillings(): HasMany
     {
         return $this->hasMany(MonthlyBilling::class);
+    }
+
+    public function customDeductions(): HasMany
+    {
+        return $this->hasMany(CustomDeduction::class)->whereNull('employee_id');
+    }
+
+    public function timeEntries(): HasMany
+    {
+        return $this->hasMany(TimeEntry::class);
+    }
+
+    public function leaveEntries(): HasMany
+    {
+        return $this->hasMany(LeaveEntry::class);
+    }
+
+    public function templates(): HasMany
+    {
+        return $this->hasMany(BusinessTemplate::class);
     }
 
     /**
@@ -135,7 +155,7 @@ class Business extends Model
      */
     public function updateStatus(string $status, ?string $reason = null): void
     {
-        if (!in_array($status, ['active', 'suspended', 'banned'])) {
+        if (! in_array($status, ['active', 'suspended', 'banned'])) {
             throw new \InvalidArgumentException("Invalid status: {$status}");
         }
 
@@ -144,5 +164,13 @@ class Business extends Model
             'status_reason' => $reason,
             'status_changed_at' => now(),
         ]);
+    }
+
+    /**
+     * Check if business has bank account details configured.
+     */
+    public function hasBankAccountDetails(): bool
+    {
+        return ! empty($this->bank_account_details) && is_array($this->bank_account_details);
     }
 }

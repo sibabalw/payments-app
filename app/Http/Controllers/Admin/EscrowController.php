@@ -16,8 +16,7 @@ class EscrowController extends Controller
 {
     public function __construct(
         protected EscrowService $escrowService
-    ) {
-    }
+    ) {}
 
     /**
      * Display escrow management dashboard.
@@ -168,18 +167,35 @@ class EscrowController extends Controller
             $totalFees = $deposits->sum('fee_amount');
             $totalAuthorized = $deposits->sum('authorized_amount');
 
-            $used = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
+            $paymentJobsUsed = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
                 $query->where('business_id', $business->id);
             })
-            ->whereNotNull('escrow_deposit_id')
-            ->whereIn('status', ['succeeded', 'processing'])
-            ->sum('amount');
+                ->whereNotNull('escrow_deposit_id')
+                ->whereIn('status', ['succeeded', 'processing'])
+                ->sum('amount');
 
-            $returned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
+            $payrollJobsUsed = \App\Models\PayrollJob::whereHas('payrollSchedule', function ($query) use ($business) {
                 $query->where('business_id', $business->id);
             })
-            ->whereNotNull('funds_returned_manually_at')
-            ->sum('amount');
+                ->whereNotNull('escrow_deposit_id')
+                ->whereIn('status', ['succeeded', 'processing'])
+                ->sum('gross_salary');
+
+            $used = $paymentJobsUsed + $payrollJobsUsed;
+
+            $paymentJobsReturned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
+                $query->where('business_id', $business->id);
+            })
+                ->whereNotNull('funds_returned_manually_at')
+                ->sum('amount');
+
+            $payrollJobsReturned = \App\Models\PayrollJob::whereHas('payrollSchedule', function ($query) use ($business) {
+                $query->where('business_id', $business->id);
+            })
+                ->whereNotNull('funds_returned_manually_at')
+                ->sum('gross_salary');
+
+            $returned = $paymentJobsReturned + $payrollJobsReturned;
 
             return [
                 'id' => $business->id,

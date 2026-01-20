@@ -41,4 +41,36 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI', '/auth/google/callback'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | AI MVP Server
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for the separate AI MVP server that handles OpenAI
+    | queries with business context.
+    |
+    */
+
+    'ai_mvp_server' => [
+        'url' => env('AI_MVP_SERVER_URL', 'http://localhost:3001'),
+        'api_key' => env('AI_MVP_SERVER_API_KEY'),
+        'timeout' => env('AI_MVP_SERVER_TIMEOUT', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | WhatsApp Cloud API
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for WhatsApp Business Cloud API integration.
+    |
+    */
+
+    'whatsapp' => [
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+        'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
+        'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
+    ],
+
 ];
