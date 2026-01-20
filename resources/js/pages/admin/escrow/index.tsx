@@ -1,3 +1,4 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,7 @@ import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { CheckCircle, XCircle, Plus, Wallet } from 'lucide-react';
+import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -76,6 +78,10 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
         bank_reference: '',
     });
 
+    const [feeReleaseConfirmOpen, setFeeReleaseConfirmOpen] = useState(false);
+    const [fundReturnConfirmOpen, setFundReturnConfirmOpen] = useState(false);
+    const [paymentJobId, setPaymentJobId] = useState<number | null>(null);
+
     const submitDeposit = (e: React.FormEvent) => {
         e.preventDefault();
         post('/admin/escrow/deposits');
@@ -87,15 +93,35 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
         });
     };
 
-    const recordFeeRelease = (paymentJobId: number) => {
-        if (confirm('Record that bank has released the fee for this payment?')) {
-            router.post(`/admin/escrow/payments/${paymentJobId}/fee-release`);
+    const recordFeeRelease = (id: number) => {
+        setPaymentJobId(id);
+        setFeeReleaseConfirmOpen(true);
+    };
+
+    const confirmFeeRelease = () => {
+        if (paymentJobId) {
+            router.post(`/admin/escrow/payments/${paymentJobId}/fee-release`, {}, {
+                onSuccess: () => {
+                    setFeeReleaseConfirmOpen(false);
+                    setPaymentJobId(null);
+                },
+            });
         }
     };
 
-    const recordFundReturn = (paymentJobId: number) => {
-        if (confirm('Record that bank has returned funds for this failed payment?')) {
-            router.post(`/admin/escrow/payments/${paymentJobId}/fund-return`);
+    const recordFundReturn = (id: number) => {
+        setPaymentJobId(id);
+        setFundReturnConfirmOpen(true);
+    };
+
+    const confirmFundReturn = () => {
+        if (paymentJobId) {
+            router.post(`/admin/escrow/payments/${paymentJobId}/fund-return`, {}, {
+                onSuccess: () => {
+                    setFundReturnConfirmOpen(false);
+                    setPaymentJobId(null);
+                },
+            });
         }
     };
 
@@ -376,6 +402,26 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                     </CardContent>
                 </Card>
             </div>
+
+            <ConfirmationDialog
+                open={feeReleaseConfirmOpen}
+                onOpenChange={setFeeReleaseConfirmOpen}
+                onConfirm={confirmFeeRelease}
+                title="Record Fee Release"
+                description="Record that the bank has released the fee for this payment?"
+                confirmText="Confirm"
+                variant="info"
+            />
+
+            <ConfirmationDialog
+                open={fundReturnConfirmOpen}
+                onOpenChange={setFundReturnConfirmOpen}
+                onConfirm={confirmFundReturn}
+                title="Record Fund Return"
+                description="Record that the bank has returned funds for this failed payment?"
+                confirmText="Confirm"
+                variant="info"
+            />
         </AppLayout>
     );
 }

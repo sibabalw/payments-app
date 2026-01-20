@@ -43,7 +43,7 @@ export function BusinessSwitcher() {
         });
     };
 
-    const getStatusBadge = (status: string) => {
+    const getStatusBadge = (status: string, size: 'sm' | 'xs' | 'default' = 'default') => {
         const statusConfig = {
             active: { label: 'Active', variant: 'default' as const, icon: CheckCircle2, className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' },
             suspended: { label: 'Suspended', variant: 'outline' as const, icon: AlertCircle, className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' },
@@ -52,10 +52,23 @@ export function BusinessSwitcher() {
 
         const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.active;
         const Icon = config.icon;
+        
+        if (size === 'xs') {
+            // Extra small for main button display
+            return (
+                <Badge className={`${config.className} text-[9px] px-1 py-0 leading-tight h-4`} variant="outline">
+                    <Icon className="h-2 w-2 mr-0.5" />
+                    {config.label}
+                </Badge>
+            );
+        }
+        
+        const iconSize = size === 'sm' ? 'h-2.5 w-2.5' : 'h-3 w-3';
+        const textSize = size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-0.5';
 
         return (
-            <Badge className={config.className} variant="outline">
-                <Icon className="mr-1 h-3 w-3" />
+            <Badge className={`${config.className} ${textSize}`} variant="outline">
+                <Icon className={`mr-0.5 ${iconSize}`} />
                 {config.label}
             </Badge>
         );
@@ -106,13 +119,13 @@ export function BusinessSwitcher() {
                                 <Building2 className="size-4" />
                             </div>
                         )}
-                        <div className="flex-1 min-w-0 text-left">
-                            <div className="text-sm font-semibold truncate">
+                        <div className="flex-1 min-w-0 text-left overflow-hidden">
+                            <div className="text-sm font-semibold truncate" title={displayText}>
                                 {displayText}
                             </div>
                             {currentBusiness && (
-                                <div className="text-xs text-sidebar-muted-foreground truncate">
-                                    {getStatusBadge(currentBusiness.status)}
+                                <div className="text-xs text-sidebar-muted-foreground mt-0.5">
+                                    {getStatusBadge(currentBusiness.status, 'xs')}
                                 </div>
                             )}
                         </div>
@@ -173,9 +186,9 @@ export function BusinessSwitcher() {
                                                 </div>
                                             )}
                                             {isActive && !isSwitching && (
-                                                <CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" />
+                                                <CheckCircle2 className="h-3 w-3 text-primary flex-shrink-0" />
                                             )}
-                                            <span className="truncate font-medium">{business.name}</span>
+                                            <span className="truncate font-medium flex-1 min-w-0" title={business.name}>{business.name}</span>
                                         </div>
                                         <div className="flex-shrink-0">
                                             {getStatusBadge(business.status)}

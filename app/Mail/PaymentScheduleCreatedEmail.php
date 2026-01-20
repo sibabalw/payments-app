@@ -6,6 +6,7 @@ use App\Models\PaymentSchedule;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -20,16 +21,24 @@ class PaymentScheduleCreatedEmail extends Mailable
     public function __construct(
         public User $user,
         public PaymentSchedule $paymentSchedule
-    ) {
-    }
+    ) {}
 
     /**
      * Get the message envelope.
      */
     public function envelope(): Envelope
     {
+        // Load business relationship
+        $this->paymentSchedule->loadMissing('business');
+        $business = $this->paymentSchedule->business;
+
+        // Get business email and name, fallback to Swift Pay defaults
+        $fromEmail = $business->email ?? config('mail.from.address');
+        $fromName = $business->name ?? config('mail.from.name');
+
         return new Envelope(
-            subject: 'Payment Schedule Created: ' . $this->paymentSchedule->name,
+            from: new Address($fromEmail, $fromName),
+            subject: 'Payment Schedule Created: '.$this->paymentSchedule->name,
         );
     }
 

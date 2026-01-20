@@ -23,8 +23,7 @@ class BusinessStatusChangedEmail extends Mailable
         public string $oldStatus,
         public string $newStatus,
         public ?string $reason = null
-    ) {
-    }
+    ) {}
 
     /**
      * Get the message envelope.
@@ -38,7 +37,7 @@ class BusinessStatusChangedEmail extends Mailable
         ];
 
         return new Envelope(
-            subject: 'Business Status Update: ' . $this->business->name . ' - ' . ($statusLabels[$this->newStatus] ?? ucfirst($this->newStatus)),
+            subject: 'Business Status Update: '.$this->business->name.' - '.($statusLabels[$this->newStatus] ?? ucfirst($this->newStatus)),
         );
     }
 
@@ -51,7 +50,8 @@ class BusinessStatusChangedEmail extends Mailable
             view: 'emails.business-status-changed',
             with: [
                 'user' => $this->user,
-                'business' => $this->business,
+                'businessData' => $this->business, // For content display only
+                'business' => null, // Explicitly null for email branding (app-related email from Swift Pay)
                 'oldStatus' => $this->oldStatus,
                 'newStatus' => $this->newStatus,
                 'reason' => $this->reason,

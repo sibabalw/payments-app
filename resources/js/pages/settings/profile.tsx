@@ -2,7 +2,8 @@ import ProfileController from '@/actions/App/Http/Controllers/Settings/ProfileCo
 import { send } from '@/routes/verification';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Transition } from '@headlessui/react';
-import { Form, Head, Link, usePage } from '@inertiajs/react';
+import { Form, Head, Link, router, usePage } from '@inertiajs/react';
+import { useState, useEffect } from 'react';
 import { 
     CheckCircle2, 
     Mail, 
@@ -15,6 +16,7 @@ import {
     Clock,
     AlertCircle
 } from 'lucide-react';
+import { Spinner } from '@/components/ui/spinner';
 
 import DeleteUser from '@/components/delete-user';
 import InputError from '@/components/input-error';
@@ -34,15 +36,139 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
+function OtpVerificationForm({
+    email,
+    onCancel,
+}: {
+    email: string;
+    onCancel: () => void;
+}) {
+    const [otp, setOtp] = useState('');
+    const [processing, setProcessing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleVerify = () => {
+        setError(null);
+
+        if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+            setError('Please enter a valid 6-digit code.');
+            return;
+        }
+
+        setProcessing(true);
+        router.post(
+            '/settings/profile/verify-email-otp',
+            { email, otp },
+            {
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    setProcessing(false);
+                    // Check if there are errors in the response
+                    const pageErrors = (page as any).props?.errors;
+                    if (pageErrors?.otp) {
+                        setError(pageErrors.otp);
+                    } else if (Object.keys(pageErrors || {}).length > 0) {
+                        // Some other error occurred
+                        setError('Verification failed. Please try again.');
+                    } else {
+                        // Success - redirect to get fresh data
+                        router.visit('/settings/profile', { preserveScroll: true });
+                    }
+                },
+                onError: (responseErrors) => {
+                    setProcessing(false);
+                    if (responseErrors.otp) {
+                        setError(responseErrors.otp as string);
+                    } else {
+                        setError('Invalid or expired OTP code. Please try again.');
+                    }
+                },
+            }
+        );
+    };
+
+    const handleOtpChange = (value: string) => {
+        const digitsOnly = value.replace(/\D/g, '').slice(0, 6);
+        setOtp(digitsOnly);
+        if (error) {
+            setError(null);
+        }
+    };
+
+    return (
+        <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
+            <div className="flex items-center gap-2 text-sm">
+                <Mail className="h-4 w-4 text-primary" />
+                <span className="font-medium">Email Verification Required</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+                We've sent a 6-digit verification code to <span className="font-medium text-foreground">{email}</span>.
+                Please enter it below to verify your new email address.
+            </p>
+            <div className="space-y-4">
+                <div className="grid gap-2">
+                    <Label htmlFor="otp">Verification Code</Label>
+                    <Input
+                        id="otp"
+                        type="text"
+                        value={otp}
+                        onChange={(e) => handleOtpChange(e.target.value)}
+                        autoFocus
+                        autoComplete="one-time-code"
+                        placeholder="000000"
+                        maxLength={6}
+                        className="text-center text-2xl font-mono tracking-widest"
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleVerify();
+                            }
+                        }}
+                    />
+                    <InputError message={error ?? undefined} />
+                </div>
+                <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={onCancel} className="flex-1">
+                        Cancel
+                    </Button>
+                    <Button type="button" onClick={handleVerify} className="flex-1" disabled={processing || otp.length !== 6}>
+                        {processing && <Spinner className="mr-2 h-4 w-4" />}
+                        Verify
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function Profile({
     mustVerifyEmail,
     status,
+    pendingEmail,
+    otpSent,
 }: {
     mustVerifyEmail: boolean;
     status?: string;
+    pendingEmail?: string;
+    otpSent?: boolean;
 }) {
     const { auth } = usePage<SharedData>().props;
     const getInitials = useInitials();
+    const [emailVerified, setEmailVerified] = useState(false);
+    const [sendingOtp, setSendingOtp] = useState(false);
+    const [currentEmail, setCurrentEmail] = useState(auth.user.email);
+    const originalEmail = auth.user.email;
+    const emailChanged = pendingEmail && pendingEmail !== originalEmail.toLowerCase();
+
+    // Sync currentEmail with pendingEmail or reset to original
+    useEffect(() => {
+        if (pendingEmail) {
+            setCurrentEmail(pendingEmail);
+        } else {
+            // Reset to original email when cancel clears pendingEmail
+            setCurrentEmail(auth.user.email);
+        }
+    }, [pendingEmail, auth.user.email]);
 
     const memberSince = auth.user.created_at 
         ? new Date(auth.user.created_at).toLocaleDateString('en-US', { 
@@ -213,16 +339,80 @@ export default function Profile({
                                                 <Label htmlFor="email" className="text-sm font-medium">
                                                     Email Address
                                                 </Label>
-                                                <Input
-                                                    id="email"
-                                                    type="email"
-                                                    className="h-11 transition-all focus:ring-2 focus:ring-primary/20"
-                                                    defaultValue={auth.user.email}
-                                                    name="email"
-                                                    required
-                                                    autoComplete="username"
-                                                    placeholder="Enter your email"
-                                                />
+                                                <div className="space-y-2">
+                                                    <div className="flex gap-2">
+                                                        <Input
+                                                            id="email"
+                                                            type="email"
+                                                            className="h-11 transition-all focus:ring-2 focus:ring-primary/20"
+                                                            defaultValue={auth.user.email}
+                                                            name="email"
+                                                            required
+                                                            autoComplete="username"
+                                                            placeholder="Enter your email"
+                                                            onChange={(e) => {
+                                                                setCurrentEmail(e.target.value);
+                                                                setEmailVerified(false);
+                                                            }}
+                                                            disabled={otpSent && !emailVerified}
+                                                        />
+                                                        {currentEmail.toLowerCase() !== originalEmail.toLowerCase() && !otpSent && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                onClick={() => {
+                                                                    setSendingOtp(true);
+                                                                    router.post(
+                                                                        '/settings/profile/send-email-otp',
+                                                                        { email: currentEmail },
+                                                                        {
+                                                                            preserveScroll: true,
+                                                                            onFinish: () => {
+                                                                                setSendingOtp(false);
+                                                                            },
+                                                                        }
+                                                                    );
+                                                                }}
+                                                                disabled={sendingOtp}
+                                                                className="whitespace-nowrap"
+                                                            >
+                                                                {sendingOtp && <Spinner className="mr-2 h-4 w-4" />}
+                                                                Send OTP
+                                                            </Button>
+                                                        )}
+                                                        {currentEmail.toLowerCase() === originalEmail.toLowerCase() && (
+                                                            <div className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
+                                                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                                                <span>Current</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {otpSent && pendingEmail && (
+                                                        <OtpVerificationForm
+                                                            email={pendingEmail}
+                                                            onCancel={() => {
+                                                                router.post('/settings/profile/cancel-email-otp', {}, {
+                                                                    preserveScroll: true,
+                                                                    onSuccess: () => {
+                                                                        router.reload();
+                                                                    },
+                                                                });
+                                                            }}
+                                                        />
+                                                    )}
+                                                    {emailVerified && (
+                                                        <div className="flex items-center gap-2 text-sm text-green-600">
+                                                            <CheckCircle2 className="h-4 w-4" />
+                                                            <span>Email verified successfully</span>
+                                                        </div>
+                                                    )}
+                                                    {currentEmail.toLowerCase() !== originalEmail.toLowerCase() && !emailVerified && !otpSent && (
+                                                        <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-500 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md p-2">
+                                                            <AlertCircle className="h-4 w-4" />
+                                                            <span>Please verify your new email address before saving changes.</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <InputError message={errors.email} />
                                             </div>
                                         </div>
@@ -275,7 +465,7 @@ export default function Profile({
                                             </Transition>
 
                                             <Button
-                                                disabled={processing}
+                                                disabled={processing || (currentEmail.toLowerCase() !== originalEmail.toLowerCase() && !emailVerified && !otpSent)}
                                                 data-test="update-profile-button"
                                                 size="lg"
                                                 className="min-w-[140px] shadow-md transition-all hover:shadow-lg"

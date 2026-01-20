@@ -7,7 +7,7 @@
     
     <div style="background-color: #f9fafb; border-left: 4px solid #1a1a1a; padding: 16px; margin: 24px 0; border-radius: 4px;">
         <p style="margin: 0 0 8px 0; font-weight: 600;">Business Details:</p>
-        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Business:</strong> {{ $business->name }}</p>
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Business:</strong> {{ $businessData->name }}</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Previous Status:</strong> {{ ucfirst($oldStatus) }}</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>New Status:</strong> {{ ucfirst($newStatus) }}</p>
         @if($reason)

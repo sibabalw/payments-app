@@ -4,9 +4,17 @@
             <tr>
                 <td align="center">
                     <div style="display: inline-block; background-color: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-                        <h1 style="color: #ffffff; font-size: 32px; font-weight: 600; margin: 0; letter-spacing: -0.5px;">
-                            Swift Pay
-                        </h1>
+                        @if(isset($business) && $business?->logo)
+                            <img
+                                src="{{ $business->logo }}"
+                                alt="{{ $business->name ?? 'Business logo' }}"
+                                style="max-width: 160px; max-height: 64px; display: block;"
+                            >
+                        @else
+                            <h1 style="color: #ffffff; font-size: 32px; font-weight: 600; margin: 0; letter-spacing: -0.5px;">
+                                {{ $business->name ?? 'Swift Pay' }}
+                            </h1>
+                        @endif
                     </div>
                 </td>
             </tr>

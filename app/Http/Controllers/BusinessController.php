@@ -3,21 +3,28 @@
 namespace App\Http\Controllers;
 
 use App\Mail\BusinessCreatedEmail;
+use App\Mail\BusinessEmailOtpEmail;
 use App\Mail\BusinessStatusChangedEmail;
 use App\Models\Business;
 use App\Services\AuditService;
+use App\Services\BusinessEmailOtpService;
 use App\Services\EmailService;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class BusinessController extends Controller
 {
+    use AuthorizesRequests;
+
     public function __construct(
-        protected AuditService $auditService
+        protected AuditService $auditService,
+        protected BusinessEmailOtpService $otpService
     ) {}
 
     /**
@@ -32,8 +39,34 @@ class BusinessController extends Controller
         $associated = $user->businesses()->with('owner')->get();
         $businesses = $owned->merge($associated)->unique('id')->values();
 
+        // Add important statistics to each business
+        $businessesWithStats = $businesses->map(function ($business) {
+            $logoUrl = null;
+            if ($business->logo) {
+                $logoUrl = \Illuminate\Support\Facades\Storage::disk('public')->url($business->logo);
+            }
+
+            return [
+                'id' => $business->id,
+                'name' => $business->name,
+                'logo' => $logoUrl,
+                'status' => $business->status,
+                'status_reason' => $business->status_reason,
+                'business_type' => $business->business_type,
+                'email' => $business->email,
+                'phone' => $business->phone,
+                'escrow_balance' => (float) $business->escrow_balance,
+                'employees_count' => \App\Models\Employee::where('business_id', $business->id)->count(),
+                'payment_schedules_count' => $business->paymentSchedules()->count(),
+                'payroll_schedules_count' => \App\Models\PayrollSchedule::where('business_id', $business->id)->count(),
+                'recipients_count' => \App\Models\Recipient::where('business_id', $business->id)->count(),
+                'created_at' => $business->created_at?->format('Y-m-d'),
+                'status_changed_at' => $business->status_changed_at?->format('Y-m-d H:i'),
+            ];
+        });
+
         return Inertia::render('businesses/index', [
-            'businesses' => $businesses,
+            'businesses' => $businessesWithStats,
         ]);
     }
 
@@ -43,6 +76,62 @@ class BusinessController extends Controller
     public function create(): Response
     {
         return Inertia::render('businesses/create');
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(Business $business): Response
+    {
+        $this->authorize('update', $business);
+
+        $logoUrl = null;
+        if ($business->logo) {
+            $logoUrl = Storage::disk('public')->url($business->logo);
+        }
+
+        // Check if there's a pending email change
+        $pendingEmail = session('business_email_change_'.$business->id);
+        $otpSent = session('business_email_otp_sent_'.$business->id, false);
+        $emailVerified = session('business_email_verified_'.$business->id, false);
+        $otpExpiresAt = session('business_email_otp_expires_'.$business->id);
+
+        // If OTP has expired, clear the session data
+        if ($otpSent && $otpExpiresAt && now()->isAfter($otpExpiresAt)) {
+            session()->forget([
+                'business_email_change_'.$business->id,
+                'business_email_otp_sent_'.$business->id,
+                'business_email_otp_expires_'.$business->id,
+                'business_email_verified_'.$business->id,
+            ]);
+            $pendingEmail = null;
+            $otpSent = false;
+            $emailVerified = false;
+        }
+
+        return Inertia::render('businesses/edit', [
+            'business' => [
+                'id' => $business->id,
+                'name' => $business->name,
+                'logo' => $logoUrl,
+                'business_type' => $business->business_type,
+                'registration_number' => $business->registration_number,
+                'tax_id' => $business->tax_id,
+                'email' => $business->email,
+                'phone' => $business->phone,
+                'website' => $business->website,
+                'street_address' => $business->street_address,
+                'city' => $business->city,
+                'province' => $business->province,
+                'postal_code' => $business->postal_code,
+                'country' => $business->country,
+                'description' => $business->description,
+                'contact_person_name' => $business->contact_person_name,
+            ],
+            'pendingEmail' => $pendingEmail,
+            'otpSent' => $otpSent,
+            'emailVerified' => $emailVerified,
+        ]);
     }
 
     /**
@@ -122,10 +211,130 @@ class BusinessController extends Controller
     }
 
     /**
+     * Send OTP for email verification.
+     */
+    public function sendEmailOtp(Request $request, Business $business)
+    {
+        $this->authorize('update', $business);
+
+        $validated = $request->validate([
+            'email' => 'required|email|max:255|unique:businesses,email,'.$business->id,
+        ]);
+
+        $newEmail = strtolower(trim($validated['email']));
+
+        // Check if email is actually different
+        if ($newEmail === strtolower($business->email)) {
+            return back()->withErrors(['email' => 'This is already your current email address.']);
+        }
+
+        try {
+            // Generate OTP
+            $otp = $this->otpService->generateOtp($newEmail, $business->id);
+
+            // Send OTP email
+            Mail::to($newEmail)->queue(new BusinessEmailOtpEmail($business, $newEmail, $otp));
+
+            // Store pending email in session with expiration time
+            session([
+                'business_email_change_'.$business->id => $newEmail,
+                'business_email_otp_sent_'.$business->id => true,
+                'business_email_otp_expires_'.$business->id => now()->addMinutes(10),
+            ]);
+
+            return back()->with('status', 'OTP code has been sent to your new email address. Please verify to complete the email change.');
+        } catch (\Exception $e) {
+            if (str_contains($e->getMessage(), 'Too many') || str_contains($e->getMessage(), 'rate limit')) {
+                return back()->withErrors([
+                    'email' => 'Too many OTP requests. Please wait a few minutes before requesting another code.',
+                ])->withInput();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Verify OTP for email change.
+     */
+    public function verifyEmailOtp(Request $request, Business $business)
+    {
+        $this->authorize('update', $business);
+
+        $validated = $request->validate([
+            'email' => 'required|email|max:255',
+            'otp' => 'required|string|size:6|regex:/^[0-9]{6}$/',
+        ]);
+
+        $newEmail = strtolower(trim($validated['email']));
+        $otp = $validated['otp'];
+
+        // Verify OTP
+        if (! $this->otpService->verifyOtp($newEmail, $otp, $business->id)) {
+            return back()->withErrors([
+                'otp' => 'Invalid or expired OTP code. Please request a new one.',
+            ])->withInput();
+        }
+
+        // Verify the email matches the pending email in session
+        $pendingEmail = session('business_email_change_'.$business->id);
+        if ($pendingEmail !== $newEmail) {
+            return back()->withErrors([
+                'email' => 'Email does not match the pending email change. Please request a new OTP.',
+            ])->withInput();
+        }
+
+        // Store the old email for audit
+        $oldEmail = $business->email;
+
+        // Immediately update the business email
+        $business->update(['email' => $newEmail]);
+
+        // Log the email change
+        $this->auditService->log(
+            'business.email_changed',
+            $business,
+            [
+                'old_email' => $oldEmail,
+                'new_email' => $newEmail,
+            ]
+        );
+
+        // Clear all email change related session data
+        session()->forget([
+            'business_email_change_'.$business->id,
+            'business_email_otp_sent_'.$business->id,
+            'business_email_otp_expires_'.$business->id,
+            'business_email_verified_'.$business->id,
+        ]);
+
+        return back()->with('status', 'Email updated successfully to '.$newEmail);
+    }
+
+    /**
+     * Cancel pending email OTP verification.
+     */
+    public function cancelEmailOtp(Business $business)
+    {
+        $this->authorize('update', $business);
+
+        // Clear all email change related session data
+        session()->forget([
+            'business_email_change_'.$business->id,
+            'business_email_otp_sent_'.$business->id,
+            'business_email_otp_expires_'.$business->id,
+            'business_email_verified_'.$business->id,
+        ]);
+
+        return back()->with('status', 'Email change cancelled. You can enter a new email address.');
+    }
+
+    /**
      * Update the specified resource in storage.
      */
     public function update(Request $request, Business $business)
     {
+        $this->authorize('update', $business);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
@@ -143,6 +352,21 @@ class BusinessController extends Controller
             'description' => 'nullable|string',
             'contact_person_name' => 'required|string|max:255',
         ]);
+
+        $newEmail = strtolower(trim($validated['email']));
+        $oldEmail = strtolower(trim($business->email));
+
+        // If email is changing, require OTP verification
+        if ($newEmail !== $oldEmail) {
+            $pendingEmail = session('business_email_change_'.$business->id);
+            $emailVerified = session('business_email_verified_'.$business->id, false);
+
+            if ($pendingEmail !== $newEmail || ! $emailVerified) {
+                return back()->withErrors([
+                    'email' => 'Please verify your new email address with OTP before saving changes.',
+                ])->withInput();
+            }
+        }
 
         // Store old logo path for cleanup
         $oldLogoPath = $business->logo;
@@ -165,6 +389,13 @@ class BusinessController extends Controller
                     'new' => $business->getChanges(),
                 ]);
             });
+
+            // Clear email verification session data
+            session()->forget([
+                'business_email_change_'.$business->id,
+                'business_email_otp_sent_'.$business->id,
+                'business_email_verified_'.$business->id,
+            ]);
 
             // If transaction succeeded, delete old logo (if new one was uploaded)
             if ($newLogoPath && $oldLogoPath && Storage::disk('public')->exists($oldLogoPath)) {

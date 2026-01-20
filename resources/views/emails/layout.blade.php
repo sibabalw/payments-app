@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>{{ $subject ?? 'Swift Pay' }}</title>
+    <title>{{ $subject ?? ($business->name ?? 'Swift Pay') }}</title>
     <style>
         /* Reset styles */
         body, table, td, p, a, li, blockquote {
@@ -120,7 +120,7 @@
                 <td align="center" style="padding: 20px 0;">
                     <table role="presentation" class="email-container" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; width: 100%;">
                         <!-- Header -->
-                        @include('emails.components.header', ['user' => $user ?? null])
+                        @include('emails.components.header', ['user' => $user ?? null, 'business' => $business ?? null])
 
                         <!-- Content -->
                         <tr>
@@ -130,7 +130,7 @@
                         </tr>
 
                         <!-- Footer -->
-                        @include('emails.components.footer', ['user' => $user ?? null, 'unsubscribeUrl' => $unsubscribeUrl ?? null])
+                        @include('emails.components.footer', ['user' => $user ?? null, 'business' => $business ?? null, 'unsubscribeUrl' => $unsubscribeUrl ?? null])
                     </table>
                 </td>
             </tr>

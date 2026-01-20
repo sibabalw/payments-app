@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Spinner } from '@/components/ui/spinner';
 import AuthLayout from '@/layouts/auth-layout';
 import { Head, router } from '@inertiajs/react';
@@ -31,6 +32,7 @@ export default function EmployeeTimeTracking({
 }: TimeTrackingProps) {
     const [processing, setProcessing] = useState(false);
     const [currentDuration, setCurrentDuration] = useState(hoursWorked);
+    const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
     // Update duration in real-time when signed in
     useEffect(() => {
@@ -48,21 +50,31 @@ export default function EmployeeTimeTracking({
         // Calculate initial duration
         const calculateDuration = () => {
             try {
-                // Parse the sign-in time with today's date
-                const [hours, minutes, seconds] = signInTime.split(':');
-                const signInDate = new Date(today);
-                signInDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), parseInt(seconds || '0', 10), 0);
+                // Parse the sign-in time with today's date using ISO format
+                // today is in format 'YYYY-MM-DD', signInTime is in format 'HH:mm:ss'
+                const signInDateTime = `${today}T${signInTime}`;
+                const signInDate = new Date(signInDateTime);
+                
+                // Check if date is valid
+                if (isNaN(signInDate.getTime())) {
+                    console.error('Invalid date:', signInDateTime);
+                    return;
+                }
                 
                 const now = new Date();
                 const diffMs = now.getTime() - signInDate.getTime();
                 
                 // Only update if the difference is positive (sign-in time is in the past)
-                if (diffMs > 0) {
+                if (diffMs >= 0) {
                     const diffHours = diffMs / (1000 * 60 * 60);
                     setCurrentDuration(Math.max(0, diffHours));
+                } else {
+                    // If sign-in time is in the future (shouldn't happen), set to 0
+                    setCurrentDuration(0);
                 }
             } catch (error) {
                 console.error('Error calculating duration:', error);
+                setCurrentDuration(0);
             }
         };
 
@@ -93,7 +105,12 @@ export default function EmployeeTimeTracking({
         });
     };
 
-    const handleSignOut = () => {
+    const handleSignOutClick = () => {
+        setShowSignOutConfirm(true);
+    };
+
+    const handleSignOutConfirm = () => {
+        setShowSignOutConfirm(false);
         setProcessing(true);
         router.post('/employee/time-tracking/sign-out', {}, {
             preserveScroll: false,
@@ -118,8 +135,20 @@ export default function EmployeeTimeTracking({
     };
 
     const formatHours = (hours: number) => {
-        const h = Math.floor(hours);
-        const m = Math.floor((hours - h) * 60);
+        if (hours < 0) {
+            return '0h 0m';
+        }
+        
+        const totalMinutes = Math.floor(hours * 60);
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        
+        if (h === 0 && m === 0) {
+            // Show seconds if less than a minute
+            const totalSeconds = Math.floor(hours * 3600);
+            return totalSeconds > 0 ? `${totalSeconds}s` : '0s';
+        }
+        
         return `${h}h ${m}m`;
     };
 
@@ -193,7 +222,7 @@ export default function EmployeeTimeTracking({
                                 <div className="flex-1">
                                     <p className="text-sm font-medium text-muted-foreground">Time Signed In</p>
                                     <p className="text-2xl font-bold text-primary">
-                                        {currentDuration > 0 ? formatHours(currentDuration) : '0h 0m'}
+                                        {formatHours(currentDuration)}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-1">
                                         Started at {formatTime(signInTime)}
@@ -205,7 +234,7 @@ export default function EmployeeTimeTracking({
                         <div className="pt-4">
                             {isSignedIn ? (
                                 <Button
-                                    onClick={handleSignOut}
+                                    onClick={handleSignOutClick}
                                     variant="destructive"
                                     className="w-full"
                                     size="lg"
@@ -244,6 +273,18 @@ export default function EmployeeTimeTracking({
                     </button>
                 </div>
             </div>
+
+            {/* Sign Out Confirmation Dialog */}
+            <ConfirmationDialog
+                open={showSignOutConfirm}
+                onOpenChange={setShowSignOutConfirm}
+                onConfirm={handleSignOutConfirm}
+                title="Are you sure you want to sign out?"
+                description="Your current session will be recorded. Once you sign out, you will not be able to sign in again today. You can only sign in once per day."
+                confirmText="Yes, Sign Out"
+                variant="destructive"
+                processing={processing}
+            />
         </AuthLayout>
     );
 }

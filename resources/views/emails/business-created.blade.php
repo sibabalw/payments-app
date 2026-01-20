@@ -7,14 +7,14 @@
     
     <div style="background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; margin: 24px 0; border-radius: 4px;">
         <p style="margin: 0 0 8px 0; font-weight: 600; color: #166534;">Business Details:</p>
-        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Name:</strong> {{ $business->name }}</p>
-        @if($business->email)
-        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Email:</strong> {{ $business->email }}</p>
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Name:</strong> {{ $businessData->name }}</p>
+        @if($businessData->email)
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Email:</strong> {{ $businessData->email }}</p>
         @endif
-        @if($business->phone)
-        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Phone:</strong> {{ $business->phone }}</p>
+        @if($businessData->phone)
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Phone:</strong> {{ $businessData->phone }}</p>
         @endif
-        <p style="margin: 0; color: #4a4a4a;"><strong>Status:</strong> {{ ucfirst($business->status) }}</p>
+        <p style="margin: 0; color: #4a4a4a;"><strong>Status:</strong> {{ ucfirst($businessData->status) }}</p>
     </div>
     
     <p>You can now start using Swift Pay with this business:</p>

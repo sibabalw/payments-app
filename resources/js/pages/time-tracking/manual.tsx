@@ -1,4 +1,5 @@
 import InputError from '@/components/input-error';
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,8 @@ export default function TimeTrackingManual({ employees, businesses, selectedBusi
     const [date, setDate] = useState(selectedDate || new Date().toISOString().split('T')[0]);
 
     const [editingEntry, setEditingEntry] = useState<any>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [entryToDelete, setEntryToDelete] = useState<number | null>(null);
 
     const { data, setData, post, put, delete: destroy, processing, errors, reset } = useForm({
         employee_id: '' as string | number,
@@ -83,11 +86,18 @@ export default function TimeTrackingManual({ employees, businesses, selectedBusi
     };
 
     const handleDelete = (entryId: number) => {
-        if (confirm('Are you sure you want to delete this time entry?')) {
-            destroy(`/time-tracking/entries/${String(entryId)}`, {
+        setEntryToDelete(entryId);
+        setDeleteConfirmOpen(true);
+    };
+
+    const confirmDelete = () => {
+        if (entryToDelete) {
+            destroy(`/time-tracking/entries/${String(entryToDelete)}`, {
                 preserveScroll: true,
                 onSuccess: () => {
                     router.reload({ only: ['entries'] });
+                    setDeleteConfirmOpen(false);
+                    setEntryToDelete(null);
                 },
             });
         }
@@ -301,6 +311,17 @@ export default function TimeTrackingManual({ employees, businesses, selectedBusi
                     </Card>
                 </div>
             </div>
+
+            <ConfirmationDialog
+                open={deleteConfirmOpen}
+                onOpenChange={setDeleteConfirmOpen}
+                onConfirm={confirmDelete}
+                title="Are you sure you want to delete this time entry?"
+                description="This action cannot be undone. The time entry will be permanently deleted."
+                confirmText="Delete"
+                variant="destructive"
+                processing={processing}
+            />
         </AppLayout>
     );
 }

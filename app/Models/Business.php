@@ -89,6 +89,11 @@ class Business extends Model
         return $this->hasMany(LeaveEntry::class);
     }
 
+    public function templates(): HasMany
+    {
+        return $this->hasMany(BusinessTemplate::class);
+    }
+
     /**
      * Check if business is active
      */

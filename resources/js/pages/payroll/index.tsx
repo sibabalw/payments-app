@@ -1,9 +1,11 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
+import { useState } from 'react';
 import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -24,12 +26,31 @@ function formatNextRunDate(dateString: string): string {
 }
 
 export default function PayrollIndex({ schedules, filters }: any) {
+    const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+    const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
+
     const handlePause = (id: number) => {
         router.post(`/payroll/${id}/pause`);
     };
 
     const handleResume = (id: number) => {
         router.post(`/payroll/${id}/resume`);
+    };
+
+    const handleCancel = (id: number) => {
+        setScheduleToCancel(id);
+        setCancelConfirmOpen(true);
+    };
+
+    const confirmCancel = () => {
+        if (scheduleToCancel) {
+            router.post(`/payroll/${scheduleToCancel}/cancel`, {
+                onSuccess: () => {
+                    setCancelConfirmOpen(false);
+                    setScheduleToCancel(null);
+                },
+            });
+        }
     };
 
     return (
@@ -116,11 +137,7 @@ export default function PayrollIndex({ schedules, filters }: any) {
                                                 </Button>
                                             )}
                                             {schedule.status !== 'cancelled' && (
-                                                <Button variant="outline" size="sm" onClick={() => {
-                                                    if (confirm('Are you sure you want to cancel this schedule?')) {
-                                                        router.post(`/payroll/${schedule.id}/cancel`);
-                                                    }
-                                                }}>
+                                                <Button variant="outline" size="sm" onClick={() => handleCancel(schedule.id)}>
                                                     Cancel
                                                 </Button>
                                             )}
@@ -146,6 +163,16 @@ export default function PayrollIndex({ schedules, filters }: any) {
                     </Card>
                 )}
             </div>
+
+            <ConfirmationDialog
+                open={cancelConfirmOpen}
+                onOpenChange={setCancelConfirmOpen}
+                onConfirm={confirmCancel}
+                title="Are you sure you want to cancel this schedule?"
+                description="This action cannot be undone. The payroll schedule will be cancelled and no further payroll will be processed."
+                confirmText="Cancel Schedule"
+                variant="destructive"
+            />
         </AppLayout>
     );
 }

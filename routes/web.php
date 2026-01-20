@@ -68,6 +68,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('dashboard', function () {
         $user = auth()->user();
+        // Get frequency - check for chart-specific frequencies first, then global
+        $trendsFrequency = request()->get('trends_frequency') ?? request()->get('frequency', 'monthly');
+        $successRateFrequency = request()->get('successRate_frequency') ?? request()->get('frequency', 'monthly');
+        $dailyFrequency = request()->get('daily_frequency') ?? request()->get('frequency', 'monthly');
+        $weeklyFrequency = request()->get('weekly_frequency') ?? request()->get('frequency', 'monthly');
+        $frequency = request()->get('frequency', 'monthly'); // Global frequency for charts without specific override
 
         // If user hasn't completed onboarding, redirect to onboarding
         if (! $user->onboarding_completed_at) {
@@ -94,17 +100,28 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         $userBusinessIds = $user->businesses()->pluck('businesses.id');
 
-        $query = \App\Models\PaymentSchedule::query();
+        // Payment schedules
+        $paymentScheduleQuery = \App\Models\PaymentSchedule::query();
         if ($businessId) {
-            $query->where('business_id', $businessId);
+            $paymentScheduleQuery->where('business_id', $businessId);
         } else {
-            $query->whereIn('business_id', $userBusinessIds);
+            $paymentScheduleQuery->whereIn('business_id', $userBusinessIds);
         }
 
-        $totalSchedules = $query->count();
-        $activeSchedules = (clone $query)->where('status', 'active')->count();
+        // Payroll schedules
+        $payrollScheduleQuery = \App\Models\PayrollSchedule::query();
+        if ($businessId) {
+            $payrollScheduleQuery->where('business_id', $businessId);
+        } else {
+            $payrollScheduleQuery->whereIn('business_id', $userBusinessIds);
+        }
 
-        $jobQuery = \App\Models\PaymentJob::query()
+        $totalSchedules = $paymentScheduleQuery->count() + $payrollScheduleQuery->count();
+        $activeSchedules = (clone $paymentScheduleQuery)->where('status', 'active')->count()
+            + (clone $payrollScheduleQuery)->where('status', 'active')->count();
+
+        // Payment jobs
+        $paymentJobQuery = \App\Models\PaymentJob::query()
             ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
                 if ($businessId) {
                     $q->where('business_id', $businessId);
@@ -113,21 +130,75 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 }
             });
 
-        $pendingJobs = (clone $jobQuery)->where('status', 'pending')->count();
-        $processingJobs = (clone $jobQuery)->where('status', 'processing')->count();
-        $succeededJobs = (clone $jobQuery)->where('status', 'succeeded')->count();
-        $failedJobs = (clone $jobQuery)->where('status', 'failed')->count();
+        // Payroll jobs
+        $payrollJobQuery = \App\Models\PayrollJob::query()
+            ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            });
 
-        $upcomingPayments = \App\Models\PaymentSchedule::query()
+        $pendingJobs = (clone $paymentJobQuery)->where('status', 'pending')->count()
+            + (clone $payrollJobQuery)->where('status', 'pending')->count();
+        $processingJobs = (clone $paymentJobQuery)->where('status', 'processing')->count()
+            + (clone $payrollJobQuery)->where('status', 'processing')->count();
+        $succeededJobs = (clone $paymentJobQuery)->where('status', 'succeeded')->count()
+            + (clone $payrollJobQuery)->where('status', 'succeeded')->count();
+        $failedJobs = (clone $paymentJobQuery)->where('status', 'failed')->count()
+            + (clone $payrollJobQuery)->where('status', 'failed')->count();
+
+        // Get upcoming payment schedules
+        $upcomingPaymentSchedules = \App\Models\PaymentSchedule::query()
             ->whereIn('business_id', $businessId ? [$businessId] : $userBusinessIds)
             ->where('status', 'active')
             ->where('next_run_at', '>=', now())
             ->orderBy('next_run_at')
-            ->limit(10)
-            ->with(['business', 'receivers'])
-            ->get();
+            ->with(['business', 'recipients'])
+            ->get()
+            ->map(function ($schedule) {
+                return [
+                    'id' => $schedule->id,
+                    'name' => $schedule->name,
+                    'next_run_at' => $schedule->next_run_at,
+                    'amount' => $schedule->amount,
+                    'currency' => $schedule->currency,
+                    'type' => 'payment',
+                    'recipients_count' => $schedule->recipients()->count(),
+                ];
+            })
+            ->toArray();
 
-        $recentJobs = \App\Models\PaymentJob::query()
+        // Get upcoming payroll schedules
+        $upcomingPayrollSchedules = \App\Models\PayrollSchedule::query()
+            ->whereIn('business_id', $businessId ? [$businessId] : $userBusinessIds)
+            ->where('status', 'active')
+            ->where('next_run_at', '>=', now())
+            ->orderBy('next_run_at')
+            ->with(['business', 'employees'])
+            ->get()
+            ->map(function ($schedule) {
+                return [
+                    'id' => $schedule->id,
+                    'name' => $schedule->name,
+                    'next_run_at' => $schedule->next_run_at,
+                    'amount' => null, // Payroll doesn't have a fixed amount
+                    'currency' => 'ZAR', // Default currency
+                    'type' => 'payroll',
+                    'employees_count' => $schedule->employees()->count(),
+                ];
+            })
+            ->toArray();
+
+        // Merge arrays and convert to collection, sort by next_run_at, limit to 6
+        $upcomingPayments = collect(array_merge($upcomingPaymentSchedules, $upcomingPayrollSchedules))
+            ->sortBy('next_run_at')
+            ->take(6)
+            ->values();
+
+        // Get recent payment jobs
+        $recentPaymentJobs = \App\Models\PaymentJob::query()
             ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
                 if ($businessId) {
                     $q->where('business_id', $businessId);
@@ -135,10 +206,54 @@ Route::middleware(['auth', 'verified'])->group(function () {
                     $q->whereIn('business_id', $userBusinessIds);
                 }
             })
-            ->with(['paymentSchedule', 'receiver'])
+            ->with(['paymentSchedule', 'recipient'])
             ->latest()
-            ->limit(10)
-            ->get();
+            ->get()
+            ->map(function ($job) {
+                return [
+                    'id' => $job->id,
+                    'name' => $job->recipient?->name ?? 'Unknown',
+                    'schedule_name' => $job->paymentSchedule?->name ?? 'Unknown',
+                    'amount' => $job->amount,
+                    'currency' => $job->currency,
+                    'status' => $job->status,
+                    'processed_at' => $job->processed_at,
+                    'type' => 'payment',
+                ];
+            })
+            ->toArray();
+
+        // Get recent payroll jobs
+        $recentPayrollJobs = \App\Models\PayrollJob::query()
+            ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            })
+            ->with(['payrollSchedule', 'employee'])
+            ->latest()
+            ->get()
+            ->map(function ($job) {
+                return [
+                    'id' => $job->id,
+                    'name' => $job->employee?->name ?? 'Unknown',
+                    'schedule_name' => $job->payrollSchedule?->name ?? 'Unknown',
+                    'amount' => $job->net_salary,
+                    'currency' => $job->currency,
+                    'status' => $job->status,
+                    'processed_at' => $job->processed_at,
+                    'type' => 'payroll',
+                ];
+            })
+            ->toArray();
+
+        // Merge arrays and convert to collection, sort by processed_at, limit to 6
+        $recentJobs = collect(array_merge($recentPaymentJobs, $recentPayrollJobs))
+            ->sortByDesc('processed_at')
+            ->take(4)
+            ->values();
 
         // Get escrow balance for selected business (or first business if none selected)
         $escrowBalance = 0;
@@ -162,13 +277,389 @@ Route::middleware(['auth', 'verified'])->group(function () {
             $selectedBusiness = $user->ownedBusinesses()->first();
         }
 
+        $businessInfo = null;
         if ($selectedBusiness) {
             $escrowService = app(\App\Services\EscrowService::class);
             $escrowBalance = $escrowService->getAvailableBalance($selectedBusiness);
+
+            $logoUrl = null;
+            if ($selectedBusiness->logo) {
+                $logoUrl = \Illuminate\Support\Facades\Storage::disk('public')->url($selectedBusiness->logo);
+            }
+
+            $businessInfo = [
+                'id' => $selectedBusiness->id,
+                'name' => $selectedBusiness->name,
+                'logo' => $logoUrl,
+                'status' => $selectedBusiness->status,
+                'business_type' => $selectedBusiness->business_type,
+                'email' => $selectedBusiness->email,
+                'phone' => $selectedBusiness->phone,
+                'escrow_balance' => (float) $escrowBalance,
+                'employees_count' => \App\Models\Employee::where('business_id', $selectedBusiness->id)->count(),
+                'payment_schedules_count' => $selectedBusiness->paymentSchedules()->count(),
+                'payroll_schedules_count' => \App\Models\PayrollSchedule::where('business_id', $selectedBusiness->id)->count(),
+                'recipients_count' => \App\Models\Recipient::where('business_id', $selectedBusiness->id)->count(),
+            ];
         }
 
         // Calculate total businesses count (both relationships)
         $businessesCount = $user->businesses()->count() + $user->ownedBusinesses()->count();
+
+        // Financial statistics for current month
+        $currentMonthStart = now()->startOfMonth();
+        $currentMonthEnd = now()->endOfMonth();
+
+        $monthlyPaymentJobs = (clone $paymentJobQuery)
+            ->whereBetween('processed_at', [$currentMonthStart, $currentMonthEnd])
+            ->get();
+
+        $monthlyPayrollJobs = (clone $payrollJobQuery)
+            ->whereBetween('processed_at', [$currentMonthStart, $currentMonthEnd])
+            ->get();
+
+        $totalPaymentsThisMonth = $monthlyPaymentJobs->where('status', 'succeeded')->sum('amount');
+        $totalPayrollThisMonth = $monthlyPayrollJobs->where('status', 'succeeded')->sum('net_salary');
+        $totalFeesThisMonth = $monthlyPaymentJobs->where('status', 'succeeded')->sum('fee')
+            + $monthlyPayrollJobs->where('status', 'succeeded')->sum('fee');
+
+        $totalJobsThisMonth = $monthlyPaymentJobs->count() + $monthlyPayrollJobs->count();
+        $succeededJobsThisMonth = $monthlyPaymentJobs->where('status', 'succeeded')->count()
+            + $monthlyPayrollJobs->where('status', 'succeeded')->count();
+        $successRate = $totalJobsThisMonth > 0 ? round(($succeededJobsThisMonth / $totalJobsThisMonth) * 100, 1) : 0;
+
+        // Helper function to generate periods based on frequency
+        $generatePeriods = function ($freq) {
+            $periods = [];
+            $labelKey = '';
+            switch ($freq) {
+                case 'weekly':
+                    $periodCount = 12; // Last 12 weeks
+                    for ($i = $periodCount - 1; $i >= 0; $i--) {
+                        $weekStart = now()->subWeeks($i)->startOfWeek();
+                        $weekEnd = now()->subWeeks($i)->endOfWeek();
+                        $periods[] = [
+                            'start' => $weekStart,
+                            'end' => $weekEnd,
+                            'label' => $weekStart->format('M d').' - '.$weekEnd->format('M d'),
+                        ];
+                    }
+                    $labelKey = 'week';
+                    break;
+                case 'monthly':
+                    $periodCount = 6; // Last 6 months
+                    for ($i = $periodCount - 1; $i >= 0; $i--) {
+                        $monthStart = now()->subMonths($i)->startOfMonth();
+                        $monthEnd = now()->subMonths($i)->endOfMonth();
+                        $periods[] = [
+                            'start' => $monthStart,
+                            'end' => $monthEnd,
+                            'label' => $monthStart->format('M Y'),
+                        ];
+                    }
+                    $labelKey = 'month';
+                    break;
+                case 'quarterly':
+                    $periodCount = 8; // Last 8 quarters (2 years)
+                    for ($i = $periodCount - 1; $i >= 0; $i--) {
+                        $quarterStart = now()->subQuarters($i)->startOfQuarter();
+                        $quarterEnd = now()->subQuarters($i)->endOfQuarter();
+                        $quarterNum = ceil($quarterStart->month / 3);
+                        $periods[] = [
+                            'start' => $quarterStart,
+                            'end' => $quarterEnd,
+                            'label' => 'Q'.$quarterNum.' '.$quarterStart->format('Y'),
+                        ];
+                    }
+                    $labelKey = 'quarter';
+                    break;
+                case 'yearly':
+                    $periodCount = 5; // Last 5 years
+                    for ($i = $periodCount - 1; $i >= 0; $i--) {
+                        $yearStart = now()->subYears($i)->startOfYear();
+                        $yearEnd = now()->subYears($i)->endOfYear();
+                        $periods[] = [
+                            'start' => $yearStart,
+                            'end' => $yearEnd,
+                            'label' => $yearStart->format('Y'),
+                        ];
+                    }
+                    $labelKey = 'year';
+                    break;
+            }
+
+            return ['periods' => $periods, 'labelKey' => $labelKey];
+        };
+
+        // Generate trends based on trends frequency
+        $trendsData = $generatePeriods($trendsFrequency);
+        $trendsPeriods = $trendsData['periods'];
+        $trendsLabelKey = $trendsData['labelKey'];
+        $monthlyTrends = [];
+
+        foreach ($trendsPeriods as $period) {
+            $periodPaymentJobs = \App\Models\PaymentJob::query()
+                ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$period['start'], $period['end']])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $periodPayrollJobs = \App\Models\PayrollJob::query()
+                ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$period['start'], $period['end']])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $monthlyTrends[] = [
+                $trendsLabelKey => $period['label'],
+                'payments' => (float) $periodPaymentJobs->sum('amount'),
+                'payroll' => (float) $periodPayrollJobs->sum('net_salary'),
+                'total' => (float) ($periodPaymentJobs->sum('amount') + $periodPayrollJobs->sum('net_salary')),
+            ];
+        }
+
+        // Status breakdown for charts
+        $statusBreakdown = [
+            'succeeded' => $succeededJobs,
+            'failed' => $failedJobs,
+            'pending' => $pendingJobs,
+            'processing' => $processingJobs,
+        ];
+
+        // Payment vs Payroll comparison
+        $paymentJobsCount = (clone $paymentJobQuery)->where('status', 'succeeded')->count();
+        $payrollJobsCount = (clone $payrollJobQuery)->where('status', 'succeeded')->count();
+
+        // Daily trends for last 30 days
+        $dailyTrends = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $dayStart = now()->subDays($i)->startOfDay();
+            $dayEnd = now()->subDays($i)->endOfDay();
+            $dayName = $dayStart->format('M d');
+
+            $dayPaymentJobs = \App\Models\PaymentJob::query()
+                ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$dayStart, $dayEnd])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $dayPayrollJobs = \App\Models\PayrollJob::query()
+                ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$dayStart, $dayEnd])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $dailyTrends[] = [
+                'date' => $dayName,
+                'payments' => (float) $dayPaymentJobs->sum('amount'),
+                'payroll' => (float) $dayPayrollJobs->sum('net_salary'),
+                'total' => (float) ($dayPaymentJobs->sum('amount') + $dayPayrollJobs->sum('net_salary')),
+                'jobs_count' => $dayPaymentJobs->count() + $dayPayrollJobs->count(),
+            ];
+        }
+
+        // Generate success rate trends based on success rate frequency
+        $successRateData = $generatePeriods($successRateFrequency);
+        $successRatePeriods = $successRateData['periods'];
+        $successRateLabelKey = $successRateData['labelKey'];
+        $successRateTrends = [];
+
+        foreach ($successRatePeriods as $period) {
+            $periodLabel = $period['label'];
+
+            $periodAllPaymentJobs = \App\Models\PaymentJob::query()
+                ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$period['start'], $period['end']])
+                ->get();
+
+            $periodAllPayrollJobs = \App\Models\PayrollJob::query()
+                ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$period['start'], $period['end']])
+                ->get();
+
+            $totalPeriodJobs = $periodAllPaymentJobs->count() + $periodAllPayrollJobs->count();
+            $succeededPeriodJobs = $periodAllPaymentJobs->where('status', 'succeeded')->count()
+                + $periodAllPayrollJobs->where('status', 'succeeded')->count();
+            $failedPeriodJobs = $periodAllPaymentJobs->where('status', 'failed')->count()
+                + $periodAllPayrollJobs->where('status', 'failed')->count();
+
+            $successRateTrends[] = [
+                $successRateLabelKey => $periodLabel,
+                'success_rate' => $totalPeriodJobs > 0 ? round(($succeededPeriodJobs / $totalPeriodJobs) * 100, 1) : 0,
+                'succeeded' => $succeededPeriodJobs,
+                'failed' => $failedPeriodJobs,
+                'total' => $totalPeriodJobs,
+            ];
+        }
+
+        // Top recipients by volume (last 30 days)
+        $topRecipients = \App\Models\PaymentJob::query()
+            ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            })
+            ->whereBetween('processed_at', [now()->subDays(30)->startOfDay(), now()->endOfDay()])
+            ->where('status', 'succeeded')
+            ->with('recipient')
+            ->get()
+            ->groupBy('recipient_id')
+            ->map(function ($jobs, $recipientId) {
+                $recipient = $jobs->first()->recipient;
+
+                return [
+                    'name' => $recipient?->name ?? 'Unknown',
+                    'total_amount' => (float) $jobs->sum('amount'),
+                    'jobs_count' => $jobs->count(),
+                    'average_amount' => (float) $jobs->avg('amount'),
+                ];
+            })
+            ->sortByDesc('total_amount')
+            ->take(10)
+            ->values();
+
+        // Top employees by volume (last 30 days)
+        $topEmployees = \App\Models\PayrollJob::query()
+            ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            })
+            ->whereBetween('processed_at', [now()->subDays(30)->startOfDay(), now()->endOfDay()])
+            ->where('status', 'succeeded')
+            ->with('employee')
+            ->get()
+            ->groupBy('employee_id')
+            ->map(function ($jobs, $employeeId) {
+                $employee = $jobs->first()->employee;
+
+                return [
+                    'name' => $employee?->name ?? 'Unknown',
+                    'total_amount' => (float) $jobs->sum('net_salary'),
+                    'jobs_count' => $jobs->count(),
+                    'average_amount' => (float) $jobs->avg('net_salary'),
+                ];
+            })
+            ->sortByDesc('total_amount')
+            ->take(10)
+            ->values();
+
+        // This month vs last month comparison
+        $lastMonthStart = now()->subMonth()->startOfMonth();
+        $lastMonthEnd = now()->subMonth()->endOfMonth();
+
+        $lastMonthPaymentJobs = \App\Models\PaymentJob::query()
+            ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            })
+            ->whereBetween('processed_at', [$lastMonthStart, $lastMonthEnd])
+            ->where('status', 'succeeded')
+            ->get();
+
+        $lastMonthPayrollJobs = \App\Models\PayrollJob::query()
+            ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                if ($businessId) {
+                    $q->where('business_id', $businessId);
+                } else {
+                    $q->whereIn('business_id', $userBusinessIds);
+                }
+            })
+            ->whereBetween('processed_at', [$lastMonthStart, $lastMonthEnd])
+            ->where('status', 'succeeded')
+            ->get();
+
+        $lastMonthTotal = (float) ($lastMonthPaymentJobs->sum('amount') + $lastMonthPayrollJobs->sum('net_salary'));
+        $thisMonthTotal = (float) ($totalPaymentsThisMonth + $totalPayrollThisMonth);
+        $monthOverMonthGrowth = $lastMonthTotal > 0
+            ? round((($thisMonthTotal - $lastMonthTotal) / $lastMonthTotal) * 100, 1)
+            : 0;
+
+        // Average transaction amounts
+        $avgPaymentAmount = $monthlyPaymentJobs->where('status', 'succeeded')->avg('amount') ?? 0;
+        $avgPayrollAmount = $monthlyPayrollJobs->where('status', 'succeeded')->avg('net_salary') ?? 0;
+
+        // Weekly trends (last 12 weeks)
+        $weeklyTrends = [];
+        for ($i = 11; $i >= 0; $i--) {
+            $weekStart = now()->subWeeks($i)->startOfWeek();
+            $weekEnd = now()->subWeeks($i)->endOfWeek();
+            $weekName = $weekStart->format('M d').' - '.$weekEnd->format('M d');
+
+            $weekPaymentJobs = \App\Models\PaymentJob::query()
+                ->whereHas('paymentSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$weekStart, $weekEnd])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $weekPayrollJobs = \App\Models\PayrollJob::query()
+                ->whereHas('payrollSchedule', function ($q) use ($businessId, $userBusinessIds) {
+                    if ($businessId) {
+                        $q->where('business_id', $businessId);
+                    } else {
+                        $q->whereIn('business_id', $userBusinessIds);
+                    }
+                })
+                ->whereBetween('processed_at', [$weekStart, $weekEnd])
+                ->where('status', 'succeeded')
+                ->get();
+
+            $weeklyTrends[] = [
+                'week' => $weekName,
+                'payments' => (float) $weekPaymentJobs->sum('amount'),
+                'payroll' => (float) $weekPayrollJobs->sum('net_salary'),
+                'total' => (float) ($weekPaymentJobs->sum('amount') + $weekPayrollJobs->sum('net_salary')),
+            ];
+        }
 
         return Inertia::render('dashboard', [
             'metrics' => [
@@ -179,10 +670,33 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 'succeeded_jobs' => $succeededJobs,
                 'failed_jobs' => $failedJobs,
             ],
+            'financial' => [
+                'total_payments_this_month' => (float) $totalPaymentsThisMonth,
+                'total_payroll_this_month' => (float) $totalPayrollThisMonth,
+                'total_fees_this_month' => (float) $totalFeesThisMonth,
+                'total_processed_this_month' => (float) ($totalPaymentsThisMonth + $totalPayrollThisMonth),
+                'success_rate' => $successRate,
+                'total_jobs_this_month' => $totalJobsThisMonth,
+            ],
+            'monthlyTrends' => $monthlyTrends,
+            'statusBreakdown' => $statusBreakdown,
+            'jobTypeComparison' => [
+                'payments' => $paymentJobsCount,
+                'payroll' => $payrollJobsCount,
+            ],
+            'dailyTrends' => $dailyTrends,
+            'weeklyTrends' => $weeklyTrends,
+            'successRateTrends' => $successRateTrends,
+            'topRecipients' => $topRecipients,
+            'topEmployees' => $topEmployees,
+            'monthOverMonthGrowth' => $monthOverMonthGrowth,
+            'avgPaymentAmount' => (float) $avgPaymentAmount,
+            'avgPayrollAmount' => (float) $avgPayrollAmount,
             'upcomingPayments' => $upcomingPayments,
             'recentJobs' => $recentJobs,
             'escrowBalance' => $escrowBalance,
             'selectedBusiness' => $selectedBusiness ? ['id' => $selectedBusiness->id, 'name' => $selectedBusiness->name] : null,
+            'businessInfo' => $businessInfo,
             'businessesCount' => $businessesCount,
         ]);
     })->name('dashboard');
@@ -190,6 +704,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Business routes
     Route::resource('businesses', \App\Http\Controllers\BusinessController::class)->except(['show', 'create', 'edit']);
     Route::get('businesses/create', [\App\Http\Controllers\BusinessController::class, 'create'])->name('businesses.create');
+    Route::get('businesses/{business}/edit', [\App\Http\Controllers\BusinessController::class, 'edit'])->name('businesses.edit');
+    Route::post('businesses/{business}/send-email-otp', [\App\Http\Controllers\BusinessController::class, 'sendEmailOtp'])->name('businesses.send-email-otp');
+    Route::post('businesses/{business}/verify-email-otp', [\App\Http\Controllers\BusinessController::class, 'verifyEmailOtp'])->name('businesses.verify-email-otp');
+    Route::post('businesses/{business}/cancel-email-otp', [\App\Http\Controllers\BusinessController::class, 'cancelEmailOtp'])->name('businesses.cancel-email-otp');
     Route::post('businesses/{business}/switch', [\App\Http\Controllers\BusinessController::class, 'switch'])->name('businesses.switch');
     Route::post('businesses/{business}/status', [\App\Http\Controllers\BusinessController::class, 'updateStatus'])->name('businesses.status');
     Route::get('businesses/{business}/bank-account', [\App\Http\Controllers\BusinessController::class, 'editBankAccount'])->name('businesses.bank-account.edit');
@@ -223,14 +741,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('leave', \App\Http\Controllers\LeaveController::class);
 
     // Payment schedule routes
+    // Payment job routes (must be before resource route to avoid conflict)
+    Route::get('payments/jobs', [\App\Http\Controllers\PaymentJobController::class, 'index'])->name('payments.jobs');
+    Route::get('payments/jobs/{paymentJob}', [\App\Http\Controllers\PaymentJobController::class, 'show'])->name('payments.jobs.show');
+
     Route::resource('payments', \App\Http\Controllers\PaymentScheduleController::class);
     Route::post('payments/{paymentSchedule}/pause', [\App\Http\Controllers\PaymentScheduleController::class, 'pause'])->name('payments.pause');
     Route::post('payments/{paymentSchedule}/resume', [\App\Http\Controllers\PaymentScheduleController::class, 'resume'])->name('payments.resume');
     Route::post('payments/{paymentSchedule}/cancel', [\App\Http\Controllers\PaymentScheduleController::class, 'cancel'])->name('payments.cancel');
-
-    // Payment job routes
-    Route::get('payments/jobs', [\App\Http\Controllers\PaymentJobController::class, 'index'])->name('payments.jobs');
-    Route::get('payments/jobs/{paymentJob}', [\App\Http\Controllers\PaymentJobController::class, 'show'])->name('payments.jobs.show');
 
     // Payroll routes
     Route::get('payroll', [\App\Http\Controllers\PayrollController::class, 'index'])->name('payroll.index');
@@ -262,6 +780,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index'])->name('audit-logs.index');
     Route::get('audit-logs/{auditLog}', [\App\Http\Controllers\AuditLogController::class, 'show'])->name('audit-logs.show');
 
+    // Template routes
+    Route::prefix('templates')->name('templates.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\TemplateController::class, 'index'])->name('index');
+        Route::get('/{type}', [\App\Http\Controllers\TemplateController::class, 'show'])->name('show');
+        Route::put('/{type}', [\App\Http\Controllers\TemplateController::class, 'update'])->name('update');
+        Route::post('/{type}/reset', [\App\Http\Controllers\TemplateController::class, 'reset'])->name('reset');
+        Route::get('/{type}/preview', [\App\Http\Controllers\TemplateController::class, 'preview'])->name('preview');
+        Route::post('/{type}/preset', [\App\Http\Controllers\TemplateController::class, 'loadPreset'])->name('load-preset');
+    });
+
     // Escrow deposit routes
     Route::get('escrow/deposit', [\App\Http\Controllers\EscrowDepositController::class, 'index'])->name('escrow.deposit.index');
     Route::post('escrow/deposit', [\App\Http\Controllers\EscrowDepositController::class, 'store'])->name('escrow.deposit.store');
@@ -279,6 +807,48 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/payments/{paymentJob}/fee-release', [\App\Http\Controllers\Admin\EscrowController::class, 'recordFeeRelease'])->name('payments.fee-release');
         Route::post('/payments/{paymentJob}/fund-return', [\App\Http\Controllers\Admin\EscrowController::class, 'recordFundReturn'])->name('payments.fund-return');
         Route::get('/balances', [\App\Http\Controllers\Admin\EscrowController::class, 'viewBalances'])->name('balances');
+    });
+
+    // Compliance routes
+    Route::prefix('compliance')->name('compliance.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ComplianceController::class, 'index'])->name('index');
+
+        // UIF routes
+        Route::get('/uif', [\App\Http\Controllers\ComplianceController::class, 'uifIndex'])->name('uif.index');
+        Route::post('/uif/generate', [\App\Http\Controllers\ComplianceController::class, 'generateUI19'])->name('uif.generate');
+        Route::get('/uif/{submission}/edit', [\App\Http\Controllers\ComplianceController::class, 'editUI19'])->name('uif.edit');
+        Route::put('/uif/{submission}', [\App\Http\Controllers\ComplianceController::class, 'updateUI19'])->name('uif.update');
+        Route::get('/uif/{submission}/download', [\App\Http\Controllers\ComplianceController::class, 'downloadUI19'])->name('uif.download');
+
+        // EMP201 routes
+        Route::get('/emp201', [\App\Http\Controllers\ComplianceController::class, 'emp201Index'])->name('emp201.index');
+        Route::post('/emp201/generate', [\App\Http\Controllers\ComplianceController::class, 'generateEMP201'])->name('emp201.generate');
+        Route::get('/emp201/{submission}/edit', [\App\Http\Controllers\ComplianceController::class, 'editEMP201'])->name('emp201.edit');
+        Route::put('/emp201/{submission}', [\App\Http\Controllers\ComplianceController::class, 'updateEMP201'])->name('emp201.update');
+        Route::get('/emp201/{submission}/download', [\App\Http\Controllers\ComplianceController::class, 'downloadEMP201'])->name('emp201.download');
+
+        // IRP5 routes
+        Route::get('/irp5', [\App\Http\Controllers\ComplianceController::class, 'irp5Index'])->name('irp5.index');
+        Route::post('/irp5/generate/{employee}', [\App\Http\Controllers\ComplianceController::class, 'generateIRP5'])->name('irp5.generate');
+        Route::post('/irp5/generate-bulk', [\App\Http\Controllers\ComplianceController::class, 'generateBulkIRP5'])->name('irp5.generate-bulk');
+        Route::get('/irp5/{submission}/edit', [\App\Http\Controllers\ComplianceController::class, 'editIRP5'])->name('irp5.edit');
+        Route::put('/irp5/{submission}', [\App\Http\Controllers\ComplianceController::class, 'updateIRP5'])->name('irp5.update');
+        Route::get('/irp5/{submission}/download', [\App\Http\Controllers\ComplianceController::class, 'downloadIRP5'])->name('irp5.download');
+
+        // SARS export
+        Route::get('/sars-export', [\App\Http\Controllers\ComplianceController::class, 'sarsExport'])->name('sars.export');
+
+        // Mark as submitted
+        Route::post('/{submission}/mark-submitted', [\App\Http\Controllers\ComplianceController::class, 'markSubmitted'])->name('mark-submitted');
+    });
+
+    // AI Chat routes
+    Route::prefix('chat')->name('chat.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ChatController::class, 'index'])->name('index');
+        Route::post('/', [\App\Http\Controllers\ChatController::class, 'store'])->name('store');
+        Route::get('/{conversation}', [\App\Http\Controllers\ChatController::class, 'show'])->name('show');
+        Route::post('/{conversation}/message', [\App\Http\Controllers\ChatController::class, 'sendMessage'])->name('message');
+        Route::delete('/{conversation}', [\App\Http\Controllers\ChatController::class, 'destroy'])->name('destroy');
     });
 });
 

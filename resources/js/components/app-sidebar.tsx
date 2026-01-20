@@ -12,7 +12,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
-import { BookOpen, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText } from 'lucide-react';
+import { BookOpen, Bot, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
 
 const footerNavItems: NavItem[] = [
@@ -36,6 +36,11 @@ export function AppSidebar() {
             title: 'Dashboard',
             href: dashboard(),
             icon: LayoutGrid,
+        },
+        {
+            title: 'AI Assistant',
+            href: '/chat',
+            icon: Bot,
         },
         {
             title: 'Payments',
@@ -86,6 +91,16 @@ export function AppSidebar() {
             title: 'Audit Logs',
             href: '/audit-logs',
             icon: FileText,
+        },
+        {
+            title: 'Compliance',
+            href: '/compliance',
+            icon: Shield,
+        },
+        {
+            title: 'Templates',
+            href: '/templates',
+            icon: Palette,
         },
         {
             title: 'Businesses',

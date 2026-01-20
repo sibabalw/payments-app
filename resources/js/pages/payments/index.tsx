@@ -1,3 +1,4 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
@@ -5,6 +6,7 @@ import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
+import { useState } from 'react';
 import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -51,6 +53,9 @@ interface PaymentsIndexProps {
 }
 
 export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps) {
+    const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+    const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
+
     const handlePause = (id: number) => {
         router.post(`/payments/${id}/pause`);
     };
@@ -60,8 +65,18 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
     };
 
     const handleCancel = (id: number) => {
-        if (confirm('Are you sure you want to cancel this schedule?')) {
-            router.post(`/payments/${id}/cancel`);
+        setScheduleToCancel(id);
+        setCancelConfirmOpen(true);
+    };
+
+    const confirmCancel = () => {
+        if (scheduleToCancel) {
+            router.post(`/payments/${scheduleToCancel}/cancel`, {
+                onSuccess: () => {
+                    setCancelConfirmOpen(false);
+                    setScheduleToCancel(null);
+                },
+            });
         }
     };
 
@@ -175,6 +190,16 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                     </Card>
                 )}
             </div>
+
+            <ConfirmationDialog
+                open={cancelConfirmOpen}
+                onOpenChange={setCancelConfirmOpen}
+                onConfirm={confirmCancel}
+                title="Are you sure you want to cancel this schedule?"
+                description="This action cannot be undone. The payment schedule will be cancelled and no further payments will be processed."
+                confirmText="Cancel Schedule"
+                variant="destructive"
+            />
         </AppLayout>
     );
 }
