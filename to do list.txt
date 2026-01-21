@@ -1,0 +1,25 @@
+add ai functionality where user will log in in whatsapp and will send to our ai in our app to do something like list payroll, or create delete, ai will be via api open ai.
+add filters in list pages
+implement load more pagination to list pages
+payments page/side emails dont use business who is active in session that perfoms or own the payments authomations, in payroll this is done smoothly
+job to send email to alert that payment jobs executed successfully fails "2026-01-21 11:48:02 App\Jobs\ProcessPaymentJob ................................................................................................................................... RUNNING
+  2026-01-21 11:48:02 App\Jobs\ProcessPaymentJob .............................................................................................................................. 35.58ms DONE
+  2026-01-21 11:48:02 App\Mail\PaymentSuccessEmail ................................................................................................................................. RUNNING
+  2026-01-21 11:48:02 App\Mail\PaymentSuccessEmail ............................................................................................................................ 13.26ms FAIL" 
+
+Replace the concept of custom deductions with a unified adjustments system. The payroll system MUST calculate net salary automatically from gross salary after applying statutory deductions. Payroll execution MUST then apply adjustments, which are the only mechanism for modifying pay beyond statutory deductions. Adjustments MUST be either recurring (applied automatically on every payroll run until removed) or once-off (scoped to a single payroll period only). Adjustments MAY be defined at company level or employee level and MAY represent either deductions or additions. During payroll execution, the system MUST load and apply only the adjustments valid for the current payroll period; if no adjustments exist, payroll MUST execute using the default net salary without modification. No adjustment MUST affect any payroll period other than the one it is explicitly scoped to unless marked as recurring. we will not track user to calculate gross salary yet leave it for the future, use specified gross salary.
+
+for business switching we need some nice react reactivity flow with nice amination but now it's dull simple boring, even onboarding on dashboard users who visit for the first time show some reactivity
+
+login email i never recieve it but it always record it's sent "  2026-01-21 14:49:34 App\Listeners\SendLoginNotification .......................................................................................................................... RUNNING
+  2026-01-21 14:49:34 App\Listeners\SendLoginNotification ..................................................................................................................... 18.46ms DONE
+"
+
+Payments page pull all jobs in all businesses not in current switched to business that is in session, this is not payments problem payroll too i realised when you refresh the page it pulls data according to business but if click of menu link Payments page, payroll page maybe other pages too pull all jobs in all businesses not in current switched to business that is in session, or i think problem is somethimes when i switch while in payments page then go to payroll i realize it has switch back to last business i was when i was in payments page virse vurser to payroll page when i go to payemnt page
+
+be like an business analyst and system designer, on the front end look to simplify user work flow, to make it easier for user, less clicks and run arounds
+
+logo in emails is never shown instead i see image placeholder indicating no image was found
+
+make admins dashboard, first read what they need in current project, admin files must be separate no file manipulation, admin can deactivate a business, block it or whatever
+add notification in dashboard, they will come from admins
