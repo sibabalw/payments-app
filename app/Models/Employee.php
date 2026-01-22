@@ -84,33 +84,46 @@ class Employee extends Model
 
     /**
      * Get all deductions for this employee (company-wide + employee-specific)
+     * Optimized to use a single query with OR condition
      */
     public function getAllDeductions(): \Illuminate\Database\Eloquent\Collection
     {
-        // Company-wide deductions
-        $companyDeductions = CustomDeduction::where('business_id', $this->business_id)
-            ->whereNull('employee_id')
-            ->where('is_active', true)
-            ->get();
+        // If customDeductions are already loaded, use them with company deductions
+        if ($this->relationLoaded('customDeductions')) {
+            $companyDeductions = CustomDeduction::where('business_id', $this->business_id)
+                ->whereNull('employee_id')
+                ->where('is_active', true)
+                ->get();
 
-        // Employee-specific deductions
-        $employeeDeductions = $this->customDeductions()
-            ->where('is_active', true)
-            ->get();
+            return $companyDeductions->merge($this->customDeductions);
+        }
 
-        return $companyDeductions->merge($employeeDeductions);
+        // Otherwise, fetch all in a single query
+        return CustomDeduction::where('business_id', $this->business_id)
+            ->where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('employee_id')
+                    ->orWhere('employee_id', $this->id);
+            })
+            ->get();
     }
 
     /**
      * Check if employee is exempt from UIF
      * According to SARS: Employees working fewer than 24 hours per month are exempt
+     * Optimized to use eager loaded time entries when available
      */
     public function isUIFExempt(): bool
     {
-        // If time entries exist, calculate actual hours from time entries
-        $timeEntries = $this->timeEntries()
-            ->whereNotNull('sign_out_time')
-            ->get();
+        // Use eager loaded time entries if available
+        if ($this->relationLoaded('timeEntries')) {
+            $timeEntries = $this->timeEntries;
+        } else {
+            // Otherwise query them
+            $timeEntries = $this->timeEntries()
+                ->whereNotNull('sign_out_time')
+                ->get();
+        }
 
         if ($timeEntries->isNotEmpty()) {
             // Calculate total hours from time entries for current month

@@ -406,6 +406,8 @@ class ComplianceController extends Controller
         $employees = [];
         $taxYears = [];
         $selectedTaxYear = $request->get('tax_year', $this->irp5Service->getTaxYear());
+        $generatedCount = 0;
+        $pendingCount = 0;
 
         if ($business) {
             // Get available tax years
@@ -418,6 +420,16 @@ class ComplianceController extends Controller
 
             // Get employees with IRP5 status
             $employees = $this->irp5Service->getEmployeesWithIRP5Status($business, $selectedTaxYear);
+
+            // Pre-compute counts at SQL level to avoid frontend aggregation
+            foreach ($employees as $emp) {
+                $status = $emp['irp5_status'] ?? 'pending';
+                if ($status === 'generated' || $status === 'submitted') {
+                    $generatedCount++;
+                } elseif ($status === 'pending') {
+                    $pendingCount++;
+                }
+            }
         }
 
         return Inertia::render('compliance/irp5/index', [
@@ -428,6 +440,8 @@ class ComplianceController extends Controller
             'employees' => $employees,
             'taxYears' => $taxYears,
             'selectedTaxYear' => $selectedTaxYear,
+            'generatedCount' => $generatedCount,
+            'pendingCount' => $pendingCount,
         ]);
     }
 

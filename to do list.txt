@@ -9,11 +9,7 @@ job to send email to alert that payment jobs executed successfully fails "2026-0
 
 Replace the concept of custom deductions with a unified adjustments system. The payroll system MUST calculate net salary automatically from gross salary after applying statutory deductions. Payroll execution MUST then apply adjustments, which are the only mechanism for modifying pay beyond statutory deductions. Adjustments MUST be either recurring (applied automatically on every payroll run until removed) or once-off (scoped to a single payroll period only). Adjustments MAY be defined at company level or employee level and MAY represent either deductions or additions. During payroll execution, the system MUST load and apply only the adjustments valid for the current payroll period; if no adjustments exist, payroll MUST execute using the default net salary without modification. No adjustment MUST affect any payroll period other than the one it is explicitly scoped to unless marked as recurring. we will not track user to calculate gross salary yet leave it for the future, use specified gross salary.
 
-for business switching we need some nice react reactivity flow with nice amination but now it's dull simple boring, even onboarding on dashboard users who visit for the first time show some reactivity
-
-login email i never recieve it but it always record it's sent "  2026-01-21 14:49:34 App\Listeners\SendLoginNotification .......................................................................................................................... RUNNING
-  2026-01-21 14:49:34 App\Listeners\SendLoginNotification ..................................................................................................................... 18.46ms DONE
-"
+add known admins pages and look in users dashboard, also add pages about system/app management
 
 Payments page pull all jobs in all businesses not in current switched to business that is in session, this is not payments problem payroll too i realised when you refresh the page it pulls data according to business but if click of menu link Payments page, payroll page maybe other pages too pull all jobs in all businesses not in current switched to business that is in session, or i think problem is somethimes when i switch while in payments page then go to payroll i realize it has switch back to last business i was when i was in payments page virse vurser to payroll page when i go to payemnt page
 
@@ -22,8 +18,20 @@ be like an business analyst and system designer, on the front end look to simpli
 logo in emails is never shown instead i see image placeholder indicating no image was found
 
 make admins dashboard, first read what they need in current project, admin files must be separate no file manipulation, admin can deactivate a business, block it or whatever
-add notification in dashboard, they will come from admins
 
+add notification in dashboard, they will come from admins
+ no calculation or filtering execute done in php or front end, unless acceptable all that must happen in sql level
 Brand web site public site (Swift pay- focus on service offered use catchy marketing terms)
 On administrative there must be a page to view user business subscriptions
+
 Now focus on security of the web app to be very secure (current rate limit implemented in employees login is weak it blocks legit users)
+
+check efficiency (Build queries before get()  Let SQL do filtering/aggregation  Avoid pulling large datasets into PHP  Don’t loop models for computation)
+optimize (Let SQL do the heavy lifting.  Offload slow work to queues.  Use PHP-FPM + proper worker tuning, optimize other code in the project i might not have mentioned)
+Laravel/PHP handles each request in a worker, which runs synchronously. Slow tasks inside a request block only that worker, but other requests continue if other workers are free. 
+To avoid blocking, you can offload heavy work to queues, run async HTTP requests, or use background processes. 
+This makes the app effectively non-blocking from the user’s perspective while keeping Laravel fast and scalable for business workloads.
+
+improve mcp server for ai
+
+add internal logs table and implement error dedection when users experience errors the apps save errors and notify admnins emails

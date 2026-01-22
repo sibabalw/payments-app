@@ -34,16 +34,16 @@ class GenerateBankReconciliation extends Command
         $businessId = $this->option('business_id');
         $startDate = $this->option('start_date');
         $endDate = $this->option('end_date');
-        $outputPath = $this->option('output') ?? 'reports/bank_reconciliation_' . now()->format('Y-m-d_His') . '.csv';
+        $outputPath = $this->option('output') ?? 'reports/bank_reconciliation_'.now()->format('Y-m-d_His').'.csv';
 
         $query = PaymentJob::query()
+            ->select(['payment_jobs.*'])
+            ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
             ->with(['paymentSchedule.business', 'receiver'])
-            ->whereNotNull('processed_at');
+            ->whereNotNull('payment_jobs.processed_at');
 
         if ($businessId) {
-            $query->whereHas('paymentSchedule', function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            });
+            $query->where('payment_schedules.business_id', $businessId);
         }
 
         if ($startDate) {
@@ -58,6 +58,7 @@ class GenerateBankReconciliation extends Command
 
         if ($jobs->isEmpty()) {
             $this->warn('No payment jobs found for the specified criteria.');
+
             return Command::SUCCESS;
         }
 
@@ -110,14 +111,14 @@ class GenerateBankReconciliation extends Command
         $csvContent = '';
         foreach ($csvData as $row) {
             $csvContent .= implode(',', array_map(function ($field) {
-                return '"' . str_replace('"', '""', $field) . '"';
-            }, $row)) . "\n";
+                return '"'.str_replace('"', '""', $field).'"';
+            }, $row))."\n";
         }
 
         Storage::put($outputPath, $csvContent);
 
         $fullPath = Storage::path($outputPath);
-        $this->info("Bank reconciliation report generated successfully!");
+        $this->info('Bank reconciliation report generated successfully!');
         $this->info("File: {$fullPath}");
         $this->info("Total records: {$jobs->count()}");
 

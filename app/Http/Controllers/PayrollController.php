@@ -40,7 +40,21 @@ class PayrollController extends Controller
         $status = $request->get('status');
 
         $query = PayrollSchedule::query()
-            ->with(['business', 'employees']);
+            ->select([
+                'id',
+                'business_id',
+                'name',
+                'frequency',
+                'schedule_type',
+                'status',
+                'next_run_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->with([
+                'business:id,name',
+                'employees:id,name,email',
+            ]);
 
         if ($businessId) {
             $query->where('business_id', $businessId);
@@ -196,28 +210,29 @@ class PayrollController extends Controller
         // Parse cron expression to extract date/time for editing
         $parsed = $this->cronParser->parse($payrollSchedule->frequency);
 
-        $schedule = $payrollSchedule->load(['business', 'employees']);
+        $schedule = $payrollSchedule->load([
+            'business',
+            'employees.customDeductions' => function ($query) {
+                $query->where('is_active', true);
+            },
+            'employees.timeEntries' => function ($query) {
+                $query->whereNotNull('sign_out_time');
+            },
+        ]);
+
         if ($parsed) {
             $schedule->scheduled_date = $parsed['date'];
             $schedule->scheduled_time = $parsed['time'];
             $schedule->parsed_frequency = $parsed['frequency'];
         }
 
-        // Calculate tax breakdowns for all employees in the schedule
-        $employeeTaxBreakdowns = [];
-        foreach ($schedule->employees as $employee) {
-            $customDeductions = $employee->getAllDeductions();
-            $employeeTaxBreakdowns[$employee->id] = $this->taxService->calculateNetSalary($employee->gross_salary, [
-                'custom_deductions' => $customDeductions,
-                'uif_exempt' => $employee->isUIFExempt(),
-            ]);
-        }
+        // Tax breakdowns are now loaded on-demand via getTaxBreakdowns endpoint
+        // This prevents blocking the page load when there are many employees
 
         return Inertia::render('payroll/edit', [
             'schedule' => $schedule,
             'businesses' => $businesses,
             'employees' => $employees,
-            'employeeTaxBreakdowns' => $employeeTaxBreakdowns,
         ]);
     }
 
@@ -348,6 +363,41 @@ class PayrollController extends Controller
     }
 
     /**
+     * Get tax breakdowns for employees in a payroll schedule (on-demand)
+     */
+    public function getTaxBreakdowns(PayrollSchedule $payrollSchedule): \Illuminate\Http\JsonResponse
+    {
+        $schedule = $payrollSchedule->load([
+            'employees.customDeductions' => function ($query) {
+                $query->where('is_active', true);
+            },
+            'employees.timeEntries' => function ($query) {
+                $query->whereNotNull('sign_out_time');
+            },
+        ]);
+
+        // Get business-wide deductions once
+        $businessDeductions = \App\Models\CustomDeduction::where('business_id', $payrollSchedule->business_id)
+            ->whereNull('employee_id')
+            ->where('is_active', true)
+            ->get();
+
+        // Calculate tax breakdowns for all employees in the schedule
+        $employeeTaxBreakdowns = [];
+        foreach ($schedule->employees as $employee) {
+            // Merge business deductions with employee-specific deductions (already loaded)
+            $customDeductions = $businessDeductions->merge($employee->customDeductions);
+
+            $employeeTaxBreakdowns[$employee->id] = $this->taxService->calculateNetSalary($employee->gross_salary, [
+                'custom_deductions' => $customDeductions,
+                'uif_exempt' => $employee->isUIFExempt(),
+            ]);
+        }
+
+        return response()->json($employeeTaxBreakdowns);
+    }
+
+    /**
      * Resume a payroll schedule.
      */
     public function resume(PayrollSchedule $payrollSchedule)
@@ -395,25 +445,24 @@ class PayrollController extends Controller
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $status = $request->get('status');
 
+        // Use JOIN instead of whereHas for better performance
         $query = \App\Models\PayrollJob::query()
+            ->select(['payroll_jobs.*'])
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
             ->with(['payrollSchedule.business', 'employee']);
 
         if ($status) {
-            $query->where('status', $status);
+            $query->where('payroll_jobs.status', $status);
         }
 
         if ($businessId) {
-            $query->whereHas('payrollSchedule', function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            });
+            $query->where('payroll_schedules.business_id', $businessId);
         } else {
-            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id');
-            $query->whereHas('payrollSchedule', function ($q) use ($userBusinessIds) {
-                $q->whereIn('business_id', $userBusinessIds);
-            });
+            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id')->toArray();
+            $query->whereIn('payroll_schedules.business_id', $userBusinessIds);
         }
 
-        $jobs = $query->latest()->paginate(20);
+        $jobs = $query->orderByDesc('payroll_jobs.created_at')->paginate(20);
 
         return Inertia::render('payroll/jobs', [
             'jobs' => $jobs,

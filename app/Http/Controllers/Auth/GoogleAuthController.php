@@ -31,7 +31,7 @@ class GoogleAuthController extends Controller
             $user = User::where('email', $googleUser->getEmail())->first();
 
             $isNewUser = false;
-            
+
             if ($user) {
                 // Update existing user with Google info and verify email if not already verified
                 $user->update([
@@ -50,7 +50,7 @@ class GoogleAuthController extends Controller
                     'email_verified_at' => now(),
                     'password' => bcrypt(str()->random(32)), // Random password since OAuth
                 ]);
-                
+
                 // Send welcome email for new users
                 $emailService = app(EmailService::class);
                 $emailService->send($user, new WelcomeEmail($user), 'welcome');
@@ -60,7 +60,7 @@ class GoogleAuthController extends Controller
             $user->refresh();
 
             // Auto-select business if user has businesses but no current_business_id
-            if (!$user->current_business_id) {
+            if (! $user->current_business_id) {
                 $firstBusiness = $user->ownedBusinesses()->first() ?? $user->businesses()->first();
                 if ($firstBusiness) {
                     $user->update(['current_business_id' => $firstBusiness->id]);
@@ -70,6 +70,11 @@ class GoogleAuthController extends Controller
 
             Auth::login($user, true);
 
+            // Admins skip onboarding - redirect to admin dashboard
+            if ($user->is_admin) {
+                return redirect()->route('admin.dashboard');
+            }
+
             // If user has already completed onboarding, go to dashboard
             if ($user->onboarding_completed_at) {
                 return redirect('/dashboard');
@@ -77,9 +82,10 @@ class GoogleAuthController extends Controller
 
             // Check if user has businesses, if so mark onboarding as completed
             $hasBusinesses = $user->businesses()->count() > 0 || $user->ownedBusinesses()->count() > 0;
-            
+
             if ($hasBusinesses) {
                 $user->update(['onboarding_completed_at' => now()]);
+
                 return redirect('/dashboard');
             }
 

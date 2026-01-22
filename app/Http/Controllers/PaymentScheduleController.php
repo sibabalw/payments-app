@@ -39,7 +39,25 @@ class PaymentScheduleController extends Controller
         $type = $request->get('type'); // 'generic' or 'payroll'
         $status = $request->get('status'); // 'active', 'paused', 'cancelled'
 
-        $query = PaymentSchedule::query()->with(['business', 'recipients']);
+        $query = PaymentSchedule::query()
+            ->select([
+                'id',
+                'business_id',
+                'type',
+                'name',
+                'frequency',
+                'amount',
+                'currency',
+                'schedule_type',
+                'status',
+                'next_run_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->with([
+                'business:id,name',
+                'recipients:id,name,email',
+            ]);
 
         if ($businessId) {
             $query->where('business_id', $businessId);

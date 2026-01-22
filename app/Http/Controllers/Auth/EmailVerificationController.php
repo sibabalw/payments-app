@@ -24,14 +24,19 @@ class EmailVerificationController extends Controller
 
         if ($user->markEmailAsVerified()) {
             event(new Verified($user));
-            
+
             // Send welcome email after verification
             $emailService = app(EmailService::class);
             $emailService->send($user, new WelcomeEmail($user), 'welcome');
         }
 
+        // Admins skip onboarding - redirect to admin dashboard
+        if ($user->is_admin) {
+            return redirect()->route('admin.dashboard')->with('verified', true);
+        }
+
         // Auto-select business if user has businesses but no current_business_id
-        if (!$user->current_business_id) {
+        if (! $user->current_business_id) {
             $firstBusiness = $user->ownedBusinesses()->first() ?? $user->businesses()->first();
             if ($firstBusiness) {
                 $user->update(['current_business_id' => $firstBusiness->id]);
@@ -48,6 +53,7 @@ class EmailVerificationController extends Controller
 
         if ($hasBusinesses) {
             $user->update(['onboarding_completed_at' => now()]);
+
             return redirect('/dashboard')->with('verified', true);
         }
 

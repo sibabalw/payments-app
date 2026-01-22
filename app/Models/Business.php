@@ -59,6 +59,21 @@ class Business extends Model
         return $this->hasMany(PaymentSchedule::class);
     }
 
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class);
+    }
+
+    public function recipients(): HasMany
+    {
+        return $this->hasMany(Recipient::class);
+    }
+
+    public function payrollSchedules(): HasMany
+    {
+        return $this->hasMany(PayrollSchedule::class);
+    }
+
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);

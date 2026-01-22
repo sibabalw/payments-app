@@ -5,15 +5,14 @@ namespace App\Listeners;
 use App\Mail\LoginNotificationEmail;
 use App\Services\EmailService;
 use Illuminate\Auth\Events\Login;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 
-class SendLoginNotification implements ShouldQueue
+class SendLoginNotification
 {
-    use InteractsWithQueue;
-
     /**
      * Handle the event.
+     *
+     * This listener runs synchronously to have access to request() context.
+     * The email itself is still queued via EmailService for performance.
      */
     public function handle(Login $event): void
     {

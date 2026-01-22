@@ -345,7 +345,7 @@ export default function Profile({
                                                             id="email"
                                                             type="email"
                                                             className="h-11 transition-all focus:ring-2 focus:ring-primary/20"
-                                                            defaultValue={auth.user.email}
+                                                            value={currentEmail}
                                                             name="email"
                                                             required
                                                             autoComplete="username"
@@ -391,6 +391,8 @@ export default function Profile({
                                                         <OtpVerificationForm
                                                             email={pendingEmail}
                                                             onCancel={() => {
+                                                                setCurrentEmail(originalEmail);
+                                                                setEmailVerified(false);
                                                                 router.post('/settings/profile/cancel-email-otp', {}, {
                                                                     preserveScroll: true,
                                                                     onSuccess: () => {

@@ -39,6 +39,9 @@ class BusinessController extends Controller
         $associated = $user->businesses()->with('owner')->get();
         $businesses = $owned->merge($associated)->unique('id')->values();
 
+        // Eager load counts for all businesses at once
+        $businesses->loadCount(['employees', 'paymentSchedules', 'payrollSchedules', 'recipients']);
+
         // Add important statistics to each business
         $businessesWithStats = $businesses->map(function ($business) {
             $logoUrl = null;
@@ -56,10 +59,10 @@ class BusinessController extends Controller
                 'email' => $business->email,
                 'phone' => $business->phone,
                 'escrow_balance' => (float) $business->escrow_balance,
-                'employees_count' => \App\Models\Employee::where('business_id', $business->id)->count(),
-                'payment_schedules_count' => $business->paymentSchedules()->count(),
-                'payroll_schedules_count' => \App\Models\PayrollSchedule::where('business_id', $business->id)->count(),
-                'recipients_count' => \App\Models\Recipient::where('business_id', $business->id)->count(),
+                'employees_count' => $business->employees_count,
+                'payment_schedules_count' => $business->payment_schedules_count,
+                'payroll_schedules_count' => $business->payroll_schedules_count,
+                'recipients_count' => $business->recipients_count,
                 'created_at' => $business->created_at?->format('Y-m-d'),
                 'status_changed_at' => $business->status_changed_at?->format('Y-m-d H:i'),
             ];

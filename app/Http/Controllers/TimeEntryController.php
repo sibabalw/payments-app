@@ -75,11 +75,17 @@ class TimeEntryController extends Controller
 
         $businesses = Auth::user()->businesses()->get();
 
+        // Pre-compute counts to avoid frontend filtering
+        $signedInCount = $employeesWithStatus->filter(fn ($e) => $e['is_signed_in'])->count();
+        $signedOutCount = $employeesWithStatus->count() - $signedInCount;
+
         return Inertia::render('time-tracking/index', [
             'employees' => $employeesWithStatus,
             'businesses' => $businesses,
             'selectedBusinessId' => $businessId,
             'today' => $today->format('Y-m-d'),
+            'signedInCount' => $signedInCount,
+            'signedOutCount' => $signedOutCount,
         ]);
     }
 

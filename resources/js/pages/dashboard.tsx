@@ -1,12 +1,13 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { WelcomeTourModal } from '@/components/welcome-tour-modal';
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition } from 'react';
 import { 
     LineChart, 
     Line, 
@@ -158,9 +159,16 @@ export default function Dashboard({
     businessInfo, 
     businessesCount: propBusinessesCount 
 }: DashboardProps) {
-    const { businessesCount: sharedBusinessesCount = 0 } = usePage<SharedData>().props;
+    const { businessesCount: sharedBusinessesCount = 0, hasCompletedDashboardTour, auth } = usePage<SharedData>().props;
     const businessesCount = propBusinessesCount ?? sharedBusinessesCount;
+    const [isPending, startTransition] = useTransition();
     const [viewMode, setViewMode] = useState<'simple' | 'advanced'>('simple');
+    
+    const handleViewModeChange = (mode: 'simple' | 'advanced') => {
+        startTransition(() => {
+            setViewMode(mode);
+        });
+    };
     const [globalFrequency, setGlobalFrequency] = useState<'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly');
     const [chartFrequencies, setChartFrequencies] = useState<{
         trends?: 'weekly' | 'monthly' | 'quarterly' | 'yearly';
@@ -168,6 +176,7 @@ export default function Dashboard({
         daily?: 'weekly' | 'monthly' | 'quarterly' | 'yearly';
         weekly?: 'weekly' | 'monthly' | 'quarterly' | 'yearly';
     }>({});
+    const [showWelcomeTour, setShowWelcomeTour] = useState(!hasCompletedDashboardTour);
     
     // Get frequency from URL params if present
     useEffect(() => {
@@ -221,6 +230,14 @@ export default function Dashboard({
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Dashboard" />
+            
+            {/* Welcome Tour Modal for first-time visitors */}
+            <WelcomeTourModal
+                isOpen={showWelcomeTour}
+                onClose={() => setShowWelcomeTour(false)}
+                userName={auth.user?.name || 'there'}
+            />
+            
             <div className="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4">
                 {/* View Mode Toggle */}
                 <div className="flex items-center justify-between">
@@ -229,8 +246,8 @@ export default function Dashboard({
                         <Button
                             variant={viewMode === 'simple' ? 'default' : 'outline'}
                             size="sm"
-                            onClick={() => setViewMode('simple')}
-                            className="gap-2"
+                            onClick={() => handleViewModeChange('simple')}
+                            className="gap-2 transition-all"
                         >
                             <LayoutDashboard className="h-4 w-4" />
                             Simple View
@@ -238,10 +255,10 @@ export default function Dashboard({
                         <Button
                             variant={viewMode === 'advanced' ? 'default' : 'outline'}
                             size="sm"
-                            onClick={() => setViewMode('advanced')}
-                            className="gap-2"
+                            onClick={() => handleViewModeChange('advanced')}
+                            className="gap-2 transition-all"
                         >
-                            <BarChartIcon2 className="h-4 w-4" />
+                            <BarChartIcon2 className={`h-4 w-4 ${isPending && viewMode === 'simple' ? 'animate-spin' : ''}`} />
                             Advanced View
                         </Button>
                     </div>

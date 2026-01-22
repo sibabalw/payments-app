@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Employee;
 use App\Models\PayrollJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,37 +21,40 @@ class PayrollJobController extends Controller
         $status = $request->get('status');
         $employeeId = $request->get('employee_id');
 
-        $query = PayrollJob::query()->with(['payrollSchedule.business', 'employee']);
+        // Use JOIN instead of whereHas for better performance
+        $query = PayrollJob::query()
+            ->select(['payroll_jobs.*'])
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->with([
+                'payrollSchedule:id,business_id,name',
+                'payrollSchedule.business:id,name',
+                'employee:id,name,email',
+            ]);
 
         if ($scheduleId) {
-            $query->where('payroll_schedule_id', $scheduleId);
+            $query->where('payroll_jobs.payroll_schedule_id', $scheduleId);
         }
 
         if ($status) {
-            $query->where('status', $status);
+            $query->where('payroll_jobs.status', $status);
         }
 
         if ($employeeId) {
-            $query->where('employee_id', $employeeId);
+            $query->where('payroll_jobs.employee_id', $employeeId);
         }
 
         if ($businessId) {
-            $query->whereHas('payrollSchedule', function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            });
+            $query->where('payroll_schedules.business_id', $businessId);
         } else {
-            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id');
-            $query->whereHas('payrollSchedule', function ($q) use ($userBusinessIds) {
-                $q->whereIn('business_id', $userBusinessIds);
-            });
+            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id')->toArray();
+            $query->whereIn('payroll_schedules.business_id', $userBusinessIds);
         }
 
-        $jobs = $query->latest()->paginate(20);
+        $jobs = $query->orderByDesc('payroll_jobs.created_at')->paginate(20);
 
-        $employees = \App\Models\Employee::query()
-            ->when($businessId, function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            })
+        $employees = Employee::query()
+            ->when($businessId, fn ($q) => $q->where('business_id', $businessId))
+            ->select(['id', 'name', 'business_id'])
             ->get();
 
         return Inertia::render('payroll/jobs', [

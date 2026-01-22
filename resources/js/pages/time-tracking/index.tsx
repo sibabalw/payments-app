@@ -11,7 +11,7 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Time Tracking', href: '/time-tracking' },
 ];
 
-export default function TimeTrackingIndex({ employees, businesses, selectedBusinessId, today }: any) {
+export default function TimeTrackingIndex({ employees, businesses, selectedBusinessId, today, signedInCount, signedOutCount }: any) {
     const [businessId, setBusinessId] = useState(selectedBusinessId || businesses[0]?.id || '');
     const [filter, setFilter] = useState<'all' | 'signed_in' | 'signed_out'>('all');
 
@@ -99,14 +99,14 @@ export default function TimeTrackingIndex({ employees, businesses, selectedBusin
                         size="sm"
                         onClick={() => setFilter('signed_in')}
                     >
-                        Signed In ({employees.filter((e: any) => e.is_signed_in).length})
+                        Signed In ({signedInCount})
                     </Button>
                     <Button
                         variant={filter === 'signed_out' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setFilter('signed_out')}
                     >
-                        Signed Out ({employees.filter((e: any) => !e.is_signed_in).length})
+                        Signed Out ({signedOutCount})
                     </Button>
                 </div>
 

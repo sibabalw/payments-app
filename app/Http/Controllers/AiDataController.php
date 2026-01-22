@@ -85,9 +85,12 @@ class AiDataController extends Controller
             ->values()
             ->toArray();
 
-        // Get recent payment jobs stats
-        $recentJobs = PaymentJob::whereHas('paymentSchedule', fn ($q) => $q->where('business_id', $business->id))
-            ->where('created_at', '>=', now()->subDays(30))
+        // Get recent payment jobs stats using JOIN instead of whereHas
+        $recentJobs = PaymentJob::query()
+            ->select(['payment_jobs.*'])
+            ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+            ->where('payment_schedules.business_id', $business->id)
+            ->where('payment_jobs.created_at', '>=', now()->subDays(30))
             ->get();
 
         $jobStatusCounts = $recentJobs->groupBy('status')
@@ -131,9 +134,12 @@ class AiDataController extends Controller
             ->values()
             ->toArray();
 
-        // Get recent payroll jobs stats
-        $recentJobs = PayrollJob::whereHas('payrollSchedule', fn ($q) => $q->where('business_id', $business->id))
-            ->where('created_at', '>=', now()->subDays(30))
+        // Get recent payroll jobs stats using JOIN instead of whereHas
+        $recentJobs = PayrollJob::query()
+            ->select(['payroll_jobs.*'])
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.created_at', '>=', now()->subDays(30))
             ->get();
 
         $jobStatusCounts = $recentJobs->groupBy('status')

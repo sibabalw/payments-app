@@ -18,8 +18,7 @@ class OnboardingController extends Controller
 {
     public function __construct(
         protected AuditService $auditService
-    ) {
-    }
+    ) {}
 
     /**
      * Display the onboarding page.
@@ -28,6 +27,11 @@ class OnboardingController extends Controller
     {
         $user = Auth::user();
 
+        // Admins skip onboarding - redirect to admin dashboard
+        if ($user->is_admin) {
+            return redirect()->route('admin.dashboard');
+        }
+
         // If user has already completed onboarding, redirect to dashboard
         if ($user->onboarding_completed_at) {
             return redirect()->route('dashboard');
@@ -35,9 +39,10 @@ class OnboardingController extends Controller
 
         // If user already has businesses, mark onboarding as completed and redirect
         $hasBusinesses = $user->businesses()->count() > 0 || $user->ownedBusinesses()->count() > 0;
-        
+
         if ($hasBusinesses) {
             $user->update(['onboarding_completed_at' => now()]);
+
             return redirect()->route('dashboard');
         }
 
@@ -76,12 +81,12 @@ class OnboardingController extends Controller
 
         // Remove logo from validated array since we handle it separately
         unset($validated['logo']);
-        
+
         try {
             // Wrap all database operations in a transaction
             DB::transaction(function () use ($logoPath, $validated, &$business, &$user) {
                 $user = Auth::user();
-                
+
                 // Create business
                 $business = Business::create([
                     'user_id' => $user->id,
@@ -109,13 +114,13 @@ class OnboardingController extends Controller
 
             return redirect()->route('dashboard')
                 ->with('success', 'Business created successfully. Welcome to Swift Pay!');
-                
+
         } catch (\Exception $e) {
             // If transaction failed, clean up uploaded file
             if ($logoPath && Storage::disk('public')->exists($logoPath)) {
                 Storage::disk('public')->delete($logoPath);
             }
-            
+
             // Re-throw the exception to show error to user
             throw $e;
         }

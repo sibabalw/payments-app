@@ -8,6 +8,7 @@ use App\Services\AuditService;
 use App\Services\SouthAfricanTaxService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -36,7 +37,22 @@ class EmployeeController extends Controller
             $query->whereIn('business_id', $userBusinessIds);
         }
 
-        $employees = $query->with('business')->latest()->paginate(15);
+        $employees = $query
+            ->select([
+                'id',
+                'business_id',
+                'name',
+                'email',
+                'employment_type',
+                'department',
+                'gross_salary',
+                'hourly_rate',
+                'created_at',
+                'updated_at',
+            ])
+            ->with('business:id,name')
+            ->latest()
+            ->paginate(15);
 
         return Inertia::render('employees/index', [
             'employees' => $employees,
@@ -115,6 +131,17 @@ class EmployeeController extends Controller
     {
         $businesses = Auth::user()->businesses()->get();
 
+        // Eager load relationships
+        $employee->load([
+            'business',
+            'customDeductions' => function ($query) {
+                $query->where('is_active', true);
+            },
+            'timeEntries' => function ($query) {
+                $query->whereNotNull('sign_out_time');
+            },
+        ]);
+
         // Get all deductions for this employee (company-wide + employee-specific)
         $customDeductions = $employee->getAllDeductions();
 
@@ -126,7 +153,7 @@ class EmployeeController extends Controller
         ]);
 
         return Inertia::render('employees/edit', [
-            'employee' => $employee->load('business'),
+            'employee' => $employee,
             'businesses' => $businesses,
             'taxBreakdown' => $taxBreakdown,
             'customDeductions' => $customDeductions,
@@ -188,6 +215,7 @@ class EmployeeController extends Controller
 
     /**
      * Calculate tax breakdown for preview (AJAX endpoint)
+     * Results are cached for 60 seconds to improve performance for repeated calculations
      */
     public function calculateTax(Request $request, ?Employee $employee = null)
     {
@@ -195,6 +223,9 @@ class EmployeeController extends Controller
         if ($employee) {
             $grossSalary = $employee->gross_salary;
             $customDeductions = $employee->getAllDeductions();
+            $employeeId = $employee->id;
+            $businessId = $employee->business_id;
+            $uifExempt = $employee->isUIFExempt();
         } else {
             // Get gross_salary from request (works with both JSON and form data)
             $grossSalary = $request->input('gross_salary') ?? $request->json('gross_salary');
@@ -210,6 +241,7 @@ class EmployeeController extends Controller
             $employeeId = $request->input('employee_id') ?? $request->json('employee_id');
 
             $customDeductions = collect();
+            $uifExempt = false;
             if ($businessId) {
                 // Company-wide deductions
                 $companyDeductions = \App\Models\CustomDeduction::where('business_id', $businessId)
@@ -233,10 +265,17 @@ class EmployeeController extends Controller
             }
         }
 
-        $breakdown = $this->taxService->calculateNetSalary($grossSalary, [
-            'custom_deductions' => $customDeductions,
-            'uif_exempt' => $uifExempt ?? false,
-        ]);
+        // Create cache key based on input parameters
+        $deductionIds = $customDeductions->pluck('id')->sort()->implode(',');
+        $cacheKey = "tax_calculation_{$grossSalary}_{$businessId}_{$employeeId}_{$uifExempt}_{$deductionIds}";
+
+        // Check cache first (60 second TTL)
+        $breakdown = Cache::remember($cacheKey, 60, function () use ($grossSalary, $customDeductions, $uifExempt) {
+            return $this->taxService->calculateNetSalary($grossSalary, [
+                'custom_deductions' => $customDeductions,
+                'uif_exempt' => $uifExempt,
+            ]);
+        });
 
         return response()->json($breakdown);
     }

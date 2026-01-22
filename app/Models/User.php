@@ -29,6 +29,9 @@ class User extends Authenticatable implements MustVerifyEmail
         'onboarding_completed_at',
         'current_business_id',
         'email_preferences',
+        'has_completed_dashboard_tour',
+        'dashboard_tour_completed_at',
+        'is_admin',
     ];
 
     /**
@@ -56,6 +59,9 @@ class User extends Authenticatable implements MustVerifyEmail
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
             'email_preferences' => 'array',
+            'has_completed_dashboard_tour' => 'boolean',
+            'dashboard_tour_completed_at' => 'datetime',
+            'is_admin' => 'boolean',
         ];
     }
 
@@ -88,7 +94,7 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         $owned = $this->ownedBusinesses()->get();
         $associated = $this->businesses()->get();
-        
+
         return $owned->merge($associated)->unique('id');
     }
 
@@ -99,7 +105,7 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         $defaults = [
             'welcome' => true,
-            'login_notification' => false, // Opt-in by default
+            'login_notification' => true, // Security notification - enabled by default
             'payment_reminder' => true,
             'payment_success' => true,
             'payment_failed' => true,
@@ -121,6 +127,7 @@ class User extends Authenticatable implements MustVerifyEmail
     public function shouldReceiveEmail(string $emailType): bool
     {
         $preferences = $this->getEmailPreferences();
+
         return $preferences[$emailType] ?? true;
     }
 
@@ -149,6 +156,6 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function sendEmailVerificationNotification(): void
     {
-        $this->notify(new VerifyEmailNotification());
+        $this->notify(new VerifyEmailNotification);
     }
 }

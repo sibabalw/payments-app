@@ -207,18 +207,17 @@ class IRP5Service
     {
         $dates = $this->getTaxYearDates($taxYear);
 
-        // Get all employees who had payroll in this tax year
+        // Get all employees who had payroll in this tax year (using JOIN)
         $employeeIds = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
             ->where(function ($q) use ($dates) {
-                $q->whereBetween('pay_period_start', [$dates['start'], $dates['end']])
-                    ->orWhereBetween('pay_period_end', [$dates['start'], $dates['end']]);
+                $q->whereBetween('payroll_jobs.pay_period_start', [$dates['start'], $dates['end']])
+                    ->orWhereBetween('payroll_jobs.pay_period_end', [$dates['start'], $dates['end']]);
             })
             ->distinct()
-            ->pluck('employee_id');
+            ->pluck('payroll_jobs.employee_id');
 
         $employees = Employee::whereIn('id', $employeeIds)->get();
 
@@ -262,18 +261,17 @@ class IRP5Service
     {
         $dates = $this->getTaxYearDates($taxYear);
 
-        // Get all employees with payroll in tax year
+        // Get all employees with payroll in tax year (using JOIN)
         $employeeIds = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
             ->where(function ($q) use ($dates) {
-                $q->whereBetween('pay_period_start', [$dates['start'], $dates['end']])
-                    ->orWhereBetween('pay_period_end', [$dates['start'], $dates['end']]);
+                $q->whereBetween('payroll_jobs.pay_period_start', [$dates['start'], $dates['end']])
+                    ->orWhereBetween('payroll_jobs.pay_period_end', [$dates['start'], $dates['end']]);
             })
             ->distinct()
-            ->pluck('employee_id');
+            ->pluck('payroll_jobs.employee_id');
 
         $employees = Employee::whereIn('id', $employeeIds)
             ->with(['business'])
@@ -319,13 +317,12 @@ class IRP5Service
      */
     public function getAvailableTaxYears(Business $business): Collection
     {
-        // Get earliest and latest payroll dates
+        // Get earliest and latest payroll dates (using JOIN)
         $dates = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
-            ->selectRaw('MIN(pay_period_start) as earliest, MAX(pay_period_end) as latest')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
+            ->selectRaw('MIN(payroll_jobs.pay_period_start) as earliest, MAX(payroll_jobs.pay_period_end) as latest')
             ->first();
 
         if (! $dates->earliest) {
