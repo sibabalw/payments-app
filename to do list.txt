@@ -23,3 +23,7 @@ logo in emails is never shown instead i see image placeholder indicating no imag
 
 make admins dashboard, first read what they need in current project, admin files must be separate no file manipulation, admin can deactivate a business, block it or whatever
 add notification in dashboard, they will come from admins
+
+Brand web site public site (Swift pay- focus on service offered use catchy marketing terms)
+On administrative there must be a page to view user business subscriptions
+Now focus on security of the web app to be very secure (current rate limit implemented in employees login is weak it blocks legit users)
