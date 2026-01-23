@@ -12,12 +12,14 @@ use App\Services\CronExpressionParser;
 use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
+use App\Services\SouthAfricaHolidayService;
 use App\Services\SouthAfricanTaxService;
 use Carbon\Carbon;
 use Cron\CronExpression;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -28,7 +30,8 @@ class PayrollController extends Controller
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
         protected CronExpressionParser $cronParser,
-        protected SouthAfricanTaxService $taxService
+        protected SouthAfricanTaxService $taxService,
+        protected SouthAfricaHolidayService $holidayService
     ) {}
 
     /**
@@ -174,7 +177,9 @@ class PayrollController extends Controller
             try {
                 $cron = CronExpression::factory($frequency);
                 // Use current time in app timezone for consistent calculation
-                $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                // Skip weekends and holidays
+                $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
@@ -207,22 +212,30 @@ class PayrollController extends Controller
         $businesses = Auth::user()->businesses()->get();
         $employees = Employee::where('business_id', $payrollSchedule->business_id)->get();
 
-        // Parse cron expression to extract date/time for editing
-        $parsed = $this->cronParser->parse($payrollSchedule->frequency);
-
         $schedule = $payrollSchedule->load([
             'business',
-            'employees.customDeductions' => function ($query) {
-                $query->where('is_active', true);
-            },
             'employees.timeEntries' => function ($query) {
                 $query->whereNotNull('sign_out_time');
             },
         ]);
 
+        // Use next_run_at to populate date/time fields, fallback to parsing cron if not available
+        if ($schedule->next_run_at) {
+            $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
+            $schedule->scheduled_date = $nextRun->format('Y-m-d');
+            $schedule->scheduled_time = $nextRun->format('H:i');
+        } else {
+            // Fallback: Parse cron expression if next_run_at is not set
+            $parsed = $this->cronParser->parse($payrollSchedule->frequency);
+            if ($parsed) {
+                $schedule->scheduled_date = $parsed['date'];
+                $schedule->scheduled_time = $parsed['time'];
+            }
+        }
+
+        // Parse frequency for display
+        $parsed = $this->cronParser->parse($payrollSchedule->frequency);
         if ($parsed) {
-            $schedule->scheduled_date = $parsed['date'];
-            $schedule->scheduled_time = $parsed['time'];
             $schedule->parsed_frequency = $parsed['frequency'];
         }
 
@@ -305,7 +318,9 @@ class PayrollController extends Controller
             if ($payrollSchedule->wasChanged('frequency')) {
                 try {
                     $cron = CronExpression::factory($frequency);
-                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    // Skip weekends and holidays
+                    $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
                     $payrollSchedule->next_run_at = $nextRun;
                     $payrollSchedule->save();
                 } catch (\Exception $e) {
@@ -368,7 +383,7 @@ class PayrollController extends Controller
     public function getTaxBreakdowns(PayrollSchedule $payrollSchedule): \Illuminate\Http\JsonResponse
     {
         $schedule = $payrollSchedule->load([
-            'employees.customDeductions' => function ($query) {
+            'employees.adjustments' => function ($query) {
                 $query->where('is_active', true);
             },
             'employees.timeEntries' => function ($query) {
@@ -376,22 +391,35 @@ class PayrollController extends Controller
             },
         ]);
 
-        // Get business-wide deductions once
-        $businessDeductions = \App\Models\CustomDeduction::where('business_id', $payrollSchedule->business_id)
-            ->whereNull('employee_id')
-            ->where('is_active', true)
-            ->get();
+        // Use current month period for preview
+        $periodStart = \Carbon\Carbon::parse(now()->startOfMonth());
+        $periodEnd = \Carbon\Carbon::parse(now()->endOfMonth());
+        $adjustmentService = app(\App\Services\AdjustmentService::class);
 
         // Calculate tax breakdowns for all employees in the schedule
         $employeeTaxBreakdowns = [];
         foreach ($schedule->employees as $employee) {
-            // Merge business deductions with employee-specific deductions (already loaded)
-            $customDeductions = $businessDeductions->merge($employee->customDeductions);
+            // Get valid adjustments for the period
+            $adjustments = $adjustmentService->getValidAdjustments($employee, $periodStart, $periodEnd);
 
-            $employeeTaxBreakdowns[$employee->id] = $this->taxService->calculateNetSalary($employee->gross_salary, [
-                'custom_deductions' => $customDeductions,
+            // Calculate net salary after statutory deductions
+            $breakdown = $this->taxService->calculateNetSalary($employee->gross_salary, [
                 'uif_exempt' => $employee->isUIFExempt(),
             ]);
+
+            // Apply adjustments
+            $adjustmentResult = $adjustmentService->applyAdjustments(
+                $breakdown['net'],
+                $adjustments,
+                $employee->gross_salary
+            );
+
+            // Merge results
+            $breakdown['adjustments'] = $adjustmentResult['adjustments_breakdown'];
+            $breakdown['total_adjustments'] = $adjustmentResult['total_adjustments'];
+            $breakdown['final_net_salary'] = $adjustmentResult['final_net_salary'];
+
+            $employeeTaxBreakdowns[$employee->id] = $breakdown;
         }
 
         return response()->json($employeeTaxBreakdowns);
@@ -405,7 +433,9 @@ class PayrollController extends Controller
         // Recalculate next run time when resuming
         try {
             $cron = CronExpression::factory($payrollSchedule->frequency);
-            $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+            $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            // Skip weekends and holidays
+            $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
             $payrollSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
@@ -471,5 +501,28 @@ class PayrollController extends Controller
                 'business_id' => $businessId,
             ],
         ]);
+    }
+
+    /**
+     * Adjust a date to the next business day if it falls on a weekend or holiday.
+     */
+    private function adjustToBusinessDay(Carbon $date, CronExpression $cron): Carbon
+    {
+        if ($this->holidayService->isBusinessDay($date)) {
+            return $date;
+        }
+
+        $originalDate = $date->format('Y-m-d');
+        $originalTime = $date->format('H:i');
+        $adjustedDate = $this->holidayService->getNextBusinessDay($date);
+        $adjustedDate->setTime((int) $date->format('H'), (int) $date->format('i'));
+
+        Log::info('Payroll schedule next run adjusted to skip weekend/holiday', [
+            'original_date' => $originalDate,
+            'adjusted_date' => $adjustedDate->format('Y-m-d'),
+            'time' => $originalTime,
+        ]);
+
+        return $adjustedDate;
     }
 }

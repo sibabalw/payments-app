@@ -26,7 +26,7 @@ class PaymentJobController extends Controller
             ->with([
                 'paymentSchedule:id,business_id,name',
                 'paymentSchedule.business:id,name',
-                'receiver:id,name',
+                'recipient:id,name',
             ]);
 
         if ($scheduleId) {
@@ -61,7 +61,7 @@ class PaymentJobController extends Controller
      */
     public function show(PaymentJob $paymentJob): Response
     {
-        $paymentJob->load(['paymentSchedule.business', 'receiver']);
+        $paymentJob->load(['paymentSchedule.business', 'recipient']);
 
         return Inertia::render('payments/job-show', [
             'job' => $paymentJob,

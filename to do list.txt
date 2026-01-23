@@ -1,15 +1,8 @@
 add ai functionality where user will log in in whatsapp and will send to our ai in our app to do something like list payroll, or create delete, ai will be via api open ai.
-add filters in list pages
-implement load more pagination to list pages
+add filters in list pages 
+implement load more pagination to list pages and in search dropdowns
 payments page/side emails dont use business who is active in session that perfoms or own the payments authomations, in payroll this is done smoothly
-job to send email to alert that payment jobs executed successfully fails "2026-01-21 11:48:02 App\Jobs\ProcessPaymentJob ................................................................................................................................... RUNNING
-  2026-01-21 11:48:02 App\Jobs\ProcessPaymentJob .............................................................................................................................. 35.58ms DONE
-  2026-01-21 11:48:02 App\Mail\PaymentSuccessEmail ................................................................................................................................. RUNNING
-  2026-01-21 11:48:02 App\Mail\PaymentSuccessEmail ............................................................................................................................ 13.26ms FAIL" 
-
-Replace the concept of custom deductions with a unified adjustments system. The payroll system MUST calculate net salary automatically from gross salary after applying statutory deductions. Payroll execution MUST then apply adjustments, which are the only mechanism for modifying pay beyond statutory deductions. Adjustments MUST be either recurring (applied automatically on every payroll run until removed) or once-off (scoped to a single payroll period only). Adjustments MAY be defined at company level or employee level and MAY represent either deductions or additions. During payroll execution, the system MUST load and apply only the adjustments valid for the current payroll period; if no adjustments exist, payroll MUST execute using the default net salary without modification. No adjustment MUST affect any payroll period other than the one it is explicitly scoped to unless marked as recurring. we will not track user to calculate gross salary yet leave it for the future, use specified gross salary.
-
-add known admins pages and look in users dashboard, also add pages about system/app management
+add known admins pages and look in users dashboard, also add pages about system/app management pages
 admin are not allowed in user app and users are not in admin pages and routes
 Payments page pull all jobs in all businesses not in current switched to business that is in session, this is not payments problem payroll too i realised when you refresh the page it pulls data according to business but if click of menu link Payments page, payroll page maybe other pages too pull all jobs in all businesses not in current switched to business that is in session, or i think problem is somethimes when i switch while in payments page then go to payroll i realize it has switch back to last business i was when i was in payments page virse vurser to payroll page when i go to payemnt page
 
@@ -34,4 +27,13 @@ This makes the app effectively non-blocking from the user’s perspective while 
 
 improve mcp server for ai
 
-add internal logs table and implement error dedection when users experience errors the apps save errors and notify admnins emails
+in front end make sure useeffects are used correctly the way they were mean to be used
+
+location in login email is not there at all
+
+reports page is not working
+
+recheck and test adjustments, refine and master: gobal :once off and recurring, employee specific: once off and recurring{
+  now i have a question, if an employee have once off adjustment in jan but have 3 executions, but 
+  this adjustment if the first execution, how will the code know that? answer the question!
+}

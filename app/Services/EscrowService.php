@@ -128,11 +128,16 @@ class EscrowService
     /**
      * Get available balance for a business.
      * Returns stored balance for performance, with optional verification.
+     *
+     * @param  bool  $refresh  Whether to refresh the model from database (default: true for safety)
      */
-    public function getAvailableBalance(Business $business, bool $verify = false): float
+    public function getAvailableBalance(Business $business, bool $verify = false, bool $refresh = true): float
     {
-        // Refresh to get latest balance
-        $business->refresh();
+        // Only refresh if explicitly needed (avoids unnecessary query when balance is already fresh)
+        if ($refresh) {
+            $business->refresh();
+        }
+
         $storedBalance = (float) ($business->escrow_balance ?? 0);
 
         // Optional verification (for debugging/audit)

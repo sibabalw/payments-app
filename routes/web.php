@@ -87,10 +87,63 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Audit Logs
         Route::get('/audit-logs', [\App\Http\Controllers\Admin\AuditLogsController::class, 'index'])->name('audit-logs.index');
 
+        // Error Logs
+        Route::get('/error-logs', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'index'])->name('error-logs.index');
+        Route::get('/error-logs/{errorLog}', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'show'])->name('error-logs.show');
+
         // Admin Settings
         Route::get('/settings', [\App\Http\Controllers\Admin\SettingsController::class, 'index'])->name('settings.index');
         Route::post('/settings', [\App\Http\Controllers\Admin\SettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/clear-cache', [\App\Http\Controllers\Admin\SettingsController::class, 'clearCache'])->name('settings.clear-cache');
+
+        // System Health & Monitoring
+        Route::get('/system-health', [\App\Http\Controllers\Admin\SystemHealthController::class, 'index'])->name('system-health.index');
+
+        // System Configuration
+        Route::get('/system-configuration', [\App\Http\Controllers\Admin\SystemConfigurationController::class, 'index'])->name('system-configuration.index');
+        Route::post('/system-configuration/maintenance', [\App\Http\Controllers\Admin\SystemConfigurationController::class, 'toggleMaintenance'])->name('system-configuration.maintenance');
+
+        // Logs Management
+        Route::get('/logs', [\App\Http\Controllers\Admin\LogsController::class, 'index'])->name('logs.index');
+        Route::post('/logs/clear', [\App\Http\Controllers\Admin\LogsController::class, 'clear'])->name('logs.clear');
+
+        // Queue Management
+        Route::get('/queue', [\App\Http\Controllers\Admin\QueueController::class, 'index'])->name('queue.index');
+        Route::post('/queue/restart', [\App\Http\Controllers\Admin\QueueController::class, 'restart'])->name('queue.restart');
+        Route::post('/queue/clear-failed', [\App\Http\Controllers\Admin\QueueController::class, 'clearFailed'])->name('queue.clear-failed');
+
+        // Database Management
+        Route::get('/database', [\App\Http\Controllers\Admin\DatabaseController::class, 'index'])->name('database.index');
+        Route::post('/database/migrate', [\App\Http\Controllers\Admin\DatabaseController::class, 'migrate'])->name('database.migrate');
+        Route::post('/database/optimize', [\App\Http\Controllers\Admin\DatabaseController::class, 'optimize'])->name('database.optimize');
+
+        // Email Configuration
+        Route::get('/email-configuration', [\App\Http\Controllers\Admin\EmailConfigurationController::class, 'index'])->name('email-configuration.index');
+        Route::post('/email-configuration/test', [\App\Http\Controllers\Admin\EmailConfigurationController::class, 'test'])->name('email-configuration.test');
+
+        // Subscription Management
+        Route::get('/subscriptions', [\App\Http\Controllers\Admin\SubscriptionController::class, 'index'])->name('subscriptions.index');
+        Route::post('/subscriptions/{billing}/status', [\App\Http\Controllers\Admin\SubscriptionController::class, 'updateStatus'])->name('subscriptions.update-status');
+
+        // Feature Flags
+        Route::get('/feature-flags', [\App\Http\Controllers\Admin\FeatureFlagsController::class, 'index'])->name('feature-flags.index');
+        Route::post('/feature-flags/toggle', [\App\Http\Controllers\Admin\FeatureFlagsController::class, 'toggle'])->name('feature-flags.toggle');
+
+        // Security Management
+        Route::get('/security', [\App\Http\Controllers\Admin\SecurityController::class, 'index'])->name('security.index');
+        Route::post('/security/rate-limit', [\App\Http\Controllers\Admin\SecurityController::class, 'updateRateLimit'])->name('security.update-rate-limit');
+        Route::post('/security/rate-limit/clear', [\App\Http\Controllers\Admin\SecurityController::class, 'clearRateLimit'])->name('security.clear-rate-limit');
+
+        // Performance Monitoring
+        Route::get('/performance', [\App\Http\Controllers\Admin\PerformanceController::class, 'index'])->name('performance.index');
+
+        // Storage Management
+        Route::get('/storage', [\App\Http\Controllers\Admin\StorageController::class, 'index'])->name('storage.index');
+        Route::post('/storage/clear-cache', [\App\Http\Controllers\Admin\StorageController::class, 'clearCache'])->name('storage.clear-cache');
+        Route::post('/storage/clear-sessions', [\App\Http\Controllers\Admin\StorageController::class, 'clearSessions'])->name('storage.clear-sessions');
+
+        // System Reports
+        Route::get('/system-reports', [\App\Http\Controllers\Admin\SystemReportsController::class, 'index'])->name('system-reports.index');
     });
 
     // Regular user routes (protected by user middleware - blocks admins)
@@ -122,15 +175,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('recipients', \App\Http\Controllers\RecipientController::class);
 
         // Employee routes (for payroll)
-        Route::resource('employees', \App\Http\Controllers\EmployeeController::class);
+        Route::resource('employees', \App\Http\Controllers\EmployeeController::class)->except(['show']);
+        Route::get('employees/search', [\App\Http\Controllers\EmployeeController::class, 'search'])->name('employees.search');
         Route::post('employees/calculate-tax', [\App\Http\Controllers\EmployeeController::class, 'calculateTax'])->name('employees.calculate-tax');
         Route::post('employees/{employee}/calculate-tax', [\App\Http\Controllers\EmployeeController::class, 'calculateTax'])->name('employees.calculate-tax.existing');
         Route::get('employees/{employee}/schedule', [\App\Http\Controllers\EmployeeScheduleController::class, 'show'])->name('employees.schedule');
         Route::put('employees/{employee}/schedule', [\App\Http\Controllers\EmployeeScheduleController::class, 'update'])->name('employees.schedule.update');
 
-        // Custom deduction routes
-        Route::resource('deductions', \App\Http\Controllers\CustomDeductionController::class);
-        Route::get('employees/{employee}/deductions', [\App\Http\Controllers\CustomDeductionController::class, 'employeeIndex'])->name('employees.deductions.index');
+        // Adjustment routes
+        Route::get('adjustments/calculate-period', [\App\Http\Controllers\AdjustmentController::class, 'calculatePeriod'])->name('adjustments.calculate-period');
+        Route::resource('adjustments', \App\Http\Controllers\AdjustmentController::class);
+        Route::get('employees/{employee}/adjustments', [\App\Http\Controllers\AdjustmentController::class, 'employeeIndex'])->name('employees.adjustments.index');
 
         // Time tracking routes
         Route::get('time-tracking', [\App\Http\Controllers\TimeEntryController::class, 'index'])->name('time-tracking.index');
@@ -150,7 +205,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('payments/jobs', [\App\Http\Controllers\PaymentJobController::class, 'index'])->name('payments.jobs');
         Route::get('payments/jobs/{paymentJob}', [\App\Http\Controllers\PaymentJobController::class, 'show'])->name('payments.jobs.show');
 
-        Route::resource('payments', \App\Http\Controllers\PaymentScheduleController::class);
+        Route::resource('payments', \App\Http\Controllers\PaymentScheduleController::class)->except(['edit', 'update']);
+        Route::get('payments/{paymentSchedule}/edit', [\App\Http\Controllers\PaymentScheduleController::class, 'edit'])->name('payments.edit');
+        Route::put('payments/{paymentSchedule}', [\App\Http\Controllers\PaymentScheduleController::class, 'update'])->name('payments.update');
         Route::post('payments/{paymentSchedule}/pause', [\App\Http\Controllers\PaymentScheduleController::class, 'pause'])->name('payments.pause');
         Route::post('payments/{paymentSchedule}/resume', [\App\Http\Controllers\PaymentScheduleController::class, 'resume'])->name('payments.resume');
         Route::post('payments/{paymentSchedule}/cancel', [\App\Http\Controllers\PaymentScheduleController::class, 'cancel'])->name('payments.cancel');

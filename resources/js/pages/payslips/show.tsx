@@ -11,7 +11,7 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 export default function PayslipShow({ payslip }: any) {
-    const { job, employee, business, custom_deductions } = payslip;
+    const { job, employee, business, adjustments } = payslip;
 
     const formatCurrency = (amount: number | string) => {
         return `ZAR ${parseFloat(String(amount)).toLocaleString('en-ZA', { 
@@ -35,10 +35,17 @@ export default function PayslipShow({ payslip }: any) {
     };
 
     const gross = parseFloat(job.gross_salary);
-    const totalDeductions = parseFloat(job.paye_amount) + parseFloat(job.uif_amount);
-    const customDeductionsTotal = custom_deductions?.reduce((sum: number, deduction: any) => {
-        return sum + (deduction.amount || 0);
-    }, 0) || 0;
+    const totalStatutoryDeductions = parseFloat(job.paye_amount) + parseFloat(job.uif_amount);
+    
+    // Calculate adjustments totals (deductions and additions)
+    const adjustmentsList = adjustments || [];
+    const adjustmentsDeductions = adjustmentsList
+        .filter((adj: any) => (adj.adjustment_type || 'deduction') === 'deduction')
+        .reduce((sum: number, adj: any) => sum + (parseFloat(adj.amount) || 0), 0);
+    const adjustmentsAdditions = adjustmentsList
+        .filter((adj: any) => (adj.adjustment_type || 'deduction') === 'addition')
+        .reduce((sum: number, adj: any) => sum + (parseFloat(adj.amount) || 0), 0);
+    const adjustmentsTotal = adjustmentsAdditions - adjustmentsDeductions;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -177,26 +184,49 @@ export default function PayslipShow({ payslip }: any) {
                                         </span>
                                     </div>
                                     
-                                    {/* Custom Deductions */}
-                                    {custom_deductions && custom_deductions.length > 0 && (
+                                    {/* Adjustments */}
+                                    {adjustmentsList.length > 0 && (
                                         <>
-                                            {custom_deductions.map((deduction: any, index: number) => (
-                                                <div key={index} className="flex justify-between items-center text-red-600">
-                                                    <span>{deduction.name}</span>
-                                                    <span>
-                                                        - {formatCurrency(deduction.amount)}
-                                                        {deduction.type === 'percentage' ? (
-                                                            <span className="text-muted-foreground ml-2 text-xs">
-                                                                ({parseFloat(deduction.original_amount || deduction.amount).toFixed(2)}%)
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-muted-foreground ml-2 text-xs">
-                                                                ({calculatePercentage(parseFloat(deduction.amount), gross)}%)
-                                                            </span>
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            ))}
+                                            {/* Deduction Adjustments */}
+                                            {adjustmentsList
+                                                .filter((adj: any) => (adj.adjustment_type || 'deduction') === 'deduction')
+                                                .map((adjustment: any, index: number) => (
+                                                    <div key={`deduction-${index}`} className="flex justify-between items-center text-red-600">
+                                                        <span>{adjustment.name}</span>
+                                                        <span>
+                                                            - {formatCurrency(adjustment.amount)}
+                                                            {adjustment.type === 'percentage' ? (
+                                                                <span className="text-muted-foreground ml-2 text-xs">
+                                                                    ({parseFloat(adjustment.original_amount || adjustment.amount).toFixed(2)}%)
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-muted-foreground ml-2 text-xs">
+                                                                    ({calculatePercentage(parseFloat(adjustment.amount), gross)}%)
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            {/* Addition Adjustments */}
+                                            {adjustmentsList
+                                                .filter((adj: any) => (adj.adjustment_type || 'deduction') === 'addition')
+                                                .map((adjustment: any, index: number) => (
+                                                    <div key={`addition-${index}`} className="flex justify-between items-center text-green-600">
+                                                        <span>{adjustment.name}</span>
+                                                        <span>
+                                                            + {formatCurrency(adjustment.amount)}
+                                                            {adjustment.type === 'percentage' ? (
+                                                                <span className="text-muted-foreground ml-2 text-xs">
+                                                                    ({parseFloat(adjustment.original_amount || adjustment.amount).toFixed(2)}%)
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-muted-foreground ml-2 text-xs">
+                                                                    ({calculatePercentage(parseFloat(adjustment.amount), gross)}%)
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                ))}
                                         </>
                                     )}
                                 </div>

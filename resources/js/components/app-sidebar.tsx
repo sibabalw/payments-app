@@ -14,6 +14,7 @@ import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
 import { BookOpen, Bot, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
+import AppearanceToggleDropdown from './appearance-dropdown';
 
 const footerNavItems: NavItem[] = [
     {
@@ -73,8 +74,8 @@ export function AppSidebar() {
             icon: UserCheck,
         },
         {
-            title: 'Deductions',
-            href: '/deductions',
+            title: 'Adjustments',
+            href: '/adjustments',
             icon: Receipt,
         },
         {
@@ -113,11 +114,14 @@ export function AppSidebar() {
     return (
         <Sidebar collapsible="icon" variant="inset">
             <SidebarHeader>
-                <SidebarMenu>
-                    <SidebarMenuItem>
-                        <BusinessSwitcher />
-                    </SidebarMenuItem>
-                </SidebarMenu>
+                <div className="flex items-center justify-between gap-2">
+                    <SidebarMenu className="flex-1">
+                        <SidebarMenuItem>
+                            <BusinessSwitcher />
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                    <AppearanceToggleDropdown />
+                </div>
             </SidebarHeader>
 
             <SidebarContent>

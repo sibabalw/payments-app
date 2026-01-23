@@ -60,10 +60,13 @@ class PaymentReminderEmail extends Mailable
         );
 
         if ($customTemplate && $customTemplate->compiled_html) {
+            // Convert logo to base64 data URI for email embedding
+            $logoDataUri = $this->getLogoDataUri($business);
+
             $html = $templateService->renderTemplate($customTemplate->compiled_html, [
                 'subject' => 'Payment Reminder',
                 'business_name' => $business->name,
-                'business_logo' => $business->logo ?? '',
+                'business_logo' => $logoDataUri,
                 'year' => date('Y'),
                 'schedule_name' => $this->paymentSchedule->name,
                 'next_payment_date' => $this->paymentSchedule->next_run_at?->format('F d, Y') ?? 'N/A',
@@ -86,5 +89,30 @@ class PaymentReminderEmail extends Mailable
                 'business' => $business,
             ],
         );
+    }
+
+    /**
+     * Convert business logo to base64 data URI for email embedding.
+     */
+    protected function getLogoDataUri($business): string
+    {
+        if (! $business || ! $business->logo) {
+            return '';
+        }
+
+        try {
+            $logoPath = $business->logo;
+            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($logoPath)) {
+                $logoContents = \Illuminate\Support\Facades\Storage::disk('public')->get($logoPath);
+                $mimeType = \Illuminate\Support\Facades\Storage::disk('public')->mimeType($logoPath);
+                $base64 = base64_encode($logoContents);
+
+                return "data:{$mimeType};base64,{$base64}";
+            }
+        } catch (\Exception $e) {
+            // Return empty string if logo can't be loaded
+        }
+
+        return '';
     }
 }

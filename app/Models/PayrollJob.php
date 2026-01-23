@@ -17,7 +17,7 @@ class PayrollJob extends Model
         'paye_amount',
         'uif_amount',
         'sdl_amount',
-        'custom_deductions',
+        'adjustments',
         'net_salary',
         'currency',
         'status',
@@ -40,7 +40,7 @@ class PayrollJob extends Model
             'paye_amount' => 'decimal:2',
             'uif_amount' => 'decimal:2',
             'sdl_amount' => 'decimal:2',
-            'custom_deductions' => 'array',
+            'adjustments' => 'array',
             'net_salary' => 'decimal:2',
             'fee' => 'decimal:2',
             'processed_at' => 'datetime',
@@ -73,13 +73,22 @@ class PayrollJob extends Model
 
     public function getTaxBreakdownAttribute(): array
     {
+        // Calculate adjustments total (deductions only, not additions)
+        $adjustmentsTotal = 0;
+        if (is_array($this->adjustments)) {
+            $adjustmentsTotal = collect($this->adjustments)
+                ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                ->sum('amount');
+        }
+
         return [
             'gross' => $this->gross_salary,
             'paye' => $this->paye_amount,
             'uif' => $this->uif_amount,
             'sdl' => $this->sdl_amount,
             'net' => $this->net_salary,
-            'total_deductions' => $this->paye_amount + $this->uif_amount + $this->sdl_amount,
+            'total_deductions' => $this->paye_amount + $this->uif_amount + $adjustmentsTotal,
+            // SDL is NOT included in total_deductions as it's an employer cost, not deducted from employee
         ];
     }
 }

@@ -25,7 +25,14 @@ import {
     Settings,
     Activity,
     FileText,
+    Server,
+    Database,
+    Mail,
+    HardDrive,
+    Monitor,
+    AlertTriangle,
 } from 'lucide-react';
+import AppearanceToggleDropdown from './appearance-dropdown';
 
 const footerNavItems: NavItem[] = [
     {
@@ -72,9 +79,44 @@ const adminNavItems: NavItem[] = [
         icon: FileText,
     },
     {
+        title: 'Error Logs',
+        href: '/admin/error-logs',
+        icon: AlertTriangle,
+    },
+    {
         title: 'Settings',
         href: '/admin/settings',
         icon: Settings,
+    },
+    {
+        title: 'System Health',
+        href: '/admin/system-health',
+        icon: Monitor,
+    },
+    {
+        title: 'System Configuration',
+        href: '/admin/system-configuration',
+        icon: Server,
+    },
+    {
+        title: 'Logs',
+        href: '/admin/logs',
+        icon: FileText,
+    },
+    {
+        title: 'Queue Management',
+        href: '/admin/queue',
+        icon: Activity,
+    },
+    {
+        title: 'Database',
+        href: '/admin/database',
+        icon: Database,
+    },
+    {
+        title: 'Email Configuration',
+        href: '/admin/email-configuration',
+        icon: Mail,
     },
 ];
 
@@ -108,21 +150,24 @@ export function AdminSidebar() {
     return (
         <Sidebar collapsible="icon" variant="inset">
             <SidebarHeader>
-                <SidebarMenu>
-                    <SidebarMenuItem>
-                        <SidebarMenuButton size="lg" asChild>
-                            <Link href="/admin" className="flex items-center gap-2">
-                                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                                    <Shield className="size-4" />
-                                </div>
-                                <div className="grid flex-1 text-left text-sm leading-tight">
-                                    <span className="truncate font-semibold">Admin Panel</span>
-                                    <span className="truncate text-xs text-muted-foreground">Swift Pay</span>
-                                </div>
-                            </Link>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
-                </SidebarMenu>
+                <div className="flex items-center justify-between gap-2">
+                    <SidebarMenu className="flex-1">
+                        <SidebarMenuItem>
+                            <SidebarMenuButton size="lg" asChild>
+                                <Link href="/admin" className="flex items-center gap-2">
+                                    <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                                        <Shield className="size-4" />
+                                    </div>
+                                    <div className="grid flex-1 text-left text-sm leading-tight">
+                                        <span className="truncate font-semibold">Admin Panel</span>
+                                        <span className="truncate text-xs text-muted-foreground">Swift Pay</span>
+                                    </div>
+                                </Link>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                    <AppearanceToggleDropdown />
+                </div>
             </SidebarHeader>
 
             <SidebarContent>

@@ -71,8 +71,8 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
 
     const confirmCancel = () => {
         if (scheduleToCancel) {
-            router.post(`/payments/${scheduleToCancel}/cancel`, {
-                onSuccess: () => {
+            router.post(`/payments/${scheduleToCancel}/cancel`, {}, {
+                onSuccess: (): void => {
                     setCancelConfirmOpen(false);
                     setScheduleToCancel(null);
                 },
@@ -163,15 +163,17 @@ export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps
                                             </Button>
                                         )}
                                         {schedule.status !== 'cancelled' && (
-                                            <Button variant="outline" size="sm" onClick={() => handleCancel(schedule.id)}>
-                                                Cancel
-                                            </Button>
+                                            <>
+                                                <Button variant="outline" size="sm" onClick={() => handleCancel(schedule.id)}>
+                                                    Cancel
+                                                </Button>
+                                                <Link href={`/payments/${schedule.id}/edit`}>
+                                                    <Button variant="outline" size="sm">
+                                                        Edit
+                                                    </Button>
+                                                </Link>
+                                            </>
                                         )}
-                                        <Link href={`/payments/${schedule.id}/edit`}>
-                                            <Button variant="outline" size="sm">
-                                                Edit
-                                            </Button>
-                                        </Link>
                                     </div>
                                 </div>
                             </CardContent>

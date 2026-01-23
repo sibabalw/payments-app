@@ -39,7 +39,7 @@ class GenerateBankReconciliation extends Command
         $query = PaymentJob::query()
             ->select(['payment_jobs.*'])
             ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
-            ->with(['paymentSchedule.business', 'receiver'])
+            ->with(['paymentSchedule.business', 'recipient'])
             ->whereNotNull('payment_jobs.processed_at');
 
         if ($businessId) {
@@ -93,8 +93,8 @@ class GenerateBankReconciliation extends Command
                 $job->paymentSchedule->business->name,
                 $job->payment_schedule_id,
                 $job->paymentSchedule->name,
-                $job->receiver_id,
-                $job->receiver->name,
+                $job->recipient_id,
+                $job->recipient?->name ?? 'N/A',
                 number_format($job->amount, 2, '.', ''),
                 number_format($job->fee, 2, '.', ''),
                 number_format($job->amount + $job->fee, 2, '.', ''),

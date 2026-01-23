@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Jobs\ProcessPayrollJob;
 use App\Models\PayrollSchedule;
+use App\Services\AdjustmentService;
 use App\Services\SalaryCalculationService;
+use App\Services\SouthAfricaHolidayService;
 use App\Services\SouthAfricanTaxService;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
@@ -28,7 +30,9 @@ class ProcessScheduledPayroll extends Command
 
     public function __construct(
         protected SouthAfricanTaxService $taxService,
-        protected SalaryCalculationService $salaryCalculationService
+        protected SalaryCalculationService $salaryCalculationService,
+        protected AdjustmentService $adjustmentService,
+        protected SouthAfricaHolidayService $holidayService
     ) {
         parent::__construct();
     }
@@ -69,12 +73,22 @@ class ProcessScheduledPayroll extends Command
                 continue;
             }
 
-            // Calculate pay period dates
-            $payPeriodStart = now()->startOfMonth();
-            $payPeriodEnd = now()->endOfMonth();
+            // Calculate pay period dates based on schedule type
+            // This ensures consistent period calculation between adjustment creation and payroll processing
+            $calculatedPeriod = $schedule->calculatePayPeriod();
+            $payPeriodStart = $calculatedPeriod['start'];
+            $payPeriodEnd = $calculatedPeriod['end'];
+
+            Log::info('Calculated pay period for schedule', [
+                'schedule_id' => $schedule->id,
+                'schedule_name' => $schedule->name,
+                'schedule_type' => $schedule->schedule_type,
+                'period_start' => $payPeriodStart->format('Y-m-d'),
+                'period_end' => $payPeriodEnd->format('Y-m-d'),
+            ]);
 
             // Create payroll jobs for each employee (only when schedule executes, not during creation)
-            // Calculate taxes and custom deductions
+            // Calculate taxes and apply adjustments
             foreach ($employees as $employee) {
                 // Calculate gross salary: use time entries if hourly, otherwise use fixed salary
                 if ($employee->hourly_rate) {
@@ -90,16 +104,28 @@ class ProcessScheduledPayroll extends Command
                     $grossSalary = $employee->gross_salary;
                 }
 
-                // Get all deductions for this employee (company-wide + employee-specific)
-                $customDeductions = $employee->getAllDeductions();
-
-                // Calculate net salary with all deductions
                 // Check if employee is exempt from UIF (works < 24 hours/month)
                 $uifExempt = $employee->isUIFExempt();
+
+                // Calculate net salary after statutory deductions only (PAYE, UIF)
                 $breakdown = $this->taxService->calculateNetSalary($grossSalary, [
-                    'custom_deductions' => $customDeductions,
                     'uif_exempt' => $uifExempt,
                 ]);
+
+                // Load valid adjustments for this payroll period and schedule
+                $adjustments = $this->adjustmentService->getValidAdjustments(
+                    $employee,
+                    $payPeriodStart,
+                    $payPeriodEnd,
+                    $schedule->id
+                );
+
+                // Apply adjustments to net salary
+                $adjustmentResult = $this->adjustmentService->applyAdjustments(
+                    $breakdown['net'],
+                    $adjustments,
+                    $grossSalary
+                );
 
                 // Log the calculation details for verification
                 Log::info('Payroll job calculation', [
@@ -110,11 +136,12 @@ class ProcessScheduledPayroll extends Command
                     'uif_amount' => $breakdown['uif'],
                     'uif_exempt' => $uifExempt,
                     'sdl_amount' => $breakdown['sdl'],
-                    'custom_deductions_count' => count($breakdown['custom_deductions'] ?? []),
-                    'custom_deductions_total' => $breakdown['custom_deductions_total'] ?? 0,
-                    'net_salary' => $breakdown['net'],
-                    'company_wide_deductions' => $customDeductions->filter(fn ($d) => $d->employee_id === null)->count(),
-                    'employee_specific_deductions' => $customDeductions->filter(fn ($d) => $d->employee_id !== null)->count(),
+                    'net_after_statutory' => $breakdown['net'],
+                    'adjustments_count' => count($adjustmentResult['adjustments_breakdown'] ?? []),
+                    'total_adjustments' => $adjustmentResult['total_adjustments'] ?? 0,
+                    'total_deductions' => $adjustmentResult['total_deductions'] ?? 0,
+                    'total_additions' => $adjustmentResult['total_additions'] ?? 0,
+                    'final_net_salary' => $adjustmentResult['final_net_salary'],
                 ]);
 
                 $payrollJob = $schedule->payrollJobs()->create([
@@ -123,8 +150,8 @@ class ProcessScheduledPayroll extends Command
                     'paye_amount' => $breakdown['paye'],
                     'uif_amount' => $breakdown['uif'],
                     'sdl_amount' => $breakdown['sdl'],
-                    'custom_deductions' => $breakdown['custom_deductions'] ?? [],
-                    'net_salary' => $breakdown['net'],
+                    'adjustments' => $adjustmentResult['adjustments_breakdown'] ?? [],
+                    'net_salary' => $adjustmentResult['final_net_salary'],
                     'currency' => 'ZAR',
                     'status' => 'pending',
                     'pay_period_start' => $payPeriodStart,
@@ -169,7 +196,22 @@ class ProcessScheduledPayroll extends Command
                 // Calculate next run time for recurring schedules
                 try {
                     $cron = CronExpression::factory($schedule->frequency);
-                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+
+                    // Skip weekends and holidays - move to next business day if needed
+                    if (! $this->holidayService->isBusinessDay($nextRun)) {
+                        $originalDate = $nextRun->format('Y-m-d');
+                        $originalTime = $nextRun->format('H:i');
+                        $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
+                        // Preserve the time from the original cron calculation
+                        $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+
+                        Log::info('Payroll schedule next run adjusted to skip weekend/holiday', [
+                            'schedule_id' => $schedule->id,
+                            'original_date' => $originalDate,
+                            'adjusted_date' => $nextRun->format('Y-m-d'),
+                        ]);
+                    }
 
                     $schedule->update([
                         'next_run_at' => $nextRun,

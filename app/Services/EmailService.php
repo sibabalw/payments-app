@@ -25,6 +25,13 @@ class EmailService
     public function send(User $user, Mailable $mailable, string $emailType): bool
     {
         try {
+            // Check if user has an email address
+            if (! $user->email) {
+                Log::warning("Cannot send email {$emailType} to user {$user->id}: user has no email address");
+
+                return false;
+            }
+
             // Security emails are always sent, cannot be opted out
             $isMandatory = in_array($emailType, self::MANDATORY_EMAILS);
 
@@ -42,7 +49,10 @@ class EmailService
 
             return true;
         } catch (\Exception $e) {
-            Log::error("Failed to send email {$emailType} to user {$user->id}: ".$e->getMessage());
+            Log::error("Failed to send email {$emailType} to user {$user->id}: ".$e->getMessage(), [
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return false;
         }

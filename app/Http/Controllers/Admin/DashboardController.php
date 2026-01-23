@@ -28,11 +28,19 @@ class DashboardController extends Controller
 
         $totalBusinesses = array_sum($businessMetrics);
 
-        // User metrics
+        // User metrics - single query with conditional aggregation
+        $userMetricsData = User::query()
+            ->selectRaw('
+                COUNT(*) as total,
+                SUM(CASE WHEN is_admin = 1 THEN 1 ELSE 0 END) as admins,
+                SUM(CASE WHEN email_verified_at IS NOT NULL THEN 1 ELSE 0 END) as verified
+            ')
+            ->first();
+
         $userMetrics = [
-            'total' => User::count(),
-            'admins' => User::where('is_admin', true)->count(),
-            'verified' => User::whereNotNull('email_verified_at')->count(),
+            'total' => (int) ($userMetricsData->total ?? 0),
+            'admins' => (int) ($userMetricsData->admins ?? 0),
+            'verified' => (int) ($userMetricsData->verified ?? 0),
         ];
 
         // Payment/Payroll job metrics

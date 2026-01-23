@@ -73,4 +73,19 @@ return [
         'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | IP Geolocation Services
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for IP geolocation services used in login notifications.
+    | Optional API keys enhance fallback reliability.
+    |
+    */
+
+    'geolocation' => [
+        'timeout' => env('GEOLOCATION_TIMEOUT', 2),
+        'cache_ttl' => env('GEOLOCATION_CACHE_TTL', 3600),
+    ],
+
 ];

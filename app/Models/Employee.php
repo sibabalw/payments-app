@@ -62,9 +62,9 @@ class Employee extends Model
         return $this->hasMany(PayrollJob::class);
     }
 
-    public function customDeductions(): HasMany
+    public function adjustments(): HasMany
     {
-        return $this->hasMany(CustomDeduction::class);
+        return $this->hasMany(Adjustment::class);
     }
 
     public function timeEntries(): HasMany
@@ -80,32 +80,6 @@ class Employee extends Model
     public function leaveEntries(): HasMany
     {
         return $this->hasMany(LeaveEntry::class);
-    }
-
-    /**
-     * Get all deductions for this employee (company-wide + employee-specific)
-     * Optimized to use a single query with OR condition
-     */
-    public function getAllDeductions(): \Illuminate\Database\Eloquent\Collection
-    {
-        // If customDeductions are already loaded, use them with company deductions
-        if ($this->relationLoaded('customDeductions')) {
-            $companyDeductions = CustomDeduction::where('business_id', $this->business_id)
-                ->whereNull('employee_id')
-                ->where('is_active', true)
-                ->get();
-
-            return $companyDeductions->merge($this->customDeductions);
-        }
-
-        // Otherwise, fetch all in a single query
-        return CustomDeduction::where('business_id', $this->business_id)
-            ->where('is_active', true)
-            ->where(function ($query) {
-                $query->whereNull('employee_id')
-                    ->orWhere('employee_id', $this->id);
-            })
-            ->get();
     }
 
     /**

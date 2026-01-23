@@ -19,9 +19,9 @@ class LoginNotificationEmail extends Mailable
     public function __construct(
         public User $user,
         public string $ipAddress,
-        public string $userAgent
-    ) {
-    }
+        public string $userAgent,
+        public ?array $location = null
+    ) {}
 
     /**
      * Get the message envelope.
@@ -44,6 +44,7 @@ class LoginNotificationEmail extends Mailable
                 'user' => $this->user,
                 'ipAddress' => $this->ipAddress,
                 'userAgent' => $this->userAgent,
+                'location' => $this->location,
             ],
         );
     }

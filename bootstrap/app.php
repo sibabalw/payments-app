@@ -33,5 +33,21 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->report(function (\Throwable $e) {
+            // Get the current request and user
+            $request = request();
+            $user = $request?->user();
+
+            // Log error to database and notify admins
+            try {
+                $errorLogService = app(\App\Services\ErrorLogService::class);
+                $errorLogService->logError($e, $request, $user);
+            } catch (\Throwable $loggingException) {
+                // If error logging itself fails, fall back to Laravel's default logging
+                \Illuminate\Support\Facades\Log::error('Failed to log error to database', [
+                    'original_error' => $e->getMessage(),
+                    'logging_error' => $loggingException->getMessage(),
+                ]);
+            }
+        });
     })->create();

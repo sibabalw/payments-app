@@ -255,13 +255,28 @@ class PaymentService
                     // Decrement escrow balance
                     $this->escrowService->decrementBalance($business, $paymentAmount);
 
-                    // Ensure custom_deductions is an array for counting
-                    $customDeductions = $payrollJob->custom_deductions;
-                    if (is_string($customDeductions)) {
-                        $customDeductions = json_decode($customDeductions, true) ?? [];
-                    }
-                    if (! is_array($customDeductions)) {
-                        $customDeductions = [];
+                    // Ensure adjustments is an array for counting
+                    // Safely access adjustments to avoid any undefined variable errors
+                    $adjustments = [];
+                    try {
+                        // Use getRawOriginal to bypass any accessors/casts that might cause issues
+                        $adjustmentsRaw = $payrollJob->getRawOriginal('adjustments');
+                        if ($adjustmentsRaw === null) {
+                            $adjustments = [];
+                        } elseif (is_string($adjustmentsRaw)) {
+                            $decoded = json_decode($adjustmentsRaw, true);
+                            $adjustments = is_array($decoded) ? $decoded : [];
+                        } elseif (is_array($adjustmentsRaw)) {
+                            $adjustments = $adjustmentsRaw;
+                        }
+                    } catch (\Throwable $e) {
+                        // Catch any error including undefined variable errors
+                        Log::warning('Failed to parse adjustments for payroll job', [
+                            'payroll_job_id' => $payrollJob->id,
+                            'error' => $e->getMessage(),
+                            'error_type' => get_class($e),
+                        ]);
+                        $adjustments = [];
                     }
 
                     Log::info('Payroll payment processed successfully', [
@@ -271,8 +286,8 @@ class PaymentService
                         'paye' => $payrollJob->paye_amount,
                         'uif' => $payrollJob->uif_amount,
                         'sdl' => $payrollJob->sdl_amount,
-                        'custom_deductions' => $customDeductions,
-                        'custom_deductions_count' => count($customDeductions),
+                        'adjustments' => $adjustments,
+                        'adjustments_count' => count($adjustments),
                         'currency' => $payrollJob->currency,
                         'employee_id' => $payrollJob->employee_id,
                     ]);

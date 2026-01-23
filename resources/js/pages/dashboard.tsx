@@ -6,8 +6,8 @@ import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2 } from 'lucide-react';
-import { useState, useEffect, useTransition } from 'react';
+import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { 
     LineChart, 
     Line, 
@@ -161,13 +161,27 @@ export default function Dashboard({
 }: DashboardProps) {
     const { businessesCount: sharedBusinessesCount = 0, hasCompletedDashboardTour, auth } = usePage<SharedData>().props;
     const businessesCount = propBusinessesCount ?? sharedBusinessesCount;
-    const [isPending, startTransition] = useTransition();
     const [viewMode, setViewMode] = useState<'simple' | 'advanced'>('simple');
+    const [isSwitchingToAdvanced, setIsSwitchingToAdvanced] = useState(false);
     
     const handleViewModeChange = (mode: 'simple' | 'advanced') => {
-        startTransition(() => {
-            setViewMode(mode);
-        });
+        if (mode === 'advanced') {
+            // Set loading state first
+            setIsSwitchingToAdvanced(true);
+            // Use double requestAnimationFrame to ensure spinner renders before view change
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    setViewMode('advanced');
+                    // Keep spinner visible briefly to show it
+                    setTimeout(() => {
+                        setIsSwitchingToAdvanced(false);
+                    }, 200);
+                });
+            });
+        } else {
+            setViewMode('simple');
+            setIsSwitchingToAdvanced(false);
+        }
     };
     const [globalFrequency, setGlobalFrequency] = useState<'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly');
     const [chartFrequencies, setChartFrequencies] = useState<{
@@ -257,8 +271,10 @@ export default function Dashboard({
                             size="sm"
                             onClick={() => handleViewModeChange('advanced')}
                             className="gap-2 transition-all"
+                            disabled={isSwitchingToAdvanced}
                         >
-                            <BarChartIcon2 className={`h-4 w-4 ${isPending && viewMode === 'simple' ? 'animate-spin' : ''}`} />
+                            {isSwitchingToAdvanced && <Loader2 className="h-4 w-4 animate-spin" />}
+                            {!isSwitchingToAdvanced && <BarChartIcon2 className="h-4 w-4" />}
                             Advanced View
                         </Button>
                     </div>

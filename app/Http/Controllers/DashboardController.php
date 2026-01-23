@@ -3,12 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Business;
-use App\Models\Employee;
 use App\Models\PaymentJob;
 use App\Models\PaymentSchedule;
 use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
-use App\Models\Recipient;
 use App\Services\EscrowService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -32,7 +30,17 @@ class DashboardController extends Controller
 
         // Redirect to onboarding if not completed
         if (! $user->onboarding_completed_at) {
-            $hasBusinesses = $user->businesses()->exists() || $user->ownedBusinesses()->exists();
+            // Single query to check if user has any businesses
+            $hasBusinesses = DB::table('businesses')
+                ->where('user_id', $user->id)
+                ->orWhereExists(function ($query) use ($user) {
+                    $query->select(DB::raw(1))
+                        ->from('business_user')
+                        ->whereColumn('business_user.business_id', 'businesses.id')
+                        ->where('business_user.user_id', $user->id);
+                })
+                ->exists();
+
             if ($hasBusinesses) {
                 $user->update(['onboarding_completed_at' => now()]);
             } else {
@@ -42,7 +50,21 @@ class DashboardController extends Controller
 
         // Auto-select business if needed
         if (! $user->current_business_id) {
-            $firstBusiness = $user->ownedBusinesses()->first() ?? $user->businesses()->first();
+            // Single query to get first business (owned or associated)
+            $firstBusiness = DB::table('businesses')
+                ->where(function ($query) use ($user) {
+                    $query->where('user_id', $user->id)
+                        ->orWhereExists(function ($subQuery) use ($user) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('business_user')
+                                ->whereColumn('business_user.business_id', 'businesses.id')
+                                ->where('business_user.user_id', $user->id);
+                        });
+                })
+                ->orderByRaw('CASE WHEN user_id = ? THEN 0 ELSE 1 END', [$user->id])
+                ->orderBy('id')
+                ->first();
+
             if ($firstBusiness) {
                 $user->update(['current_business_id' => $firstBusiness->id]);
                 $user->refresh();
@@ -132,10 +154,19 @@ class DashboardController extends Controller
 
     private function getUserBusinessIds($user): array
     {
-        $ownedIds = $user->ownedBusinesses()->pluck('id')->toArray();
-        $associatedIds = $user->businesses()->pluck('businesses.id')->toArray();
-
-        return array_unique(array_merge($ownedIds, $associatedIds));
+        // Single query using UNION to get all business IDs
+        return DB::table('businesses')
+            ->where('user_id', $user->id)
+            ->select('id')
+            ->union(
+                DB::table('business_user')
+                    ->where('user_id', $user->id)
+                    ->select('business_id as id')
+            )
+            ->pluck('id')
+            ->unique()
+            ->values()
+            ->toArray();
     }
 
     private function getBasicMetrics(?int $businessId, array $userBusinessIds): array
@@ -629,25 +660,64 @@ class DashboardController extends Controller
         $business = null;
 
         if ($businessId) {
-            $business = Business::find($businessId);
+            $business = Business::select('id', 'name', 'logo', 'status', 'business_type', 'email', 'phone', 'escrow_balance')
+                ->find($businessId);
         }
 
         if (! $business) {
-            $business = $user->businesses()->first() ?? $user->ownedBusinesses()->first();
+            // Single query to get first business (owned or associated)
+            $businessData = DB::table('businesses')
+                ->where(function ($query) use ($user) {
+                    $query->where('user_id', $user->id)
+                        ->orWhereExists(function ($subQuery) use ($user) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('business_user')
+                                ->whereColumn('business_user.business_id', 'businesses.id')
+                                ->where('business_user.user_id', $user->id);
+                        });
+                })
+                ->orderByRaw('CASE WHEN user_id = ? THEN 0 ELSE 1 END', [$user->id])
+                ->orderBy('id')
+                ->select('id', 'name', 'logo', 'status', 'business_type', 'email', 'phone', 'escrow_balance')
+                ->first();
+
+            if ($businessData) {
+                $business = Business::make((array) $businessData);
+            }
         }
 
         if (! $business) {
             return null;
         }
 
-        // Get counts in single queries
-        $employeesCount = Employee::where('business_id', $business->id)->count();
-        $paymentSchedulesCount = PaymentSchedule::where('business_id', $business->id)->count();
-        $payrollSchedulesCount = PayrollSchedule::where('business_id', $business->id)->count();
-        $recipientsCount = Recipient::where('business_id', $business->id)->count();
+        // Get all counts in a single query using UNION
+        $counts = DB::select("
+            SELECT 
+                'employees' as type, COUNT(*) as count 
+            FROM employees 
+            WHERE business_id = ?
+            UNION ALL
+            SELECT 
+                'payment_schedules' as type, COUNT(*) as count 
+            FROM payment_schedules 
+            WHERE business_id = ?
+            UNION ALL
+            SELECT 
+                'payroll_schedules' as type, COUNT(*) as count 
+            FROM payroll_schedules 
+            WHERE business_id = ?
+            UNION ALL
+            SELECT 
+                'recipients' as type, COUNT(*) as count 
+            FROM recipients 
+            WHERE business_id = ?
+        ", [$business->id, $business->id, $business->id, $business->id]);
+
+        $countsMap = array_column($counts, 'count', 'type');
 
         $logoUrl = $business->logo ? Storage::disk('public')->url($business->logo) : null;
-        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        // Use stored escrow_balance directly instead of calling service (avoids refresh query)
+        $escrowBalance = (float) ($business->escrow_balance ?? 0);
 
         return [
             'id' => $business->id,
@@ -657,11 +727,11 @@ class DashboardController extends Controller
             'business_type' => $business->business_type,
             'email' => $business->email,
             'phone' => $business->phone,
-            'escrow_balance' => (float) $escrowBalance,
-            'employees_count' => $employeesCount,
-            'payment_schedules_count' => $paymentSchedulesCount,
-            'payroll_schedules_count' => $payrollSchedulesCount,
-            'recipients_count' => $recipientsCount,
+            'escrow_balance' => $escrowBalance,
+            'employees_count' => (int) ($countsMap['employees'] ?? 0),
+            'payment_schedules_count' => (int) ($countsMap['payment_schedules'] ?? 0),
+            'payroll_schedules_count' => (int) ($countsMap['payroll_schedules'] ?? 0),
+            'recipients_count' => (int) ($countsMap['recipients'] ?? 0),
         ];
     }
 

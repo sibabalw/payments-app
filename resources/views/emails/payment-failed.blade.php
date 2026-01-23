@@ -8,7 +8,7 @@
     <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; margin: 24px 0; border-radius: 4px;">
         <p style="margin: 0 0 8px 0; font-weight: 600; color: #991b1b;">Payment Details:</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Amount:</strong> {{ number_format($paymentJob->amount, 2) }} {{ $paymentJob->currency }}</p>
-        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Receiver:</strong> {{ $paymentJob->receiver->name }}</p>
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Receiver:</strong> {{ $paymentJob->recipient?->name ?? 'N/A' }}</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Schedule:</strong> {{ $paymentJob->paymentSchedule->name }}</p>
         @if($paymentJob->error_message)
         <p style="margin: 0; color: #991b1b;"><strong>Error:</strong> {{ $paymentJob->error_message }}</p>

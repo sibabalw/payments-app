@@ -98,15 +98,18 @@ class IRP5Service
         $totalPaye = $payrollJobs->sum('paye_amount');
         $totalUif = $payrollJobs->sum('uif_amount');
 
-        // Calculate custom deductions
-        $customDeductionsTotals = [];
+        // Calculate adjustments (only deductions, not additions)
+        $adjustmentsTotals = [];
         foreach ($payrollJobs as $job) {
-            foreach ($job->custom_deductions ?? [] as $deduction) {
-                $name = $deduction['name'] ?? 'Other';
-                if (! isset($customDeductionsTotals[$name])) {
-                    $customDeductionsTotals[$name] = 0;
+            foreach ($job->adjustments ?? [] as $adjustment) {
+                // Only include deduction-type adjustments for IRP5
+                if (($adjustment['adjustment_type'] ?? 'deduction') === 'deduction') {
+                    $name = $adjustment['name'] ?? 'Other';
+                    if (! isset($adjustmentsTotals[$name])) {
+                        $adjustmentsTotals[$name] = 0;
+                    }
+                    $adjustmentsTotals[$name] += $adjustment['amount'] ?? 0;
                 }
-                $customDeductionsTotals[$name] += $deduction['amount'] ?? 0;
             }
         }
 
@@ -133,8 +136,8 @@ class IRP5Service
             ],
         ];
 
-        // Add custom deductions (pension, medical, etc.)
-        foreach ($customDeductionsTotals as $name => $amount) {
+        // Add adjustments (deductions only, not additions)
+        foreach ($adjustmentsTotals as $name => $amount) {
             $code = $this->mapDeductionToSarsCode($name);
             $deductions[] = [
                 'code' => $code,
@@ -143,7 +146,7 @@ class IRP5Service
             ];
         }
 
-        $totalDeductions = $totalPaye + $totalUif + array_sum($customDeductionsTotals);
+        $totalDeductions = $totalPaye + $totalUif + array_sum($adjustmentsTotals);
 
         // Get employment period within tax year
         $firstPayroll = $payrollJobs->first();

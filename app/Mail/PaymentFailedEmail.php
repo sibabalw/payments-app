@@ -49,7 +49,7 @@ class PaymentFailedEmail extends Mailable
      */
     public function content(): Content
     {
-        $this->paymentJob->loadMissing(['paymentSchedule.business', 'receiver']);
+        $this->paymentJob->loadMissing(['paymentSchedule.business', 'recipient']);
         $business = $this->paymentJob->paymentSchedule->business;
 
         // Check for custom template
@@ -60,14 +60,17 @@ class PaymentFailedEmail extends Mailable
         );
 
         if ($customTemplate && $customTemplate->compiled_html) {
+            // Convert logo to base64 data URI for email embedding
+            $logoDataUri = $this->getLogoDataUri($business);
+
             $html = $templateService->renderTemplate($customTemplate->compiled_html, [
                 'subject' => 'Payment Failed',
                 'business_name' => $business->name,
-                'business_logo' => $business->logo ?? '',
+                'business_logo' => $logoDataUri,
                 'year' => date('Y'),
                 'amount' => number_format($this->paymentJob->amount, 2),
                 'currency' => $this->paymentJob->currency,
-                'receiver_name' => $this->paymentJob->receiver?->name ?? 'Unknown',
+                'receiver_name' => $this->paymentJob->recipient?->name ?? 'Unknown',
                 'error_message' => $this->paymentJob->error_message ?? 'An error occurred',
                 'retry_url' => route('payments.index'),
             ]);
@@ -86,5 +89,30 @@ class PaymentFailedEmail extends Mailable
                 'business' => $business,
             ],
         );
+    }
+
+    /**
+     * Convert business logo to base64 data URI for email embedding.
+     */
+    protected function getLogoDataUri($business): string
+    {
+        if (! $business || ! $business->logo) {
+            return '';
+        }
+
+        try {
+            $logoPath = $business->logo;
+            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($logoPath)) {
+                $logoContents = \Illuminate\Support\Facades\Storage::disk('public')->get($logoPath);
+                $mimeType = \Illuminate\Support\Facades\Storage::disk('public')->mimeType($logoPath);
+                $base64 = base64_encode($logoContents);
+
+                return "data:{$mimeType};base64,{$base64}";
+            }
+        } catch (\Exception $e) {
+            // Return empty string if logo can't be loaded
+        }
+
+        return '';
     }
 }

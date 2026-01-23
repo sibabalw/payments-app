@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -81,5 +82,58 @@ class PayrollSchedule extends Model
     public function scopeRecurring(Builder $query): Builder
     {
         return $query->where('schedule_type', 'recurring');
+    }
+
+    /**
+     * Calculate the pay period this schedule will process when it executes.
+     *
+     * This method determines what pay period (start and end dates) the schedule
+     * will use when processing payroll. The calculation is based on:
+     * - Monthly recurring schedules: pay for the previous month
+     * - One-time schedules: pay for the scheduled month
+     * - Other schedules: use current month
+     *
+     * @param  Carbon|null  $executionDate  If null, uses next_run_at or now()
+     * @return array{start: Carbon, end: Carbon}
+     */
+    public function calculatePayPeriod(?Carbon $executionDate = null): array
+    {
+        $executionDate = $executionDate ?? $this->next_run_at ?? now();
+
+        // Ensure we're working with a Carbon instance
+        if (! $executionDate instanceof Carbon) {
+            $executionDate = Carbon::parse($executionDate);
+        }
+
+        // Parse cron frequency to determine schedule type
+        $cronParts = explode(' ', $this->frequency);
+
+        // For monthly recurring schedules: pay for previous month
+        // Cron format: "0 0 25 * *" (runs on 25th) means pay for previous month
+        if ($this->isRecurring() && count($cronParts) === 5) {
+            // Check if it's a monthly schedule (day of month is specified, not *)
+            if ($cronParts[2] !== '*' && $cronParts[3] === '*') {
+                $previousMonth = $executionDate->copy()->subMonth();
+
+                return [
+                    'start' => $previousMonth->copy()->startOfMonth(),
+                    'end' => $previousMonth->copy()->endOfMonth(),
+                ];
+            }
+        }
+
+        // For one-time schedules: pay for the month they're scheduled in
+        if ($this->isOneTime()) {
+            return [
+                'start' => $executionDate->copy()->startOfMonth(),
+                'end' => $executionDate->copy()->endOfMonth(),
+            ];
+        }
+
+        // For weekly/biweekly/daily: use current month (default behavior)
+        return [
+            'start' => $executionDate->copy()->startOfMonth(),
+            'end' => $executionDate->copy()->endOfMonth(),
+        ];
     }
 }

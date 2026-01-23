@@ -23,9 +23,6 @@ interface PaymentsEditProps {
 
 export default function PaymentsEdit({ schedule, businesses, recipients }: PaymentsEditProps) {
     // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
-    const scheduledDate = schedule.scheduled_date 
-        ? new Date(schedule.scheduled_date + 'T' + (schedule.scheduled_time || '00:00'))
-        : undefined;
     const scheduledTime = schedule.scheduled_time || '09:00';
     const parsedFrequency = schedule.parsed_frequency || 'daily';
 
@@ -41,10 +38,18 @@ export default function PaymentsEdit({ schedule, businesses, recipients }: Payme
         recipient_ids: schedule.recipients?.map((r: any) => r.id) || schedule.receivers?.map((r: any) => r.id) || [],
     });
 
+    // Calculate scheduledDate reactively from form data
+    const scheduledDate = data.scheduled_date 
+        ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00'))
+        : undefined;
+
     const isReadOnly = schedule.status === 'cancelled';
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (isReadOnly) {
+            return;
+        }
         put(`/payments/${schedule.id}`);
     };
 
@@ -125,7 +130,7 @@ export default function PaymentsEdit({ schedule, businesses, recipients }: Payme
                                 {isReadOnly ? (
                                     <div className="mt-2">
                                         <p className="text-sm text-muted-foreground">
-                                            {scheduledDate ? scheduledDate.toLocaleDateString() : 'N/A'} at {scheduledTime}
+                                            {scheduledDate ? scheduledDate.toLocaleDateString() : 'N/A'} at {data.scheduled_time}
                                         </p>
                                     </div>
                                 ) : (
@@ -135,17 +140,18 @@ export default function PaymentsEdit({ schedule, businesses, recipients }: Payme
                                             onDateChange={(date) => {
                                                 if (date) {
                                                     // Use local date components to avoid timezone shifts
+                                                    // Only update the date part, preserve the time from form data
                                                     const year = date.getFullYear();
                                                     const month = (date.getMonth() + 1).toString().padStart(2, '0');
                                                     const day = date.getDate().toString().padStart(2, '0');
-                                                    const hours = date.getHours().toString().padStart(2, '0');
-                                                    const minutes = date.getMinutes().toString().padStart(2, '0');
                                                     setData('scheduled_date', `${year}-${month}-${day}`);
-                                                    setData('scheduled_time', `${hours}:${minutes}`);
+                                                    // Don't update time here - let onTimeChange handle it
                                                 }
                                             }}
                                             time={data.scheduled_time}
-                                            onTimeChange={(time) => setData('scheduled_time', time)}
+                                            onTimeChange={(time) => {
+                                                setData('scheduled_time', time);
+                                            }}
                                             showTime={true}
                                         />
                                         <InputError message={errors.scheduled_date} />
@@ -228,7 +234,7 @@ export default function PaymentsEdit({ schedule, businesses, recipients }: Payme
                             </div>
 
                             <div className="flex gap-2">
-                                <Button type="submit" disabled={processing}>
+                                <Button type="submit" disabled={processing || isReadOnly}>
                                     Update Schedule
                                 </Button>
                                 <Link href="/payments">

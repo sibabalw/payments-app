@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\ProcessPaymentJob;
 use App\Models\PaymentSchedule;
+use App\Services\SouthAfricaHolidayService;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -23,6 +24,12 @@ class ProcessScheduledPayments extends Command
      * @var string
      */
     protected $description = 'Process all due payment schedules';
+
+    public function __construct(
+        protected SouthAfricaHolidayService $holidayService
+    ) {
+        parent::__construct();
+    }
 
     /**
      * Execute the console command.
@@ -109,7 +116,22 @@ class ProcessScheduledPayments extends Command
                 // Calculate next run time for recurring schedules
                 try {
                     $cron = CronExpression::factory($schedule->frequency);
-                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+
+                    // Skip weekends and holidays - move to next business day if needed
+                    if (! $this->holidayService->isBusinessDay($nextRun)) {
+                        $originalDate = $nextRun->format('Y-m-d');
+                        $originalTime = $nextRun->format('H:i');
+                        $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
+                        // Preserve the time from the original cron calculation
+                        $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+
+                        Log::info('Payment schedule next run adjusted to skip weekend/holiday', [
+                            'schedule_id' => $schedule->id,
+                            'original_date' => $originalDate,
+                            'adjusted_date' => $nextRun->format('Y-m-d'),
+                        ]);
+                    }
 
                     $schedule->update([
                         'next_run_at' => $nextRun,

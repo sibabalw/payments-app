@@ -138,7 +138,7 @@ class ReportController extends Controller
                 'payroll_jobs.paye_amount',
                 'payroll_jobs.uif_amount',
                 'payroll_jobs.sdl_amount',
-                'payroll_jobs.custom_deductions',
+                'payroll_jobs.adjustments',
                 'payroll_jobs.net_salary',
                 'payroll_jobs.pay_period_start',
                 'payroll_jobs.pay_period_end',
@@ -146,9 +146,11 @@ class ReportController extends Controller
             ])
             ->get();
 
-        // Calculate total custom deductions
-        $totalCustomDeductions = $jobs->sum(function ($job) {
-            return collect($job->custom_deductions ?? [])->sum('amount');
+        // Calculate total adjustments (deductions only, not additions)
+        $totalAdjustments = $jobs->sum(function ($job) {
+            return collect($job->adjustments ?? [])
+                ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                ->sum('amount');
         });
 
         return [
@@ -157,7 +159,7 @@ class ReportController extends Controller
             'total_paye' => (float) ($summary->total_paye ?? 0),
             'total_uif' => (float) ($summary->total_uif ?? 0),
             'total_sdl' => (float) ($summary->total_sdl ?? 0),
-            'total_custom_deductions' => $totalCustomDeductions,
+            'total_adjustments' => $totalAdjustments,
             'total_net' => (float) ($summary->total_net ?? 0),
             'jobs' => $jobs->map(function ($job) {
                 return [
@@ -167,8 +169,10 @@ class ReportController extends Controller
                     'paye_amount' => $job->paye_amount,
                     'uif_amount' => $job->uif_amount,
                     'sdl_amount' => $job->sdl_amount,
-                    'custom_deductions' => $job->custom_deductions ?? [],
-                    'custom_deductions_total' => collect($job->custom_deductions ?? [])->sum('amount'),
+                    'adjustments' => $job->adjustments ?? [],
+                    'adjustments_total' => collect($job->adjustments ?? [])
+                        ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                        ->sum('amount'),
                     'net_salary' => $job->net_salary,
                     'pay_period_start' => $job->pay_period_start?->format('Y-m-d'),
                     'pay_period_end' => $job->pay_period_end?->format('Y-m-d'),
@@ -224,19 +228,21 @@ class ReportController extends Controller
         $detailedJobs = PayrollJob::query()
             ->where('status', 'succeeded')
             ->whereIn('employee_id', $employeeIds)
-            ->select(['id', 'employee_id', 'gross_salary', 'net_salary', 'pay_period_start', 'pay_period_end', 'custom_deductions'])
+            ->select(['id', 'employee_id', 'gross_salary', 'net_salary', 'pay_period_start', 'pay_period_end', 'adjustments'])
             ->get()
             ->groupBy('employee_id');
 
-        // Calculate custom deductions per employee
-        $customDeductionsByEmployee = [];
+        // Calculate adjustments per employee (deductions only)
+        $adjustmentsByEmployee = [];
         foreach ($detailedJobs as $employeeId => $jobs) {
-            $customDeductionsByEmployee[$employeeId] = $jobs->sum(function ($job) {
-                return collect($job->custom_deductions ?? [])->sum('amount');
+            $adjustmentsByEmployee[$employeeId] = $jobs->sum(function ($job) {
+                return collect($job->adjustments ?? [])
+                    ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                    ->sum('amount');
             });
         }
 
-        $employees = $byEmployee->map(function ($emp) use ($detailedJobs, $customDeductionsByEmployee) {
+        $employees = $byEmployee->map(function ($emp) use ($detailedJobs, $adjustmentsByEmployee) {
             $jobs = $detailedJobs->get($emp->employee_id, collect());
 
             return [
@@ -247,7 +253,7 @@ class ReportController extends Controller
                 'total_paye' => (float) $emp->total_paye,
                 'total_uif' => (float) $emp->total_uif,
                 'total_sdl' => (float) $emp->total_sdl,
-                'total_custom_deductions' => $customDeductionsByEmployee[$emp->employee_id] ?? 0,
+                'total_adjustments' => $adjustmentsByEmployee[$emp->employee_id] ?? 0,
                 'total_net' => (float) $emp->total_net,
                 'jobs' => $jobs->map(function ($job) {
                     return [
@@ -363,32 +369,43 @@ class ReportController extends Controller
 
         $jobs = $query->get();
 
-        // Aggregate custom deductions by name
-        $deductionBreakdown = [];
+        // Aggregate adjustments by name (deductions only)
+        $adjustmentBreakdown = [];
         foreach ($jobs as $job) {
-            foreach ($job->custom_deductions ?? [] as $deduction) {
-                $name = $deduction['name'] ?? 'Unknown';
-                if (! isset($deductionBreakdown[$name])) {
-                    $deductionBreakdown[$name] = [
-                        'name' => $name,
-                        'type' => $deduction['type'] ?? 'fixed',
-                        'total_amount' => 0,
-                        'count' => 0,
-                    ];
+            foreach ($job->adjustments ?? [] as $adjustment) {
+                // Only include deduction-type adjustments
+                if (($adjustment['adjustment_type'] ?? 'deduction') === 'deduction') {
+                    $name = $adjustment['name'] ?? 'Unknown';
+                    if (! isset($adjustmentBreakdown[$name])) {
+                        $adjustmentBreakdown[$name] = [
+                            'name' => $name,
+                            'type' => $adjustment['type'] ?? 'fixed',
+                            'total_amount' => 0,
+                            'count' => 0,
+                        ];
+                    }
+                    $adjustmentBreakdown[$name]['total_amount'] += $adjustment['amount'] ?? 0;
+                    $adjustmentBreakdown[$name]['count']++;
                 }
-                $deductionBreakdown[$name]['total_amount'] += $deduction['amount'] ?? 0;
-                $deductionBreakdown[$name]['count']++;
             }
         }
 
+        $totalAdjustments = $jobs->sum(function ($job) {
+            return collect($job->adjustments ?? [])
+                ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                ->sum('amount');
+        });
+
         return [
-            'deductions' => array_values($deductionBreakdown),
-            'total_custom_deductions' => $jobs->sum(function ($job) {
-                return collect($job->custom_deductions ?? [])->sum('amount');
-            }),
+            'deductions' => array_values($adjustmentBreakdown),
+            'total_adjustments' => $totalAdjustments,
             'total_statutory_deductions' => $jobs->sum('paye_amount') + $jobs->sum('uif_amount'),
             'total_all_deductions' => $jobs->sum(function ($job) {
-                return $job->paye_amount + $job->uif_amount + collect($job->custom_deductions ?? [])->sum('amount');
+                $adjustmentTotal = collect($job->adjustments ?? [])
+                    ->filter(fn ($adj) => ($adj['adjustment_type'] ?? 'deduction') === 'deduction')
+                    ->sum('amount');
+
+                return $job->paye_amount + $job->uif_amount + $adjustmentTotal;
             }),
         ];
     }
@@ -428,7 +445,7 @@ class ReportController extends Controller
 
         // Get detailed jobs list with eager loading
         $jobs = (clone $query)
-            ->with(['receiver:id,name'])
+            ->with(['recipient:id,name'])
             ->select(['payment_jobs.id', 'payment_jobs.recipient_id', 'payment_jobs.amount', 'payment_jobs.fee', 'payment_jobs.currency', 'payment_jobs.processed_at'])
             ->get();
 
@@ -439,7 +456,7 @@ class ReportController extends Controller
             'jobs' => $jobs->map(function ($job) {
                 return [
                     'id' => $job->id,
-                    'receiver_name' => $job->receiver->name ?? 'N/A',
+                    'receiver_name' => $job->recipient?->name ?? 'N/A',
                     'amount' => $job->amount,
                     'fee' => $job->fee,
                     'currency' => $job->currency,
@@ -1009,7 +1026,7 @@ class ReportController extends Controller
         fputcsv($output, ['Total Gross', number_format($report['total_gross'] ?? 0, 2)]);
         fputcsv($output, ['Total PAYE', number_format($report['total_paye'] ?? 0, 2)]);
         fputcsv($output, ['Total UIF', number_format($report['total_uif'] ?? 0, 2)]);
-        fputcsv($output, ['Total Custom Deductions', number_format($report['total_custom_deductions'] ?? 0, 2)]);
+        fputcsv($output, ['Total Adjustments', number_format($report['total_adjustments'] ?? 0, 2)]);
         fputcsv($output, ['Total SDL', number_format($report['total_sdl'] ?? 0, 2)]);
         fputcsv($output, ['Total Net', number_format($report['total_net'] ?? 0, 2)]);
         fputcsv($output, []);
@@ -1023,7 +1040,7 @@ class ReportController extends Controller
                     number_format($job['gross_salary'] ?? 0, 2),
                     number_format($job['paye_amount'] ?? 0, 2),
                     number_format($job['uif_amount'] ?? 0, 2),
-                    number_format($job['custom_deductions_total'] ?? 0, 2),
+                    number_format($job['adjustments_total'] ?? 0, 2),
                     number_format($job['net_salary'] ?? 0, 2),
                     $job['pay_period_start'] ?? 'N/A',
                     $job['pay_period_end'] ?? 'N/A',
@@ -1046,7 +1063,7 @@ class ReportController extends Controller
                     number_format($emp['total_gross'] ?? 0, 2),
                     number_format($emp['total_paye'] ?? 0, 2),
                     number_format($emp['total_uif'] ?? 0, 2),
-                    number_format($emp['total_custom_deductions'] ?? 0, 2),
+                    number_format($emp['total_adjustments'] ?? 0, 2),
                     number_format($emp['total_net'] ?? 0, 2),
                 ]);
             }
@@ -1086,7 +1103,7 @@ class ReportController extends Controller
         fputcsv($output, ['Deductions Summary Report']);
         fputcsv($output, []);
         fputcsv($output, ['Statutory Deductions', number_format($report['total_statutory_deductions'] ?? 0, 2)]);
-        fputcsv($output, ['Custom Deductions', number_format($report['total_custom_deductions'] ?? 0, 2)]);
+        fputcsv($output, ['Adjustments', number_format($report['total_adjustments'] ?? 0, 2)]);
         fputcsv($output, ['Total All Deductions', number_format($report['total_all_deductions'] ?? 0, 2)]);
         fputcsv($output, []);
 

@@ -89,9 +89,9 @@ class Business extends Model
         return $this->hasMany(MonthlyBilling::class);
     }
 
-    public function customDeductions(): HasMany
+    public function adjustments(): HasMany
     {
-        return $this->hasMany(CustomDeduction::class)->whereNull('employee_id');
+        return $this->hasMany(Adjustment::class)->whereNull('employee_id');
     }
 
     public function timeEntries(): HasMany

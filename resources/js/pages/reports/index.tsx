@@ -244,7 +244,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold text-red-600">
-                                {formatCurrency((report.total_paye || 0) + (report.total_uif || 0) + (report.total_custom_deductions || 0))}
+                                {formatCurrency((report.total_paye || 0) + (report.total_uif || 0) + (report.total_adjustments || 0))}
                             </div>
                         </CardContent>
                     </Card>
@@ -273,8 +273,8 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                                 <span>{formatCurrency(report.total_uif || 0)}</span>
                             </div>
                             <div className="flex justify-between">
-                                <span>Custom Deductions:</span>
-                                <span>{formatCurrency(report.total_custom_deductions || 0)}</span>
+                                <span>Adjustments:</span>
+                                <span>{formatCurrency(report.total_adjustments || 0)}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span>SDL (Employer Cost):</span>
@@ -298,7 +298,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                                             <th className="text-right p-2">Gross</th>
                                             <th className="text-right p-2">PAYE</th>
                                             <th className="text-right p-2">UIF</th>
-                                            <th className="text-right p-2">Custom</th>
+                                            <th className="text-right p-2">Adjustments</th>
                                             <th className="text-right p-2">Net</th>
                                             <th className="text-left p-2">Period</th>
                                         </tr>
@@ -310,7 +310,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                                                 <td className="text-right p-2">{formatCurrency(job.gross_salary)}</td>
                                                 <td className="text-right p-2 text-red-600">{formatCurrency(job.paye_amount)}</td>
                                                 <td className="text-right p-2 text-red-600">{formatCurrency(job.uif_amount)}</td>
-                                                <td className="text-right p-2 text-red-600">{formatCurrency(job.custom_deductions_total)}</td>
+                                                <td className="text-right p-2 text-red-600">{formatCurrency(job.adjustments_total || 0)}</td>
                                                 <td className="text-right p-2 font-medium text-green-600">{formatCurrency(job.net_salary)}</td>
                                                 <td className="p-2 text-xs text-muted-foreground">
                                                     {formatDate(job.pay_period_start)} - {formatDate(job.pay_period_end)}
@@ -384,7 +384,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                                     <div>
                                         <div className="text-sm text-muted-foreground">Total Deductions</div>
                                         <div className="text-lg font-bold text-red-600">
-                                            {formatCurrency(emp.total_paye + emp.total_uif + emp.total_custom_deductions)}
+                                            {formatCurrency(emp.total_paye + emp.total_uif + (emp.total_adjustments || 0))}
                                         </div>
                                     </div>
                                 </div>
@@ -497,7 +497,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                             <CardTitle>Custom Deductions</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">{formatCurrency(report.total_custom_deductions || 0)}</div>
+                            <div className="text-2xl font-bold">{formatCurrency(report.total_adjustments || 0)}</div>
                         </CardContent>
                     </Card>
 
@@ -514,7 +514,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
                 {report.deductions && report.deductions.length > 0 && (
                     <Card>
                         <CardHeader>
-                            <CardTitle>Custom Deductions Breakdown</CardTitle>
+                            <CardTitle>Adjustments Breakdown</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="overflow-x-auto">

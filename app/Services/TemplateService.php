@@ -1126,7 +1126,46 @@ HTML;
     {
         foreach ($data as $key => $value) {
             if (is_string($value) || is_numeric($value)) {
-                $html = str_replace("{{{$key}}}", (string) $value, $html);
+                $replacement = (string) $value;
+
+                // Convert relative logo paths to base64 data URIs for email embedding
+                if ($key === 'business_logo' && $replacement && ! str_starts_with($replacement, 'data:')) {
+                    \Illuminate\Support\Facades\Log::info('TemplateService: Processing business_logo', [
+                        'original_value' => $replacement,
+                        'is_url' => filter_var($replacement, FILTER_VALIDATE_URL),
+                    ]);
+
+                    // If it's not already a data URI, try to convert it
+                    if (! filter_var($replacement, FILTER_VALIDATE_URL)) {
+                        // It's a relative path, convert to base64
+                        try {
+                            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($replacement)) {
+                                $logoContents = \Illuminate\Support\Facades\Storage::disk('public')->get($replacement);
+                                $mimeType = \Illuminate\Support\Facades\Storage::disk('public')->mimeType($replacement) ?: 'image/png';
+                                $base64 = base64_encode($logoContents);
+                                $replacement = "data:{$mimeType};base64,{$base64}";
+
+                                \Illuminate\Support\Facades\Log::info('TemplateService: Logo converted to base64', [
+                                    'mime_type' => $mimeType,
+                                    'base64_length' => strlen($base64),
+                                ]);
+                            } else {
+                                \Illuminate\Support\Facades\Log::warning('TemplateService: Logo file not found', [
+                                    'logo_path' => $replacement,
+                                ]);
+                                $replacement = '';
+                            }
+                        } catch (\Exception $e) {
+                            \Illuminate\Support\Facades\Log::error('TemplateService: Failed to convert logo', [
+                                'logo_path' => $replacement,
+                                'error' => $e->getMessage(),
+                            ]);
+                            $replacement = '';
+                        }
+                    }
+                }
+
+                $html = str_replace("{{{$key}}}", $replacement, $html);
             }
         }
 
