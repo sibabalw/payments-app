@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\AdminTestEmail;
 use App\Services\AuditService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -45,19 +46,15 @@ class EmailConfigurationController extends Controller
         ]);
 
         try {
-            Mail::raw('This is a test email from the admin panel.', function ($message) use ($validated) {
-                $message->to($validated['email'])
-                    ->subject('Test Email - '.config('app.name'));
-            });
+            Mail::to($validated['email'])->queue(new AdminTestEmail);
 
             $this->auditService->log(
                 'email.test_sent',
-                'Admin sent test email',
                 null,
                 ['test_email' => $validated['email']]
             );
 
-            return back()->with('success', 'Test email sent successfully to '.$validated['email']);
+            return back()->with('success', 'Test email queued and will be sent to '.$validated['email'].' shortly.');
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to send test email: '.$e->getMessage());
         }

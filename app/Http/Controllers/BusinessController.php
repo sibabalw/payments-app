@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreBusinessRequest;
 use App\Mail\BusinessCreatedEmail;
 use App\Mail\BusinessEmailOtpEmail;
 use App\Mail\BusinessStatusChangedEmail;
@@ -139,26 +140,11 @@ class BusinessController extends Controller
 
     /**
      * Store a newly created resource in storage.
+     * Uses same validation as onboarding (StoreBusinessRequest).
      */
-    public function store(Request $request)
+    public function store(StoreBusinessRequest $request)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
-            'business_type' => 'nullable|in:small_business,medium_business,large_business,sole_proprietorship,partnership,corporation,other',
-            'registration_number' => 'nullable|string|max:255',
-            'tax_id' => 'nullable|string|max:255',
-            'email' => 'required|email|max:255',
-            'phone' => 'required|string|max:255',
-            'website' => 'nullable|url|max:255',
-            'street_address' => 'nullable|string|max:255',
-            'city' => 'required|string|max:255',
-            'province' => 'nullable|string|max:255',
-            'postal_code' => 'nullable|string|max:255',
-            'country' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'contact_person_name' => 'required|string|max:255',
-        ]);
+        $validated = $request->validated();
 
         // Handle logo upload first (outside transaction)
         $logoPath = null;
@@ -169,6 +155,9 @@ class BusinessController extends Controller
 
         // Remove logo from validated array since we handle it separately
         unset($validated['logo']);
+
+        // Default business_type when not provided (column is NOT NULL) – same as onboarding
+        $validated['business_type'] = $validated['business_type'] ?? 'small_business';
 
         try {
             // Wrap all database operations in a transaction

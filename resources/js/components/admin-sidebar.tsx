@@ -10,43 +10,29 @@ import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
+    SidebarMenuSub,
+    SidebarMenuSubButton,
+    SidebarMenuSubItem,
 } from '@/components/ui/sidebar';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useActiveUrl } from '@/hooks/use-active-url';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/react';
 import {
-    BookOpen,
     Building2,
-    Folder,
+    ChevronDown,
     LayoutGrid,
+    Server,
+    Settings,
     Shield,
+    UserCircle,
     Users,
     Wallet,
-    Settings,
-    UserCircle,
-    Activity,
     FileText,
-    Server,
-    Database,
-    Mail,
-    HardDrive,
-    Monitor,
-    AlertTriangle,
 } from 'lucide-react';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Repository',
-        href: 'https://github.com/laravel/react-starter-kit',
-        icon: Folder,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#react',
-        icon: BookOpen,
-    },
-];
+const footerNavItems: NavItem[] = [];
 
 const adminNavItems: NavItem[] = [
     {
@@ -60,69 +46,57 @@ const adminNavItems: NavItem[] = [
         icon: Building2,
     },
     {
-        title: 'Escrow Management',
-        href: '/admin/escrow',
+        title: 'Escrow',
         icon: Wallet,
-    },
-    {
-        title: 'Escrow Balances',
-        href: '/admin/escrow/balances',
-        icon: Activity,
+        items: [
+            { title: 'Overview', href: '/admin/escrow' },
+            { title: 'Balances', href: '/admin/escrow/balances' },
+        ],
     },
     {
         title: 'Users',
-        href: '/admin/users',
         icon: Users,
+        items: [
+            { title: 'All Users', href: '/admin/users' },
+            { title: 'Create User', href: '/admin/users/create' },
+        ],
     },
     {
-        title: 'Audit Logs',
-        href: '/admin/audit-logs',
+        title: 'Logs & Queue',
         icon: FileText,
-    },
-    {
-        title: 'Error Logs',
-        href: '/admin/error-logs',
-        icon: AlertTriangle,
+        items: [
+            { title: 'Audit Logs', href: '/admin/audit-logs' },
+            { title: 'Error Logs', href: '/admin/error-logs' },
+            { title: 'Logs', href: '/admin/logs' },
+            { title: 'Queue Management', href: '/admin/queue' },
+        ],
     },
     {
         title: 'Account',
-        href: '/admin/account/profile',
         icon: UserCircle,
+        items: [
+            { title: 'Profile', href: '/admin/account/profile' },
+            { title: 'Password', href: '/admin/account/password' },
+            { title: 'Appearance', href: '/admin/account/appearance' },
+            { title: 'Two-Factor', href: '/admin/account/two-factor' },
+        ],
     },
     {
-        title: 'Settings',
-        href: '/admin/settings',
+        title: 'Configuration',
         icon: Settings,
+        items: [
+            { title: 'Settings', href: '/admin/settings' },
+            { title: 'System Configuration', href: '/admin/system-configuration' },
+            { title: 'Email Configuration', href: '/admin/email-configuration' },
+        ],
     },
     {
-        title: 'System Health',
-        href: '/admin/system-health',
-        icon: Monitor,
-    },
-    {
-        title: 'System Configuration',
-        href: '/admin/system-configuration',
+        title: 'System',
         icon: Server,
-    },
-    {
-        title: 'Logs',
-        href: '/admin/logs',
-        icon: FileText,
-    },
-    {
-        title: 'Queue Management',
-        href: '/admin/queue',
-        icon: Activity,
-    },
-    {
-        title: 'Database',
-        href: '/admin/database',
-        icon: Database,
-    },
-    {
-        title: 'Email Configuration',
-        href: '/admin/email-configuration',
-        icon: Mail,
+        items: [
+            { title: 'System Health', href: '/admin/system-health' },
+            { title: 'Database', href: '/admin/database' },
+        ],
     },
 ];
 
@@ -133,20 +107,74 @@ function AdminNavMain({ items = [] }: { items: NavItem[] }) {
         <SidebarGroup className="px-2 py-0">
             <SidebarGroupLabel>Admin Panel</SidebarGroupLabel>
             <SidebarMenu>
-                {items.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                            asChild
-                            isActive={urlIsActive(item.href)}
-                            tooltip={{ children: item.title }}
-                        >
-                            <Link href={item.href}>
-                                {item.icon && <item.icon />}
-                                <span>{item.title}</span>
-                            </Link>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
-                ))}
+                {items.map((item) => {
+                    const hasChildren = item.items && item.items.length > 0;
+                    const isParentActive =
+                        hasChildren &&
+                        item.items!.some((child) => child.href && urlIsActive(child.href));
+
+                    if (hasChildren) {
+                        return (
+                            <Collapsible
+                                key={item.title}
+                                defaultOpen={isParentActive}
+                                className="group/collapsible"
+                            >
+                                <SidebarMenuItem>
+                                    <CollapsibleTrigger asChild>
+                                        <SidebarMenuButton
+                                            isActive={isParentActive}
+                                            tooltip={{ children: item.title }}
+                                        >
+                                            {item.icon && <item.icon />}
+                                            <span>{item.title}</span>
+                                            <ChevronDown className="ml-auto size-4 shrink-0 transition-transform group-data-[state=closed]/collapsible:rotate-[-90deg]" />
+                                        </SidebarMenuButton>
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                        <SidebarMenuSub>
+                                            {item.items!.map((child) => (
+                                                <SidebarMenuSubItem key={child.title}>
+                                                    <SidebarMenuSubButton
+                                                        asChild
+                                                        isActive={
+                                                            child.href
+                                                                ? urlIsActive(child.href)
+                                                                : false
+                                                        }
+                                                    >
+                                                        <Link href={child.href!}>
+                                                            <span>{child.title}</span>
+                                                        </Link>
+                                                    </SidebarMenuSubButton>
+                                                </SidebarMenuSubItem>
+                                            ))}
+                                        </SidebarMenuSub>
+                                    </CollapsibleContent>
+                                </SidebarMenuItem>
+                            </Collapsible>
+                        );
+                    }
+
+                    if (!item.href) {
+                        return null;
+                    }
+
+                    return (
+                        <SidebarMenuItem key={item.title}>
+                            <SidebarMenuButton
+                                asChild
+                                isActive={urlIsActive(item.href)}
+                                tooltip={{ children: item.title }}
+                            >
+                                <Link href={item.href}>
+                                    {item.icon && <item.icon />}
+                                    <span>{item.title}</span>
+                                </Link>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    );
+                })}
             </SidebarMenu>
         </SidebarGroup>
     );
@@ -181,7 +209,9 @@ export function AdminSidebar() {
             </SidebarContent>
 
             <SidebarFooter>
-                <NavFooter items={footerNavItems} className="mt-auto" />
+                {footerNavItems.length > 0 && (
+                    <NavFooter items={footerNavItems} className="mt-auto" />
+                )}
                 <NavUser />
             </SidebarFooter>
         </Sidebar>
