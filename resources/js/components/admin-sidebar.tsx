@@ -23,6 +23,7 @@ import {
     Users,
     Wallet,
     Settings,
+    UserCircle,
     Activity,
     FileText,
     Server,
@@ -82,6 +83,11 @@ const adminNavItems: NavItem[] = [
         title: 'Error Logs',
         href: '/admin/error-logs',
         icon: AlertTriangle,
+    },
+    {
+        title: 'Account',
+        href: '/admin/account/profile',
+        icon: UserCircle,
     },
     {
         title: 'Settings',

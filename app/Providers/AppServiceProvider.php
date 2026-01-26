@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Events\AdminLoginCompleted;
 use App\Listeners\SendLoginNotification;
 use App\Listeners\SyncJobsOnWorkerStart;
 use App\Models\Business;
@@ -33,6 +34,9 @@ class AppServiceProvider extends ServiceProvider
      */
     protected $listen = [
         Login::class => [
+            SendLoginNotification::class,
+        ],
+        AdminLoginCompleted::class => [
             SendLoginNotification::class,
         ],
         WorkerStarting::class => [

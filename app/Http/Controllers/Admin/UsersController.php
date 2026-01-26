@@ -3,10 +3,14 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreAdminRequest;
+use App\Mail\AdminAddedEmail;
 use App\Models\User;
 use App\Services\AuditService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -15,6 +19,41 @@ class UsersController extends Controller
     public function __construct(
         protected AuditService $auditService
     ) {}
+
+    /**
+     * Show the form for creating a new admin user.
+     */
+    public function create(): Response
+    {
+        return Inertia::render('admin/users/create');
+    }
+
+    /**
+     * Store a newly created admin user and send notification email.
+     */
+    public function store(StoreAdminRequest $request): RedirectResponse
+    {
+        $validated = $request->validated();
+
+        $user = User::query()->create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'is_admin' => true,
+        ]);
+
+        Mail::to($user->email)->queue(new AdminAddedEmail($user, $request->user()));
+
+        $this->auditService->log(
+            'user.admin_created',
+            'Admin created new administrator',
+            $user,
+            ['created_by' => $request->user()->id]
+        );
+
+        return to_route('admin.users.index')
+            ->with('success', 'Administrator added successfully. They have been sent a notification email.');
+    }
 
     /**
      * Display a listing of all users with filtering.
@@ -91,6 +130,10 @@ class UsersController extends Controller
         $wasAdmin = $user->is_admin;
         $user->update(['is_admin' => ! $wasAdmin]);
 
+        if (! $wasAdmin) {
+            Mail::to($user->email)->queue(new AdminAddedEmail($user, $request->user()));
+        }
+
         $action = $wasAdmin ? 'removed admin from' : 'granted admin to';
 
         $this->auditService->log(
@@ -105,7 +148,7 @@ class UsersController extends Controller
 
         $message = $wasAdmin
             ? 'Admin privileges removed from user.'
-            : 'Admin privileges granted to user.';
+            : 'Admin privileges granted to user. They have been sent a notification email.';
 
         return back()->with('success', $message);
     }

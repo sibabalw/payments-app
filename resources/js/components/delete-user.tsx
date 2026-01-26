@@ -16,8 +16,14 @@ import { Label } from '@/components/ui/label';
 import { Form } from '@inertiajs/react';
 import { useRef } from 'react';
 
-export default function DeleteUser() {
+interface DeleteUserProps {
+    /** When provided (e.g. admin account), use this form action instead of profile destroy */
+    formAction?: { action: string; method: 'delete' };
+}
+
+export default function DeleteUser({ formAction }: DeleteUserProps = {}) {
     const passwordInput = useRef<HTMLInputElement>(null);
+    const formProps = formAction ?? ProfileController.destroy.form();
 
     return (
         <div className="space-y-6">
@@ -54,7 +60,7 @@ export default function DeleteUser() {
                         </DialogDescription>
 
                         <Form
-                            {...ProfileController.destroy.form()}
+                            {...formProps}
                             options={{
                                 preserveScroll: true,
                             }}

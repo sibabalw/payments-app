@@ -8,17 +8,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Mail;
-use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
+use Laravel\Fortify\Contracts\TwoFactorLoginResponse as TwoFactorLoginResponseContract;
+use Laravel\Fortify\Fortify;
 use Symfony\Component\HttpFoundation\Response;
 
-class LoginResponse implements LoginResponseContract
+class TwoFactorLoginResponse implements TwoFactorLoginResponseContract
 {
     /**
-     * Create an HTTP response that represents the object.
-     *
-     * Only used for password-based login (Fortify). Admin users must confirm
-     * an email OTP before access. Google/OAuth admin logins do not use this
-     * response and skip OTP (handled in GoogleAuthController).
+     * After 2FA code is valid, admins must also pass email OTP (same as password-only flow).
      */
     public function toResponse($request): Response
     {
@@ -44,7 +41,7 @@ class LoginResponse implements LoginResponseContract
         }
 
         return $request->wantsJson()
-            ? new JsonResponse(['two_factor' => false], 200)
-            : redirect()->intended(config('fortify.home'));
+            ? new JsonResponse('', 204)
+            : redirect()->intended(Fortify::redirects('login'));
     }
 }

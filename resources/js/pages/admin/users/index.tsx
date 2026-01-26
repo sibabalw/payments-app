@@ -11,6 +11,7 @@ import {
     MoreHorizontal,
     Shield,
     ShieldOff,
+    UserPlus,
     Users,
     UserCheck,
     Mail,
@@ -162,12 +163,20 @@ export default function AdminUsers({ users, roleCounts, filters }: AdminUsersPro
                         <h1 className="text-2xl font-bold">Manage Users</h1>
                         <p className="text-sm text-muted-foreground">View and manage all platform users</p>
                     </div>
-                    <Link href="/admin">
-                        <Button variant="outline">
-                            <ChevronLeft className="mr-2 h-4 w-4" />
-                            Back to Dashboard
-                        </Button>
-                    </Link>
+                    <div className="flex gap-2">
+                        <Link href="/admin/users/create">
+                            <Button>
+                                <UserPlus className="mr-2 h-4 w-4" />
+                                Add Admin
+                            </Button>
+                        </Link>
+                        <Link href="/admin">
+                            <Button variant="outline">
+                                <ChevronLeft className="mr-2 h-4 w-4" />
+                                Back to Dashboard
+                            </Button>
+                        </Link>
+                    </div>
                 </div>
 
                 {/* Role Filter Tabs */}

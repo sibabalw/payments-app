@@ -15,8 +15,12 @@ class PasswordController extends Controller
     /**
      * Show the user's password settings page.
      */
-    public function edit(): Response
+    public function edit(Request $request): Response
     {
+        if ($request->routeIs('admin.account.*')) {
+            return Inertia::render('admin/account/password');
+        }
+
         return Inertia::render('settings/password');
     }
 

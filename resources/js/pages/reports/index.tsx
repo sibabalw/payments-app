@@ -7,7 +7,7 @@ import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/react';
 import { Download, FileText, TrendingUp, Users, Receipt, DollarSign, FileSpreadsheet, Loader2, Mail } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Reports', href: '/reports' },
@@ -26,6 +26,7 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
     const [loadingButtons, setLoadingButtons] = useState<Record<string, boolean>>({});
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const sseRef = useRef<EventSource | null>(null);
 
     // Fetch report data when filters change
     const fetchReportData = async () => {
@@ -114,13 +115,35 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
             });
 
             if (response.ok) {
+                const contentType = response.headers.get('content-type');
+                if (!contentType?.includes('application/json')) {
+                    setErrorMessage('Unexpected response. Please try again.');
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    return;
+                }
                 const data = await response.json();
-                
+
+                if (data.success === false && data.error) {
+                    setErrorMessage(data.error);
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    return;
+                }
+
                 if (delivery === 'download') {
-                    // For download, use SSE to track progress and auto-download when ready
-                    trackDownloadProgress(data.report_generation_id, data.sse_url, data.download_url, buttonKey);
+                    if (data.download_url && !data.sse_url) {
+                        const iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.src = data.download_url;
+                        document.body.appendChild(iframe);
+                        setTimeout(() => {
+                            if (iframe.parentNode) document.body.removeChild(iframe);
+                        }, 60000);
+                        setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                        setSuccessMessage('Report downloaded successfully!');
+                    } else {
+                        trackDownloadProgress(data.report_generation_id, data.sse_url, data.download_url, buttonKey);
+                    }
                 } else {
-                    // For email, show success message
                     setSuccessMessage(`Your ${format.toUpperCase()} report is being generated and will be sent to your email.`);
                     setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
                 }
@@ -137,40 +160,63 @@ export default function ReportsIndex({ report: initialReport, report_type, busin
     };
 
     const trackDownloadProgress = (reportGenerationId: number, sseUrl: string, downloadUrl: string, buttonKey: string) => {
+        const clearLoading = () => {
+            setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+            if (sseRef.current) {
+                sseRef.current.close();
+                sseRef.current = null;
+            }
+        };
+
+        if (sseRef.current) {
+            sseRef.current.close();
+            sseRef.current = null;
+        }
+
         const eventSource = new EventSource(sseUrl);
-        
+        sseRef.current = eventSource;
+
         eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 if (data.status === 'completed') {
-                    // Trigger download
-                    window.location.href = downloadUrl;
                     eventSource.close();
+                    sseRef.current = null;
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = data.download_url ?? downloadUrl;
+                    document.body.appendChild(iframe);
+                    setTimeout(() => {
+                        if (iframe.parentNode) document.body.removeChild(iframe);
+                    }, 60000);
                     setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
                     setSuccessMessage('Report downloaded successfully!');
                 } else if (data.status === 'failed') {
                     setErrorMessage(data.error_message || 'Report generation failed.');
-                    eventSource.close();
-                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    clearLoading();
                 }
-                // Keep loading spinner for 'pending' and 'processing' states
             } catch (e) {
                 console.error('Error parsing SSE data:', e);
             }
         };
 
         eventSource.onerror = () => {
-            // Connection error - keep trying or show error after timeout
-            setTimeout(() => {
-                if (eventSource.readyState === EventSource.CLOSED) {
-                    setErrorMessage('Connection lost. Please try again.');
-                    eventSource.close();
-                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
-                }
-            }, 5000);
+            eventSource.close();
+            if (sseRef.current === eventSource) sseRef.current = null;
+            setErrorMessage('Connection lost. Please try again.');
+            clearLoading();
         };
     };
+
+    useEffect(() => {
+        return () => {
+            if (sseRef.current) {
+                sseRef.current.close();
+                sseRef.current = null;
+            }
+        };
+    }, []);
 
     const formatCurrency = (amount: number | string) => {
         return `ZAR ${parseFloat(String(amount)).toLocaleString('en-ZA', { 

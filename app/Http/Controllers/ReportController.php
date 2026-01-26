@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\GenerateReportJob;
+use App\Models\Business;
 use App\Models\Employee;
 use App\Models\PaymentJob;
 use App\Models\PayrollJob;
@@ -13,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -538,21 +540,102 @@ class ReportController extends Controller
     }
 
     /**
+     * Generate report synchronously and return download URL (for download from reports page).
+     *
+     * @return array{download_url: string}|array{error: string}
+     */
+    private function generateReportSync(
+        int $userId,
+        ?string $businessId,
+        string $reportType,
+        string $format,
+        ?string $startDate,
+        ?string $endDate
+    ): array {
+        $reportGeneration = ReportGeneration::create([
+            'user_id' => $userId,
+            'business_id' => $businessId,
+            'report_type' => $reportType,
+            'format' => $format,
+            'status' => 'processing',
+            'delivery_method' => 'download',
+            'parameters' => [
+                'business_id' => $businessId,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ],
+            'started_at' => now(),
+        ]);
+
+        try {
+            $report = $this->getReportData($reportType, $businessId, $startDate, $endDate, $userId);
+            $filename = $this->getExportFilename($reportType, $startDate, $endDate, $format);
+            $directory = 'reports/'.now()->format('Y/m');
+            Storage::disk('local')->makeDirectory($directory, 0755, true);
+            $filePath = $directory.'/'.$filename;
+
+            if ($format === 'pdf') {
+                $selectedBusiness = $businessId ? Business::find($businessId) : null;
+                $pdf = PDF::loadView('reports.pdf', [
+                    'report' => $report,
+                    'reportType' => $reportType,
+                    'business' => $selectedBusiness,
+                    'startDate' => $startDate,
+                    'endDate' => $endDate,
+                ]);
+                Storage::disk('local')->put($filePath, $pdf->output());
+            } else {
+                $fullPath = Storage::disk('local')->path($filePath);
+                $output = fopen($fullPath, 'w');
+                fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+                $this->writeCsvData($output, $report, $reportType);
+                fclose($output);
+            }
+
+            $reportGeneration->markAsCompleted($filePath, $filename);
+
+            return ['download_url' => route('reports.download', $reportGeneration)];
+        } catch (\Throwable $e) {
+            Log::error('Sync report generation failed', [
+                'report_generation_id' => $reportGeneration->id,
+                'error' => $e->getMessage(),
+            ]);
+            $reportGeneration->markAsFailed($e->getMessage());
+
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
      * Export report to CSV
-     * Supports two delivery methods (both queued):
-     * - email: Queued generation with email notification (default)
-     * - download: Queued generation, returns ID for polling and download
+     * - email: Queued generation with email notification
+     * - download: When expects JSON, generate synchronously and return download_url (no queue/SSE)
      */
     public function exportCsv(Request $request)
     {
-        $delivery = $request->get('delivery', 'email'); // 'email' or 'download'
+        $delivery = $request->get('delivery', 'email');
         $user = Auth::user();
         $businessId = $request->get('business_id') ?? $user->current_business_id ?? session('current_business_id');
         $reportType = $request->get('report_type', 'payroll_summary');
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
-        // Create report generation record
+        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
+        $wantsJson = $request->expectsJson() && ! $isInertiaRequest;
+
+        if ($delivery === 'download' && $wantsJson) {
+            $result = $this->generateReportSync($user->id, $businessId, $reportType, 'csv', $startDate, $endDate);
+            if (isset($result['error'])) {
+                return response()->json(['success' => false, 'error' => $result['error']], 422);
+            }
+
+            return response()->json([
+                'success' => true,
+                'delivery_method' => $delivery,
+                'download_url' => $result['download_url'],
+            ]);
+        }
+
         $reportGeneration = ReportGeneration::create([
             'user_id' => $user->id,
             'business_id' => $businessId,
@@ -567,13 +650,9 @@ class ReportController extends Controller
             ],
         ]);
 
-        // Queue the job (both email and download are queued)
-        GenerateReportJob::dispatch($reportGeneration)->onQueue('reports');
+        GenerateReportJob::dispatch($reportGeneration);
 
-        // If AJAX request (but NOT Inertia request), return JSON instead of redirecting
-        // Check for AJAX request and absence of X-Inertia headers
-        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
-        if ($request->ajax() && ! $isInertiaRequest) {
+        if ($wantsJson) {
             return response()->json([
                 'success' => true,
                 'report_generation_id' => $reportGeneration->id,
@@ -583,32 +662,43 @@ class ReportController extends Controller
             ]);
         }
 
-        // For non-AJAX requests, redirect (fallback for direct browser navigation)
-        // For direct download, redirect to download page with SSE
         if ($delivery === 'download') {
             return redirect()->route('reports.download-wait', $reportGeneration);
         }
 
-        // Email delivery - redirect to email wait page
         return redirect()->route('reports.email-wait', $reportGeneration);
     }
 
     /**
      * Export report to PDF
-     * Supports two delivery methods (both queued):
-     * - email: Queued generation with email notification (default)
-     * - download: Queued generation, returns ID for polling and download
+     * - email: Queued with email notification
+     * - download: When expects JSON, generate synchronously and return download_url
      */
     public function exportPdf(Request $request)
     {
-        $delivery = $request->get('delivery', 'email'); // 'email' or 'download'
+        $delivery = $request->get('delivery', 'email');
         $user = Auth::user();
         $businessId = $request->get('business_id') ?? $user->current_business_id ?? session('current_business_id');
         $reportType = $request->get('report_type', 'payroll_summary');
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
-        // Create report generation record
+        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
+        $wantsJson = $request->expectsJson() && ! $isInertiaRequest;
+
+        if ($delivery === 'download' && $wantsJson) {
+            $result = $this->generateReportSync($user->id, $businessId, $reportType, 'pdf', $startDate, $endDate);
+            if (isset($result['error'])) {
+                return response()->json(['success' => false, 'error' => $result['error']], 422);
+            }
+
+            return response()->json([
+                'success' => true,
+                'delivery_method' => $delivery,
+                'download_url' => $result['download_url'],
+            ]);
+        }
+
         $reportGeneration = ReportGeneration::create([
             'user_id' => $user->id,
             'business_id' => $businessId,
@@ -623,13 +713,9 @@ class ReportController extends Controller
             ],
         ]);
 
-        // Queue the job (both email and download are queued)
-        GenerateReportJob::dispatch($reportGeneration)->onQueue('reports');
+        GenerateReportJob::dispatch($reportGeneration);
 
-        // If AJAX request (but NOT Inertia request), return JSON instead of redirecting
-        // Check for AJAX request and absence of X-Inertia headers
-        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
-        if ($request->ajax() && ! $isInertiaRequest) {
+        if ($wantsJson) {
             return response()->json([
                 'success' => true,
                 'report_generation_id' => $reportGeneration->id,
@@ -639,37 +725,48 @@ class ReportController extends Controller
             ]);
         }
 
-        // For non-AJAX requests, redirect (fallback for direct browser navigation)
-        // For direct download, redirect to download page with SSE
         if ($delivery === 'download') {
             return redirect()->route('reports.download-wait', $reportGeneration);
         }
 
-        // Email delivery - redirect to email wait page
         return redirect()->route('reports.email-wait', $reportGeneration);
     }
 
     /**
      * Export report to Excel (CSV format)
-     * Supports two delivery methods (both queued):
-     * - email: Queued generation with email notification (default)
-     * - download: Queued generation, redirects to download wait page with SSE
+     * - email: Queued with email notification
+     * - download: When expects JSON, generate synchronously and return download_url
      */
     public function exportExcel(Request $request)
     {
-        $delivery = $request->get('delivery', 'email'); // 'email' or 'download'
+        $delivery = $request->get('delivery', 'email');
         $user = Auth::user();
         $businessId = $request->get('business_id') ?? $user->current_business_id ?? session('current_business_id');
         $reportType = $request->get('report_type', 'payroll_summary');
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
-        // Create report generation record
+        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
+        $wantsJson = $request->expectsJson() && ! $isInertiaRequest;
+
+        if ($delivery === 'download' && $wantsJson) {
+            $result = $this->generateReportSync($user->id, $businessId, $reportType, 'csv', $startDate, $endDate);
+            if (isset($result['error'])) {
+                return response()->json(['success' => false, 'error' => $result['error']], 422);
+            }
+
+            return response()->json([
+                'success' => true,
+                'delivery_method' => $delivery,
+                'download_url' => $result['download_url'],
+            ]);
+        }
+
         $reportGeneration = ReportGeneration::create([
             'user_id' => $user->id,
             'business_id' => $businessId,
             'report_type' => $reportType,
-            'format' => 'csv', // Excel uses CSV format
+            'format' => 'csv',
             'status' => 'pending',
             'delivery_method' => $delivery,
             'parameters' => [
@@ -679,13 +776,9 @@ class ReportController extends Controller
             ],
         ]);
 
-        // Queue the job (both email and download are queued)
-        GenerateReportJob::dispatch($reportGeneration)->onQueue('reports');
+        GenerateReportJob::dispatch($reportGeneration);
 
-        // If AJAX request (but NOT Inertia request), return JSON instead of redirecting
-        // Check for AJAX request and absence of X-Inertia headers
-        $isInertiaRequest = $request->header('X-Inertia') || $request->header('X-Inertia-Version');
-        if ($request->ajax() && ! $isInertiaRequest) {
+        if ($wantsJson) {
             return response()->json([
                 'success' => true,
                 'report_generation_id' => $reportGeneration->id,
@@ -695,12 +788,10 @@ class ReportController extends Controller
             ]);
         }
 
-        // For direct download, redirect to download wait page with SSE
         if ($delivery === 'download') {
             return redirect()->route('reports.download-wait', $reportGeneration);
         }
 
-        // Email delivery - redirect to email wait page
         return redirect()->route('reports.email-wait', $reportGeneration);
     }
 
@@ -762,6 +853,9 @@ class ReportController extends Controller
         $connectionTracker = app(SseConnectionTracker::class);
         $userId = Auth::id();
         $connectionTracker->track($reportGeneration->id, $userId);
+
+        // Release session lock so the long-lived stream does not block other requests (e.g. navigation)
+        Session::save();
 
         // Log connection for monitoring
         Log::info('SSE connection opened', [

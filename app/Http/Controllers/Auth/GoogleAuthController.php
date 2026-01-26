@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Events\AdminLoginCompleted;
 use App\Http\Controllers\Controller;
 use App\Mail\WelcomeEmail;
 use App\Models\User;
@@ -70,8 +71,9 @@ class GoogleAuthController extends Controller
 
             Auth::login($user, true);
 
-            // Admins skip onboarding - redirect to admin dashboard
             if ($user->is_admin) {
+                event(new AdminLoginCompleted($user));
+
                 return redirect()->route('admin.dashboard');
             }
 

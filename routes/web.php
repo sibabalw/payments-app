@@ -60,6 +60,19 @@ Route::prefix('employee')->name('employee.')->middleware(\App\Http\Middleware\Ve
     Route::post('/sign-out-session', [\App\Http\Controllers\EmployeeSignInController::class, 'logout'])->name('sign-out-session');
 });
 
+// Admin OTP challenge (no auth required; requires valid pending session from password login)
+Route::prefix('admin')->name('admin.')->group(function () {
+    Route::get('/otp', [\App\Http\Controllers\Auth\AdminOtpController::class, 'show'])
+        ->middleware('throttle:60,1')
+        ->name('otp.show');
+    Route::post('/otp', [\App\Http\Controllers\Auth\AdminOtpController::class, 'verify'])
+        ->middleware('throttle:10,1')
+        ->name('otp.verify');
+    Route::post('/otp/resend', [\App\Http\Controllers\Auth\AdminOtpController::class, 'resend'])
+        ->middleware('throttle:5,5')
+        ->name('otp.resend');
+});
+
 Route::middleware(['auth', 'verified'])->group(function () {
     // Admin routes (protected by admin middleware) - must be first to take precedence
     Route::prefix('admin')->name('admin.')->middleware('admin')->group(function () {
@@ -82,6 +95,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // User Management
         Route::get('/users', [\App\Http\Controllers\Admin\UsersController::class, 'index'])->name('users.index');
+        Route::get('/users/create', [\App\Http\Controllers\Admin\UsersController::class, 'create'])->name('users.create');
+        Route::post('/users', [\App\Http\Controllers\Admin\UsersController::class, 'store'])->name('users.store');
         Route::post('/users/{user}/toggle-admin', [\App\Http\Controllers\Admin\UsersController::class, 'toggleAdmin'])->name('users.toggle-admin');
 
         // Audit Logs
@@ -91,10 +106,25 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/error-logs', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'index'])->name('error-logs.index');
         Route::get('/error-logs/{errorLog}', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'show'])->name('error-logs.show');
 
-        // Admin Settings
+        // Admin Settings (system/application config)
         Route::get('/settings', [\App\Http\Controllers\Admin\SettingsController::class, 'index'])->name('settings.index');
         Route::post('/settings', [\App\Http\Controllers\Admin\SettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/clear-cache', [\App\Http\Controllers\Admin\SettingsController::class, 'clearCache'])->name('settings.clear-cache');
+
+        // Admin Account (profile, password, appearance, two-factor - admin's own settings)
+        Route::redirect('/account', '/admin/account/profile')->name('account.redirect');
+        Route::get('/account/profile', [\App\Http\Controllers\Settings\ProfileController::class, 'edit'])->name('account.profile.edit');
+        Route::patch('/account/profile', [\App\Http\Controllers\Settings\ProfileController::class, 'update'])->name('account.profile.update');
+        Route::post('/account/profile/send-email-otp', [\App\Http\Controllers\Settings\ProfileController::class, 'sendEmailOtp'])->name('account.profile.send-email-otp');
+        Route::post('/account/profile/verify-email-otp', [\App\Http\Controllers\Settings\ProfileController::class, 'verifyEmailOtp'])->name('account.profile.verify-email-otp');
+        Route::post('/account/profile/cancel-email-otp', [\App\Http\Controllers\Settings\ProfileController::class, 'cancelEmailOtp'])->name('account.profile.cancel-email-otp');
+        Route::delete('/account/profile', [\App\Http\Controllers\Settings\ProfileController::class, 'destroy'])->name('account.profile.destroy');
+        Route::get('/account/password', [\App\Http\Controllers\Settings\PasswordController::class, 'edit'])->name('account.password.edit');
+        Route::put('/account/password', [\App\Http\Controllers\Settings\PasswordController::class, 'update'])->name('account.password.update');
+        Route::get('/account/appearance', function () {
+            return \Inertia\Inertia::render('admin/account/appearance');
+        })->name('account.appearance.edit');
+        Route::get('/account/two-factor', [\App\Http\Controllers\Settings\TwoFactorAuthenticationController::class, 'show'])->name('account.two-factor.show');
 
         // System Health & Monitoring
         Route::get('/system-health', [\App\Http\Controllers\Admin\SystemHealthController::class, 'index'])->name('system-health.index');

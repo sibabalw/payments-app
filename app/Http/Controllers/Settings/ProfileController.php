@@ -48,12 +48,18 @@ class ProfileController extends Controller
             $otpSent = false;
         }
 
-        return Inertia::render('settings/profile', [
+        $props = [
             'mustVerifyEmail' => $user instanceof MustVerifyEmail,
             'status' => $request->session()->get('status'),
             'pendingEmail' => $pendingEmail,
             'otpSent' => $otpSent,
-        ]);
+        ];
+
+        if ($request->routeIs('admin.account.*')) {
+            return Inertia::render('admin/account/profile', $props);
+        }
+
+        return Inertia::render('settings/profile', $props);
     }
 
     /**
@@ -200,7 +206,11 @@ class ProfileController extends Controller
             $user->save();
         });
 
-        return to_route('profile.edit')->with('status', 'Profile updated successfully.');
+        $redirectRoute = $request->routeIs('admin.account.*')
+            ? 'admin.account.profile.edit'
+            : 'profile.edit';
+
+        return to_route($redirectRoute)->with('status', 'Profile updated successfully.');
     }
 
     /**

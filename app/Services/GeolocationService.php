@@ -27,20 +27,27 @@ class GeolocationService
 
     /**
      * Get location from IP address using multiple fallback methods.
+     * For local/private IPs we still attempt location via request (headers, user agent, language);
+     * only use "Local network" when no location can be determined.
      */
     public function getLocationFromIp(string $ip, ?Request $request = null): ?array
     {
-        // Skip private/local IPs
-        if ($this->isPrivateIp($ip)) {
-            return [
-                'city' => 'Local',
-                'country' => 'Network',
-                'region' => 'Private',
-                'source' => 'private_ip',
+        $isPrivate = $this->isPrivateIp($ip);
+
+        if ($isPrivate) {
+            // Only trust proxy/CDN geo headers for private IPs (no Accept-Language / user-agent
+            // inference, which would e.g. show "United States" for en-US users in South Africa)
+            $location = $this->tryTrustedGeoHeaders($request);
+
+            return $location ?? [
+                'city' => 'Local network',
+                'region' => '',
+                'country' => '',
+                'source' => 'fallback',
             ];
         }
 
-        // Check cache first
+        // Check cache first (public IP only)
         $cacheKey = "geolocation:ip:{$ip}";
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
@@ -370,15 +377,15 @@ class GeolocationService
     }
 
     /**
-     * Fallback 7: HTTP Headers Analysis
+     * Trusted geo headers only (proxy/CDN). Used for private IPs so we never infer location
+     * from Accept-Language or user-agent (e.g. "en-US" would wrongly show United States).
      */
-    private function tryHttpHeaders(?Request $request): ?array
+    private function tryTrustedGeoHeaders(?Request $request): ?array
     {
         if (! $request) {
             return null;
         }
 
-        // Try Cloudflare country header
         $cfCountry = $request->header('CF-IPCountry');
         if ($cfCountry && $cfCountry !== 'XX' && strlen($cfCountry) === 2) {
             return [
@@ -389,7 +396,6 @@ class GeolocationService
             ];
         }
 
-        // Try Cloudflare city header
         $cfCity = $request->header('CF-IPCity');
         if ($cfCity && $cfCountry && $cfCountry !== 'XX') {
             return [
@@ -400,7 +406,6 @@ class GeolocationService
             ];
         }
 
-        // Try X-Forwarded-For country hints (if available)
         $xffCountry = $request->header('X-Country-Code');
         if ($xffCountry && strlen($xffCountry) === 2) {
             return [
@@ -411,10 +416,26 @@ class GeolocationService
             ];
         }
 
-        // Try Accept-Language for country inference
+        return null;
+    }
+
+    /**
+     * Fallback 7: HTTP Headers Analysis
+     */
+    private function tryHttpHeaders(?Request $request): ?array
+    {
+        $trusted = $this->tryTrustedGeoHeaders($request);
+        if ($trusted !== null) {
+            return $trusted;
+        }
+
+        if (! $request) {
+            return null;
+        }
+
+        // Try Accept-Language for country inference (only for public IPs / general path)
         $acceptLanguage = $request->header('Accept-Language');
         if ($acceptLanguage) {
-            // Extract country code from language (e.g., "en-US" -> "US")
             if (preg_match('/-([A-Z]{2})\b/i', $acceptLanguage, $matches)) {
                 $countryCode = strtoupper($matches[1]);
 
