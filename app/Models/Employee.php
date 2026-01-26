@@ -62,9 +62,9 @@ class Employee extends Model
         return $this->hasMany(PayrollJob::class);
     }
 
-    public function customDeductions(): HasMany
+    public function adjustments(): HasMany
     {
-        return $this->hasMany(CustomDeduction::class);
+        return $this->hasMany(Adjustment::class);
     }
 
     public function timeEntries(): HasMany
@@ -83,34 +83,21 @@ class Employee extends Model
     }
 
     /**
-     * Get all deductions for this employee (company-wide + employee-specific)
-     */
-    public function getAllDeductions(): \Illuminate\Database\Eloquent\Collection
-    {
-        // Company-wide deductions
-        $companyDeductions = CustomDeduction::where('business_id', $this->business_id)
-            ->whereNull('employee_id')
-            ->where('is_active', true)
-            ->get();
-
-        // Employee-specific deductions
-        $employeeDeductions = $this->customDeductions()
-            ->where('is_active', true)
-            ->get();
-
-        return $companyDeductions->merge($employeeDeductions);
-    }
-
-    /**
      * Check if employee is exempt from UIF
      * According to SARS: Employees working fewer than 24 hours per month are exempt
+     * Optimized to use eager loaded time entries when available
      */
     public function isUIFExempt(): bool
     {
-        // If time entries exist, calculate actual hours from time entries
-        $timeEntries = $this->timeEntries()
-            ->whereNotNull('sign_out_time')
-            ->get();
+        // Use eager loaded time entries if available
+        if ($this->relationLoaded('timeEntries')) {
+            $timeEntries = $this->timeEntries;
+        } else {
+            // Otherwise query them
+            $timeEntries = $this->timeEntries()
+                ->whereNotNull('sign_out_time')
+                ->get();
+        }
 
         if ($timeEntries->isNotEmpty()) {
             // Calculate total hours from time entries for current month

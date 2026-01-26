@@ -240,21 +240,27 @@
                             @endif
                         </td>
                     </tr>
-                    @if($custom_deductions && count($custom_deductions) > 0)
-                        @foreach($custom_deductions as $deduction)
-                        <tr class="deduction-row">
-                            <td>{{ is_array($deduction) ? $deduction['name'] : $deduction->name }}</td>
+                    @if($adjustments && count($adjustments) > 0)
+                        @foreach($adjustments as $adjustment)
+                        @php
+                            $adjustmentName = is_array($adjustment) ? $adjustment['name'] : $adjustment->name;
+                            $adjustmentType = is_array($adjustment) ? ($adjustment['adjustment_type'] ?? 'deduction') : ($adjustment->adjustment_type ?? 'deduction');
+                            $adjustmentAmount = is_array($adjustment) ? $adjustment['amount'] : $adjustment->amount;
+                            $adjustmentCalcType = is_array($adjustment) ? ($adjustment['type'] ?? 'fixed') : ($adjustment->type ?? 'fixed');
+                            $originalAmount = is_array($adjustment) ? ($adjustment['original_amount'] ?? $adjustment['amount']) : ($adjustment->original_amount ?? $adjustment->amount);
+                        @endphp
+                        <tr class="{{ $adjustmentType === 'deduction' ? 'deduction-row' : 'addition-row' }}">
+                            <td>{{ $adjustmentName }}</td>
                             <td>
-                                - ZAR {{ number_format(is_array($deduction) ? $deduction['amount'] : $deduction->amount, 2, '.', ',') }}
-                                @php
-                                    $deductionType = is_array($deduction) ? $deduction['type'] : $deduction->type;
-                                    $deductionAmount = is_array($deduction) ? $deduction['amount'] : $deduction->amount;
-                                    $originalAmount = is_array($deduction) ? ($deduction['original_amount'] ?? $deduction['amount']) : ($deduction->original_amount ?? $deduction->amount);
-                                @endphp
-                                @if($deductionType === 'percentage')
+                                @if($adjustmentType === 'deduction')
+                                    - ZAR {{ number_format($adjustmentAmount, 2, '.', ',') }}
+                                @else
+                                    + ZAR {{ number_format($adjustmentAmount, 2, '.', ',') }}
+                                @endif
+                                @if($adjustmentCalcType === 'percentage')
                                     <span class="percentage">({{ number_format($originalAmount, 2) }}%)</span>
                                 @elseif($job->gross_salary > 0)
-                                    <span class="percentage">({{ number_format(($deductionAmount / $job->gross_salary) * 100, 2) }}%)</span>
+                                    <span class="percentage">({{ number_format(($adjustmentAmount / $job->gross_salary) * 100, 2) }}%)</span>
                                 @endif
                             </td>
                         </tr>

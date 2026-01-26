@@ -44,36 +44,43 @@ class HandleInertiaRequests extends Middleware
         $userBusinesses = [];
 
         if ($user = $request->user()) {
-            $businessesCount = $user->businesses()->count() + $user->ownedBusinesses()->count();
+            // Get current business ID from cached middleware data
+            $currentBusinessId = $request->attributes->get('current_business_id') ?? $user->current_business_id;
 
-            // Get all businesses user has access to
-            $owned = $user->ownedBusinesses()->get();
-            $associated = $user->businesses()->get();
-            $allBusinesses = $owned->merge($associated)->unique('id');
+            // Get all businesses user has access to with minimal fields
+            $owned = $user->ownedBusinesses()
+                ->select(['id', 'name', 'status', 'logo'])
+                ->get();
+            $associated = $user->businesses()
+                ->select(['businesses.id', 'businesses.name', 'businesses.status', 'businesses.logo'])
+                ->get();
+            $allBusinesses = $owned->merge($associated)->unique('id')->values();
+
+            $businessesCount = $allBusinesses->count();
 
             $userBusinesses = $allBusinesses->map(function ($business) {
                 $logoUrl = null;
                 if ($business->logo) {
                     $logoUrl = Storage::disk('public')->url($business->logo);
                 }
-                
+
                 return [
                     'id' => $business->id,
                     'name' => $business->name,
                     'status' => $business->status,
                     'logo' => $logoUrl,
                 ];
-            })->values()->toArray();
+            })->toArray();
 
             // Get current business
-            if ($user->current_business_id) {
-                $current = $allBusinesses->firstWhere('id', $user->current_business_id);
+            if ($currentBusinessId) {
+                $current = $allBusinesses->firstWhere('id', $currentBusinessId);
                 if ($current) {
                     $logoUrl = null;
                     if ($current->logo) {
                         $logoUrl = Storage::disk('public')->url($current->logo);
                     }
-                    
+
                     $currentBusiness = [
                         'id' => $current->id,
                         'name' => $current->name,
@@ -95,6 +102,7 @@ class HandleInertiaRequests extends Middleware
             'businessesCount' => $businessesCount,
             'currentBusiness' => $currentBusiness,
             'userBusinesses' => $userBusinesses,
+            'hasCompletedDashboardTour' => $user?->has_completed_dashboard_tour ?? false,
         ];
     }
 }

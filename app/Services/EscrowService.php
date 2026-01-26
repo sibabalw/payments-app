@@ -128,11 +128,16 @@ class EscrowService
     /**
      * Get available balance for a business.
      * Returns stored balance for performance, with optional verification.
+     *
+     * @param  bool  $refresh  Whether to refresh the model from database (default: true for safety)
      */
-    public function getAvailableBalance(Business $business, bool $verify = false): float
+    public function getAvailableBalance(Business $business, bool $verify = false, bool $refresh = true): float
     {
-        // Refresh to get latest balance
-        $business->refresh();
+        // Only refresh if explicitly needed (avoids unnecessary query when balance is already fresh)
+        if ($refresh) {
+            $business->refresh();
+        }
+
         $storedBalance = (float) ($business->escrow_balance ?? 0);
 
         // Optional verification (for debugging/audit)
@@ -153,6 +158,7 @@ class EscrowService
 
     /**
      * Calculate balance from scratch (for verification/sync).
+     * Optimized with JOINs instead of whereHas subqueries.
      */
     private function calculateBalance(Business $business): float
     {
@@ -161,37 +167,37 @@ class EscrowService
             ->where('status', 'confirmed')
             ->sum('authorized_amount');
 
-        // Sum of amounts from payment jobs that used escrow funds
-        $paymentJobsUsed = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-            ->whereNotNull('escrow_deposit_id')
-            ->whereIn('status', ['succeeded', 'processing'])
-            ->sum('amount');
+        // Sum of amounts from payment jobs that used escrow funds (using JOIN)
+        $paymentJobsUsed = PaymentJob::query()
+            ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+            ->where('payment_schedules.business_id', $business->id)
+            ->whereNotNull('payment_jobs.escrow_deposit_id')
+            ->whereIn('payment_jobs.status', ['succeeded', 'processing'])
+            ->sum('payment_jobs.amount');
 
-        // Sum of amounts from payroll jobs that used escrow funds
-        $payrollJobsUsed = \App\Models\PayrollJob::whereHas('payrollSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-            ->whereNotNull('escrow_deposit_id')
-            ->whereIn('status', ['succeeded', 'processing'])
-            ->sum('gross_salary');
+        // Sum of amounts from payroll jobs that used escrow funds (using JOIN)
+        $payrollJobsUsed = \App\Models\PayrollJob::query()
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->whereNotNull('payroll_jobs.escrow_deposit_id')
+            ->whereIn('payroll_jobs.status', ['succeeded', 'processing'])
+            ->sum('payroll_jobs.gross_salary');
 
         $totalUsed = $paymentJobsUsed + $payrollJobsUsed;
 
-        // Funds returned manually from payment jobs
-        $paymentJobsReturned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-            ->whereNotNull('funds_returned_manually_at')
-            ->sum('amount');
+        // Funds returned manually from payment jobs (using JOIN)
+        $paymentJobsReturned = PaymentJob::query()
+            ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+            ->where('payment_schedules.business_id', $business->id)
+            ->whereNotNull('payment_jobs.funds_returned_manually_at')
+            ->sum('payment_jobs.amount');
 
-        // Funds returned manually from payroll jobs
-        $payrollJobsReturned = \App\Models\PayrollJob::whereHas('payrollSchedule', function ($query) use ($business) {
-            $query->where('business_id', $business->id);
-        })
-            ->whereNotNull('funds_returned_manually_at')
-            ->sum('gross_salary');
+        // Funds returned manually from payroll jobs (using JOIN)
+        $payrollJobsReturned = \App\Models\PayrollJob::query()
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->whereNotNull('payroll_jobs.funds_returned_manually_at')
+            ->sum('payroll_jobs.gross_salary');
 
         $totalReturned = $paymentJobsReturned + $payrollJobsReturned;
 

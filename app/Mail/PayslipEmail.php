@@ -65,19 +65,8 @@ class PayslipEmail extends Mailable
 
         $business = $this->payrollJob->payrollSchedule->business ?? $this->employee->business;
 
-        // Get custom deductions
-        $customDeductions = $this->employee->getAllDeductions();
-        $customDeductionsWithAmounts = $customDeductions->map(function ($deduction) {
-            $amount = $deduction->calculateAmount($this->payrollJob->gross_salary);
-
-            return [
-                'id' => $deduction->id,
-                'name' => $deduction->name,
-                'type' => $deduction->type,
-                'amount' => $amount,
-                'original_amount' => $deduction->amount,
-            ];
-        })->values();
+        // Use adjustments from PayrollJob (already calculated and stored during payroll execution)
+        $adjustments = $this->payrollJob->adjustments ?? [];
 
         // Check for custom template
         $templateService = app(TemplateService::class);
@@ -91,10 +80,13 @@ class PayslipEmail extends Mailable
                 ? $this->payrollJob->pay_period_start->format('F Y')
                 : now()->format('F Y');
 
+            // Convert logo to base64 data URI for email embedding
+            $logoDataUri = $this->getLogoDataUri($business);
+
             $html = $templateService->renderTemplate($customTemplate->compiled_html, [
                 'subject' => 'Your Payslip',
                 'business_name' => $business->name,
-                'business_logo' => $business->logo ?? '',
+                'business_logo' => $logoDataUri,
                 'year' => date('Y'),
                 'employee_name' => $this->employee->name,
                 'pay_period' => $period,
@@ -116,7 +108,7 @@ class PayslipEmail extends Mailable
                 'employee' => $this->employee,
                 'payrollJob' => $this->payrollJob,
                 'business' => $business,
-                'customDeductions' => $customDeductionsWithAmounts,
+                'adjustments' => $adjustments,
                 'user' => (object) ['email' => $this->employee->email], // For email layout compatibility
             ],
         );
@@ -137,25 +129,14 @@ class PayslipEmail extends Mailable
             'releasedBy',
         ]);
 
-        // Get custom deductions
-        $customDeductions = $this->employee->getAllDeductions();
-        $customDeductionsWithAmounts = $customDeductions->map(function ($deduction) {
-            $amount = $deduction->calculateAmount($this->payrollJob->gross_salary);
-
-            return [
-                'id' => $deduction->id,
-                'name' => $deduction->name,
-                'type' => $deduction->type,
-                'amount' => $amount,
-                'original_amount' => $deduction->amount,
-            ];
-        })->values();
+        // Use adjustments from PayrollJob (already calculated and stored during payroll execution)
+        $adjustments = $this->payrollJob->adjustments ?? [];
 
         $data = [
             'job' => $this->payrollJob,
             'employee' => $this->employee,
             'business' => $this->payrollJob->payrollSchedule->business,
-            'custom_deductions' => $customDeductionsWithAmounts,
+            'adjustments' => $adjustments,
         ];
 
         // Generate PDF
@@ -170,5 +151,30 @@ class PayslipEmail extends Mailable
             Attachment::fromData(fn () => $pdf->output(), $filename)
                 ->withMime('application/pdf'),
         ];
+    }
+
+    /**
+     * Convert business logo to base64 data URI for email embedding.
+     */
+    protected function getLogoDataUri($business): string
+    {
+        if (! $business || ! $business->logo) {
+            return '';
+        }
+
+        try {
+            $logoPath = $business->logo;
+            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($logoPath)) {
+                $logoContents = \Illuminate\Support\Facades\Storage::disk('public')->get($logoPath);
+                $mimeType = \Illuminate\Support\Facades\Storage::disk('public')->mimeType($logoPath);
+                $base64 = base64_encode($logoContents);
+
+                return "data:{$mimeType};base64,{$base64}";
+            }
+        } catch (\Exception $e) {
+            // Return empty string if logo can't be loaded
+        }
+
+        return '';
     }
 }

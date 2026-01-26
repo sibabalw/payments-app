@@ -148,63 +148,33 @@ class SouthAfricanTaxService
     }
 
     /**
-     * Calculate net salary with full tax breakdown
+     * Calculate net salary with full tax breakdown (statutory deductions only)
+     *
+     * This method calculates net salary after applying only statutory deductions (PAYE, UIF).
+     * Adjustments (deductions/additions) are applied separately after this calculation.
      *
      * @param  float  $grossSalary  Monthly gross salary
      * @param  array  $options  Additional options:
      *                          - 'tax_year' (int): Tax year for PAYE calculation
      *                          - 'employer_pays_sdl' (bool): Whether employer pays SDL
      *                          - 'annual_payroll' (float): Total annual payroll for SDL threshold check
-     *                          - 'custom_deductions' (array): Array of CustomDeduction models or deduction data
-     * @return array Breakdown with gross, paye, uif, sdl, custom_deductions, net, and total_deductions
+     *                          - 'uif_exempt' (bool): Whether employee is exempt from UIF
+     * @return array Breakdown with gross, paye, uif, sdl, net, and total_deductions
      */
     public function calculateNetSalary(float $grossSalary, array $options = []): array
     {
         $taxYear = $options['tax_year'] ?? null;
         $employerPaysSDL = $options['employer_pays_sdl'] ?? true;
         $annualPayroll = $options['annual_payroll'] ?? null;
-        $customDeductions = $options['custom_deductions'] ?? [];
         $uifExempt = $options['uif_exempt'] ?? false;
 
         $paye = $this->calculatePAYE($grossSalary, $taxYear);
         $uif = $this->calculateUIF($grossSalary, $uifExempt);
         $sdl = $this->calculateSDL($grossSalary, $employerPaysSDL, $annualPayroll);
 
-        // Calculate custom deductions
-        $customDeductionsTotal = 0;
-        $customDeductionsBreakdown = [];
-
-        foreach ($customDeductions as $deduction) {
-            if (is_object($deduction) && method_exists($deduction, 'calculateAmount')) {
-                $amount = $deduction->calculateAmount($grossSalary);
-                $type = $deduction->type;
-                $originalAmount = $deduction->amount;
-                $name = $deduction->name;
-            } elseif (is_array($deduction)) {
-                // Handle array format
-                $type = $deduction['type'] ?? 'fixed';
-                $originalAmount = $deduction['amount'] ?? 0;
-                $amount = $type === 'percentage'
-                    ? round($grossSalary * ($originalAmount / 100), 2)
-                    : round($originalAmount, 2);
-                $name = $deduction['name'] ?? 'Custom Deduction';
-            } else {
-                continue;
-            }
-
-            $customDeductionsTotal += $amount;
-
-            $customDeductionsBreakdown[] = [
-                'name' => $name,
-                'amount' => $amount,
-                'type' => $type,
-                'original_amount' => $originalAmount, // The configured percentage or fixed amount
-            ];
-        }
-
         // SDL is NOT deducted from employee salary - it's paid entirely by the employer
-        // Only PAYE, UIF, and custom deductions reduce the employee's net salary
-        $totalEmployeeDeductions = $paye + $uif + $customDeductionsTotal;
+        // Only PAYE and UIF reduce the employee's net salary
+        $totalEmployeeDeductions = $paye + $uif;
         $netSalary = $grossSalary - $totalEmployeeDeductions;
 
         return [
@@ -212,10 +182,8 @@ class SouthAfricanTaxService
             'paye' => $paye,
             'uif' => $uif,
             'sdl' => $sdl, // Employer cost only - NOT deducted from employee
-            'custom_deductions' => $customDeductionsBreakdown,
-            'custom_deductions_total' => round($customDeductionsTotal, 2),
             'net' => round($netSalary, 2),
-            'total_deductions' => round($totalEmployeeDeductions, 2), // Only employee deductions
+            'total_deductions' => round($totalEmployeeDeductions, 2), // Only employee statutory deductions
             'total_employer_costs' => round($sdl, 2), // SDL is employer cost
         ];
     }

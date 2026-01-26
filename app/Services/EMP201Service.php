@@ -24,15 +24,15 @@ class EMP201Service
         $startDate = $date->copy()->startOfMonth();
         $endDate = $date->copy()->endOfMonth();
 
-        // Get all payroll jobs for the period
+        // Get all payroll jobs for the period (using JOIN)
         $payrollJobs = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
+            ->select(['payroll_jobs.*'])
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
             ->where(function ($q) use ($startDate, $endDate) {
-                $q->whereBetween('pay_period_start', [$startDate, $endDate])
-                    ->orWhereBetween('pay_period_end', [$startDate, $endDate]);
+                $q->whereBetween('payroll_jobs.pay_period_start', [$startDate, $endDate])
+                    ->orWhereBetween('payroll_jobs.pay_period_end', [$startDate, $endDate]);
             })
             ->with('employee')
             ->get();
@@ -185,13 +185,12 @@ class EMP201Service
      */
     public function getPendingPeriods(Business $business): Collection
     {
-        // Get all months with payroll activity
+        // Get all months with payroll activity (using JOIN)
         $activeMonths = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
-            ->selectRaw("DATE_FORMAT(pay_period_start, '%Y-%m') as period")
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
+            ->selectRaw("DATE_FORMAT(payroll_jobs.pay_period_start, '%Y-%m') as period")
             ->distinct()
             ->pluck('period');
 

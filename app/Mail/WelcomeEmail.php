@@ -18,8 +18,7 @@ class WelcomeEmail extends Mailable
      */
     public function __construct(
         public User $user
-    ) {
-    }
+    ) {}
 
     /**
      * Get the message envelope.

@@ -9,6 +9,34 @@
         <p style="margin: 0 0 8px 0; font-weight: 600;">Login Details:</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Time:</strong> {{ now()->format('F d, Y \a\t g:i A') }}</p>
         <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>IP Address:</strong> {{ $ipAddress }}</p>
+        <p style="margin: 0 0 4px 0; color: #4a4a4a;"><strong>Location:</strong> 
+            @php
+                $locationString = 'Unknown';
+                if (isset($location) && is_array($location)) {
+                    $city = trim($location['city'] ?? '');
+                    $region = trim($location['region'] ?? '');
+                    $country = trim($location['country'] ?? '');
+                    
+                    $locationParts = [];
+                    if (!empty($city)) {
+                        $locationParts[] = $city;
+                    }
+                    if (!empty($region)) {
+                        $locationParts[] = $region;
+                    }
+                    if (!empty($country)) {
+                        $locationParts[] = $country;
+                    }
+                    
+                    if (!empty($locationParts)) {
+                        $locationString = implode(', ', $locationParts);
+                    } elseif (!empty($country)) {
+                        $locationString = $country;
+                    }
+                }
+            @endphp
+            {{ $locationString }}
+        </p>
         <p style="margin: 0; color: #4a4a4a;"><strong>Device:</strong> {{ Str::limit($userAgent, 100) }}</p>
     </div>
     

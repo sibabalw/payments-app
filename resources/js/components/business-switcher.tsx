@@ -9,6 +9,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { router, usePage, Link } from '@inertiajs/react';
 import { type SharedData } from '@/types';
+import { BusinessSwitchOverlay } from './business-switch-overlay';
 
 // Helper function to get business initials
 const getBusinessInitials = (name: string): string => {
@@ -27,18 +28,32 @@ export function BusinessSwitcher() {
     const { currentBusiness, userBusinesses = [] } = usePage<SharedData>().props;
     const [isOpen, setIsOpen] = useState(false);
     const [switching, setSwitching] = useState<number | null>(null);
+    const [showOverlay, setShowOverlay] = useState(false);
+    const [targetBusiness, setTargetBusiness] = useState<typeof currentBusiness>(null);
 
     const handleSwitch = (businessId: number) => {
+        const newBusiness = userBusinesses.find(b => b.id === businessId);
+        if (!newBusiness) return;
+
         setSwitching(businessId);
         setIsOpen(false);
+        setTargetBusiness(newBusiness);
+        setShowOverlay(true);
         
         router.post(`/businesses/${businessId}/switch`, {}, {
             preserveScroll: true,
-            onFinish: () => {
-                setSwitching(null);
+            onSuccess: () => {
+                // Keep overlay visible for animation, then hide
+                setTimeout(() => {
+                    setShowOverlay(false);
+                    setSwitching(null);
+                    setTargetBusiness(null);
+                }, 2000);
             },
             onError: () => {
+                setShowOverlay(false);
                 setSwitching(null);
+                setTargetBusiness(null);
             },
         });
     };
@@ -81,6 +96,12 @@ export function BusinessSwitcher() {
             : 'Select business';
 
     return (
+        <>
+        <BusinessSwitchOverlay
+            isVisible={showOverlay}
+            fromBusiness={currentBusiness ?? null}
+            toBusiness={targetBusiness ?? null}
+        />
         <Popover open={isOpen} onOpenChange={setIsOpen}>
             <PopoverTrigger asChild>
                 <Button
@@ -217,5 +238,6 @@ export function BusinessSwitcher() {
                 </div>
             </PopoverContent>
         </Popover>
+        </>
     );
 }

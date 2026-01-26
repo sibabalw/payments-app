@@ -19,31 +19,28 @@ class PayslipController extends Controller
         $employeeId = $request->get('employee_id');
         $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
 
+        // Use JOIN instead of whereHas for better performance
         $query = PayrollJob::query()
-            ->where('status', 'succeeded')
+            ->select(['payroll_jobs.*'])
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_jobs.status', 'succeeded')
             ->with(['payrollSchedule.business', 'employee']);
 
         if ($employeeId) {
-            $query->where('employee_id', $employeeId);
+            $query->where('payroll_jobs.employee_id', $employeeId);
         }
 
         if ($businessId) {
-            $query->whereHas('payrollSchedule', function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            });
+            $query->where('payroll_schedules.business_id', $businessId);
         } else {
-            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id');
-            $query->whereHas('payrollSchedule', function ($q) use ($userBusinessIds) {
-                $q->whereIn('business_id', $userBusinessIds);
-            });
+            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id')->toArray();
+            $query->whereIn('payroll_schedules.business_id', $userBusinessIds);
         }
 
-        $payslips = $query->latest('pay_period_start')->paginate(20);
+        $payslips = $query->orderByDesc('payroll_jobs.pay_period_start')->paginate(20);
 
         $employees = \App\Models\Employee::query()
-            ->when($businessId, function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            })
+            ->when($businessId, fn ($q) => $q->where('business_id', $businessId))
             ->get();
 
         return Inertia::render('payslips/index', [
@@ -68,26 +65,15 @@ class PayslipController extends Controller
             'releasedBy',
         ]);
 
-        // Get custom deductions for this employee and calculate amounts
-        $customDeductions = $payrollJob->employee->getAllDeductions();
-        $customDeductionsWithAmounts = $customDeductions->map(function ($deduction) use ($payrollJob) {
-            $amount = $deduction->calculateAmount($payrollJob->gross_salary);
-
-            return [
-                'id' => $deduction->id,
-                'name' => $deduction->name,
-                'type' => $deduction->type,
-                'amount' => $amount,
-                'original_amount' => $deduction->amount, // The configured percentage or fixed amount
-            ];
-        })->values();
+        // Use adjustments from PayrollJob (already calculated and stored during payroll execution)
+        $adjustments = $payrollJob->adjustments ?? [];
 
         return Inertia::render('payslips/show', [
             'payslip' => [
                 'job' => $payrollJob,
                 'employee' => $payrollJob->employee,
                 'business' => $payrollJob->payrollSchedule->business,
-                'custom_deductions' => $customDeductionsWithAmounts,
+                'adjustments' => $adjustments,
             ],
         ]);
     }
@@ -104,24 +90,14 @@ class PayslipController extends Controller
             'releasedBy',
         ]);
 
-        $customDeductions = $payrollJob->employee->getAllDeductions();
-        $customDeductionsWithAmounts = $customDeductions->map(function ($deduction) use ($payrollJob) {
-            $amount = $deduction->calculateAmount($payrollJob->gross_salary);
-
-            return [
-                'id' => $deduction->id,
-                'name' => $deduction->name,
-                'type' => $deduction->type,
-                'amount' => $amount,
-                'original_amount' => $deduction->amount,
-            ];
-        })->values();
+        // Use adjustments from PayrollJob (already calculated and stored during payroll execution)
+        $adjustments = $payrollJob->adjustments ?? [];
 
         $data = [
             'job' => $payrollJob,
             'employee' => $payrollJob->employee,
             'business' => $payrollJob->payrollSchedule->business,
-            'custom_deductions' => $customDeductionsWithAmounts,
+            'adjustments' => $adjustments,
         ];
 
         // Generate PDF using DomPDF
@@ -145,24 +121,14 @@ class PayslipController extends Controller
             'releasedBy',
         ]);
 
-        $customDeductions = $payrollJob->employee->getAllDeductions();
-        $customDeductionsWithAmounts = $customDeductions->map(function ($deduction) use ($payrollJob) {
-            $amount = $deduction->calculateAmount($payrollJob->gross_salary);
-
-            return [
-                'id' => $deduction->id,
-                'name' => $deduction->name,
-                'type' => $deduction->type,
-                'amount' => $amount,
-                'original_amount' => $deduction->amount,
-            ];
-        })->values();
+        // Use adjustments from PayrollJob (already calculated and stored during payroll execution)
+        $adjustments = $payrollJob->adjustments ?? [];
 
         $data = [
             'job' => $payrollJob,
             'employee' => $payrollJob->employee,
             'business' => $payrollJob->payrollSchedule->business,
-            'custom_deductions' => $customDeductionsWithAmounts,
+            'adjustments' => $adjustments,
         ];
 
         $pdf = PDF::loadView('payslips.pdf', $data);

@@ -13,11 +13,13 @@ use App\Services\CronExpressionParser;
 use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
+use App\Services\SouthAfricaHolidayService;
 use Carbon\Carbon;
 use Cron\CronExpression;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -27,7 +29,8 @@ class PaymentScheduleController extends Controller
         protected AuditService $auditService,
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
-        protected CronExpressionParser $cronParser
+        protected CronExpressionParser $cronParser,
+        protected SouthAfricaHolidayService $holidayService
     ) {}
 
     /**
@@ -39,7 +42,25 @@ class PaymentScheduleController extends Controller
         $type = $request->get('type'); // 'generic' or 'payroll'
         $status = $request->get('status'); // 'active', 'paused', 'cancelled'
 
-        $query = PaymentSchedule::query()->with(['business', 'recipients']);
+        $query = PaymentSchedule::query()
+            ->select([
+                'id',
+                'business_id',
+                'type',
+                'name',
+                'frequency',
+                'amount',
+                'currency',
+                'schedule_type',
+                'status',
+                'next_run_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->with([
+                'business:id,name',
+                'recipients:id,name,email',
+            ]);
 
         if ($businessId) {
             $query->where('business_id', $businessId);
@@ -175,7 +196,9 @@ class PaymentScheduleController extends Controller
             try {
                 $cron = CronExpression::factory($frequency);
                 // Use current time in app timezone for consistent calculation
-                $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                // Skip weekends and holidays
+                $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
@@ -215,13 +238,25 @@ class PaymentScheduleController extends Controller
         $businesses = Auth::user()->businesses()->get();
         $recipients = Recipient::where('business_id', $paymentSchedule->business_id)->get();
 
-        // Parse cron expression to extract date/time for editing
-        $parsed = $this->cronParser->parse($paymentSchedule->frequency);
-
         $schedule = $paymentSchedule->load(['business', 'recipients']);
+
+        // Use next_run_at to populate date/time fields, fallback to parsing cron if not available
+        if ($schedule->next_run_at) {
+            $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
+            $schedule->scheduled_date = $nextRun->format('Y-m-d');
+            $schedule->scheduled_time = $nextRun->format('H:i');
+        } else {
+            // Fallback: Parse cron expression if next_run_at is not set
+            $parsed = $this->cronParser->parse($paymentSchedule->frequency);
+            if ($parsed) {
+                $schedule->scheduled_date = $parsed['date'];
+                $schedule->scheduled_time = $parsed['time'];
+            }
+        }
+
+        // Parse frequency for display
+        $parsed = $this->cronParser->parse($paymentSchedule->frequency);
         if ($parsed) {
-            $schedule->scheduled_date = $parsed['date'];
-            $schedule->scheduled_time = $parsed['time'];
             $schedule->parsed_frequency = $parsed['frequency'];
         }
 
@@ -311,7 +346,9 @@ class PaymentScheduleController extends Controller
             if ($paymentSchedule->wasChanged('frequency')) {
                 try {
                     $cron = CronExpression::factory($frequency);
-                    $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+                    $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    // Skip weekends and holidays
+                    $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
                     $paymentSchedule->next_run_at = $nextRun;
                     $paymentSchedule->save();
                 } catch (\Exception $e) {
@@ -385,7 +422,9 @@ class PaymentScheduleController extends Controller
         // Recalculate next run time when resuming
         try {
             $cron = CronExpression::factory($paymentSchedule->frequency);
-            $nextRun = $cron->getNextRunDate(now(config('app.timezone')));
+            $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            // Skip weekends and holidays
+            $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
             $paymentSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
@@ -415,5 +454,28 @@ class PaymentScheduleController extends Controller
 
         return redirect()->back()
             ->with('success', 'Payment schedule cancelled.');
+    }
+
+    /**
+     * Adjust a date to the next business day if it falls on a weekend or holiday.
+     */
+    private function adjustToBusinessDay(Carbon $date, CronExpression $cron): Carbon
+    {
+        if ($this->holidayService->isBusinessDay($date)) {
+            return $date;
+        }
+
+        $originalDate = $date->format('Y-m-d');
+        $originalTime = $date->format('H:i');
+        $adjustedDate = $this->holidayService->getNextBusinessDay($date);
+        $adjustedDate->setTime((int) $date->format('H'), (int) $date->format('i'));
+
+        Log::info('Payment schedule next run adjusted to skip weekend/holiday', [
+            'original_date' => $originalDate,
+            'adjusted_date' => $adjustedDate->format('Y-m-d'),
+            'time' => $originalTime,
+        ]);
+
+        return $adjustedDate;
     }
 }

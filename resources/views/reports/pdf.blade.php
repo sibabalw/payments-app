@@ -113,7 +113,7 @@
             </div>
             <div class="summary-card">
                 <div class="summary-card-title">Total Deductions</div>
-                <div class="summary-card-value">ZAR {{ number_format(($report['total_paye'] ?? 0) + ($report['total_uif'] ?? 0) + ($report['total_custom_deductions'] ?? 0), 2, '.', ',') }}</div>
+                <div class="summary-card-value">ZAR {{ number_format(($report['total_paye'] ?? 0) + ($report['total_uif'] ?? 0) + ($report['total_adjustments'] ?? 0), 2, '.', ',') }}</div>
             </div>
             <div class="summary-card">
                 <div class="summary-card-title">Total Net</div>
@@ -130,7 +130,7 @@
                         <th class="text-right">Gross</th>
                         <th class="text-right">PAYE</th>
                         <th class="text-right">UIF</th>
-                        <th class="text-right">Custom</th>
+                        <th class="text-right">Adjustments</th>
                         <th class="text-right">Net</th>
                         <th>Period</th>
                     </tr>
@@ -142,7 +142,7 @@
                         <td class="text-right">ZAR {{ number_format($job['gross_salary'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($job['paye_amount'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($job['uif_amount'] ?? 0, 2, '.', ',') }}</td>
-                        <td class="text-right">ZAR {{ number_format($job['custom_deductions_total'] ?? 0, 2, '.', ',') }}</td>
+                        <td class="text-right">ZAR {{ number_format($job['adjustments_total'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($job['net_salary'] ?? 0, 2, '.', ',') }}</td>
                         <td>{{ $job['pay_period_start'] ?? 'N/A' }} - {{ $job['pay_period_end'] ?? 'N/A' }}</td>
                     </tr>
@@ -173,7 +173,7 @@
                         <td class="text-right">ZAR {{ number_format($emp['total_gross'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($emp['total_paye'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($emp['total_uif'] ?? 0, 2, '.', ',') }}</td>
-                        <td class="text-right">ZAR {{ number_format($emp['total_custom_deductions'] ?? 0, 2, '.', ',') }}</td>
+                        <td class="text-right">ZAR {{ number_format($emp['total_adjustments'] ?? 0, 2, '.', ',') }}</td>
                         <td class="text-right">ZAR {{ number_format($emp['total_net'] ?? 0, 2, '.', ',') }}</td>
                     </tr>
                     @endforeach
@@ -208,8 +208,8 @@
                 <div class="summary-card-value">ZAR {{ number_format($report['total_statutory_deductions'] ?? 0, 2, '.', ',') }}</div>
             </div>
             <div class="summary-card">
-                <div class="summary-card-title">Custom</div>
-                <div class="summary-card-value">ZAR {{ number_format($report['total_custom_deductions'] ?? 0, 2, '.', ',') }}</div>
+                <div class="summary-card-title">Adjustments</div>
+                <div class="summary-card-value">ZAR {{ number_format($report['total_adjustments'] ?? 0, 2, '.', ',') }}</div>
             </div>
             <div class="summary-card">
                 <div class="summary-card-title">Total</div>
@@ -218,7 +218,7 @@
         </div>
 
         @if(isset($report['deductions']) && count($report['deductions']) > 0)
-            <div class="section-title">Custom Deductions Breakdown</div>
+            <div class="section-title">Adjustments Breakdown</div>
             <table>
                 <thead>
                     <tr>

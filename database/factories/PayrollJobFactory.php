@@ -30,7 +30,7 @@ class PayrollJobFactory extends Factory
             'paye_amount' => $paye,
             'uif_amount' => $uif,
             'sdl_amount' => $sdl,
-            'custom_deductions' => [],
+            'adjustments' => [],
             'net_salary' => $grossSalary - $paye - $uif,
             'currency' => 'ZAR',
             'status' => 'succeeded',
@@ -85,26 +85,31 @@ class PayrollJobFactory extends Factory
     }
 
     /**
-     * Add custom deductions.
+     * Add adjustments.
      */
-    public function withCustomDeductions(array $deductions = []): static
+    public function withAdjustments(array $adjustments = []): static
     {
-        $defaultDeductions = [
+        $defaultAdjustments = [
             [
                 'name' => 'Medical Aid',
                 'type' => 'fixed',
+                'adjustment_type' => 'deduction',
                 'amount' => 1500,
+                'original_amount' => 1500,
+                'is_recurring' => true,
             ],
             [
                 'name' => 'Pension Fund',
                 'type' => 'percentage',
+                'adjustment_type' => 'deduction',
                 'amount' => 5,
                 'original_amount' => 5,
+                'is_recurring' => true,
             ],
         ];
 
         return $this->state(fn (array $attributes) => [
-            'custom_deductions' => empty($deductions) ? $defaultDeductions : $deductions,
+            'adjustments' => empty($adjustments) ? $defaultAdjustments : $adjustments,
         ]);
     }
 }

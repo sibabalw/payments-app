@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Business;
 use App\Models\Employee;
+use App\Services\AdjustmentService;
 use App\Services\AuditService;
 use App\Services\SouthAfricanTaxService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,8 @@ class EmployeeController extends Controller
 {
     public function __construct(
         protected AuditService $auditService,
-        protected SouthAfricanTaxService $taxService
+        protected SouthAfricanTaxService $taxService,
+        protected AdjustmentService $adjustmentService
     ) {}
 
     /**
@@ -36,7 +39,22 @@ class EmployeeController extends Controller
             $query->whereIn('business_id', $userBusinessIds);
         }
 
-        $employees = $query->with('business')->latest()->paginate(15);
+        $employees = $query
+            ->select([
+                'id',
+                'business_id',
+                'name',
+                'email',
+                'employment_type',
+                'department',
+                'gross_salary',
+                'hourly_rate',
+                'created_at',
+                'updated_at',
+            ])
+            ->with('business:id,name')
+            ->latest()
+            ->paginate(15);
 
         return Inertia::render('employees/index', [
             'employees' => $employees,
@@ -115,21 +133,45 @@ class EmployeeController extends Controller
     {
         $businesses = Auth::user()->businesses()->get();
 
-        // Get all deductions for this employee (company-wide + employee-specific)
-        $customDeductions = $employee->getAllDeductions();
-
-        // Calculate tax breakdown for preview with custom deductions
-        // Check if employee is exempt from UIF (works < 24 hours/month)
-        $taxBreakdown = $this->taxService->calculateNetSalary($employee->gross_salary, [
-            'custom_deductions' => $customDeductions,
-            'uif_exempt' => $employee->isUIFExempt(),
+        // Eager load relationships
+        $employee->load([
+            'business',
+            'adjustments' => function ($query) {
+                $query->where('is_active', true);
+            },
+            'timeEntries' => function ($query) {
+                $query->whereNotNull('sign_out_time');
+            },
         ]);
 
+        // For preview, use current month period and get all valid adjustments (recurring + once-off for current period)
+        $periodStart = Carbon::parse(now()->startOfMonth());
+        $periodEnd = Carbon::parse(now()->endOfMonth());
+        $adjustments = $this->adjustmentService->getValidAdjustments($employee, $periodStart, $periodEnd);
+
+        // Calculate net salary after statutory deductions
+        $uifExempt = $employee->isUIFExempt();
+        $taxBreakdown = $this->taxService->calculateNetSalary($employee->gross_salary, [
+            'uif_exempt' => $uifExempt,
+        ]);
+
+        // Apply adjustments for preview
+        $adjustmentResult = $this->adjustmentService->applyAdjustments(
+            $taxBreakdown['net'],
+            $adjustments,
+            $employee->gross_salary
+        );
+
+        // Merge adjustment results into tax breakdown for frontend
+        $taxBreakdown['adjustments'] = $adjustmentResult['adjustments_breakdown'];
+        $taxBreakdown['total_adjustments'] = $adjustmentResult['total_adjustments'];
+        $taxBreakdown['final_net_salary'] = $adjustmentResult['final_net_salary'];
+
         return Inertia::render('employees/edit', [
-            'employee' => $employee->load('business'),
+            'employee' => $employee,
             'businesses' => $businesses,
             'taxBreakdown' => $taxBreakdown,
-            'customDeductions' => $customDeductions,
+            'adjustments' => $adjustments,
         ]);
     }
 
@@ -188,13 +230,21 @@ class EmployeeController extends Controller
 
     /**
      * Calculate tax breakdown for preview (AJAX endpoint)
+     * Results are cached for 60 seconds to improve performance for repeated calculations
      */
     public function calculateTax(Request $request, ?Employee $employee = null)
     {
+        // Use current month period for preview calculations
+        $periodStart = Carbon::parse(now()->startOfMonth());
+        $periodEnd = Carbon::parse(now()->endOfMonth());
+
         // If employee is provided, use their gross_salary; otherwise get it from request
         if ($employee) {
             $grossSalary = $employee->gross_salary;
-            $customDeductions = $employee->getAllDeductions();
+            $employeeId = $employee->id;
+            $businessId = $employee->business_id;
+            $uifExempt = $employee->isUIFExempt();
+            $adjustments = $this->adjustmentService->getValidAdjustments($employee, $periodStart, $periodEnd);
         } else {
             // Get gross_salary from request (works with both JSON and form data)
             $grossSalary = $request->input('gross_salary') ?? $request->json('gross_salary');
@@ -205,38 +255,38 @@ class EmployeeController extends Controller
 
             $grossSalary = (float) $grossSalary;
 
-            // Get business_id to fetch company-wide deductions
+            // Get business_id and employee_id
             $businessId = $request->input('business_id') ?? $request->json('business_id');
             $employeeId = $request->input('employee_id') ?? $request->json('employee_id');
 
-            $customDeductions = collect();
-            if ($businessId) {
-                // Company-wide deductions
-                $companyDeductions = \App\Models\CustomDeduction::where('business_id', $businessId)
-                    ->whereNull('employee_id')
-                    ->where('is_active', true)
-                    ->get();
-                $customDeductions = $customDeductions->merge($companyDeductions);
+            $uifExempt = false;
+            $adjustments = collect();
 
-                // Employee-specific deductions and UIF exemption check
-                if ($employeeId) {
-                    $employee = \App\Models\Employee::find($employeeId);
-                    if ($employee) {
-                        $uifExempt = $employee->isUIFExempt();
-                        $employeeDeductions = \App\Models\CustomDeduction::where('business_id', $businessId)
-                            ->where('employee_id', $employeeId)
-                            ->where('is_active', true)
-                            ->get();
-                        $customDeductions = $customDeductions->merge($employeeDeductions);
-                    }
+            if ($businessId && $employeeId) {
+                $employee = Employee::find($employeeId);
+                if ($employee && $employee->business_id === $businessId) {
+                    $uifExempt = $employee->isUIFExempt();
+                    $adjustments = $this->adjustmentService->getValidAdjustments($employee, $periodStart, $periodEnd);
                 }
             }
         }
 
+        // Calculate net salary after statutory deductions
         $breakdown = $this->taxService->calculateNetSalary($grossSalary, [
-            'custom_deductions' => $customDeductions,
-            'uif_exempt' => $uifExempt ?? false,
+            'uif_exempt' => $uifExempt,
         ]);
+
+        // Apply adjustments
+        $adjustmentResult = $this->adjustmentService->applyAdjustments(
+            $breakdown['net'],
+            $adjustments,
+            $grossSalary
+        );
+
+        // Merge results
+        $breakdown['adjustments'] = $adjustmentResult['adjustments_breakdown'];
+        $breakdown['total_adjustments'] = $adjustmentResult['total_adjustments'];
+        $breakdown['final_net_salary'] = $adjustmentResult['final_net_salary'];
 
         return response()->json($breakdown);
     }
@@ -252,5 +302,46 @@ class EmployeeController extends Controller
 
         return redirect()->route('employees.index')
             ->with('success', 'Employee deleted successfully.');
+    }
+
+    /**
+     * Search employees by name or email (for autocomplete/search)
+     */
+    public function search(Request $request)
+    {
+        $request->validate([
+            'business_id' => 'required|exists:businesses,id',
+            'query' => 'nullable|string|max:255',
+        ]);
+
+        $user = Auth::user();
+        $businessId = $request->business_id;
+
+        // Verify user has access to this business
+        $hasAccess = $user->ownedBusinesses()->where('businesses.id', $businessId)->exists()
+            || $user->businesses()->where('businesses.id', $businessId)->exists();
+
+        if (! $hasAccess) {
+            return response()->json(['error' => 'Unauthorized access to business.'], 403);
+        }
+
+        $query = Employee::query()
+            ->where('business_id', $businessId)
+            ->select(['id', 'business_id', 'name', 'email']);
+
+        if ($request->filled('query')) {
+            $searchTerm = $request->get('query');
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('name', 'like', "%{$searchTerm}%")
+                    ->orWhere('email', 'like', "%{$searchTerm}%");
+            });
+        }
+
+        $employees = $query
+            ->orderBy('name')
+            ->limit(20)
+            ->get();
+
+        return response()->json($employees);
     }
 }

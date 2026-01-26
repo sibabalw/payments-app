@@ -33,8 +33,7 @@ class ProcessPaymentJob implements ShouldQueue
      */
     public function __construct(
         public PaymentJob $paymentJob
-    ) {
-    }
+    ) {}
 
     /**
      * Execute the job.
@@ -45,13 +44,25 @@ class ProcessPaymentJob implements ShouldQueue
             $success = $paymentService->processPaymentJob($this->paymentJob);
 
             if ($success) {
-                // Refresh to get updated status
-                $this->paymentJob->refresh();
-                
-                // Send success email
-                $user = $this->paymentJob->paymentSchedule->business->owner;
-                $emailService = app(EmailService::class);
-                $emailService->send($user, new PaymentSuccessEmail($user, $this->paymentJob), 'payment_success');
+                // Reload PaymentJob completely fresh from database to avoid any stale eager load metadata
+                // This ensures no 'receiver' relationship metadata is carried over
+                $freshPaymentJob = PaymentJob::query()
+                    ->where('id', $this->paymentJob->id)
+                    ->firstOrFail();
+
+                // Load only what we need for the email
+                $freshPaymentJob->load('paymentSchedule.business.owner');
+                $user = $freshPaymentJob->paymentSchedule?->business?->owner;
+
+                if ($user) {
+                    $emailService = app(EmailService::class);
+                    // Pass the fresh instance to avoid any serialization issues
+                    $emailService->send($user, new PaymentSuccessEmail($user, $freshPaymentJob), 'payment_success');
+                } else {
+                    Log::warning('Cannot send payment success email: user not found', [
+                        'payment_job_id' => $this->paymentJob->id,
+                    ]);
+                }
             } else {
                 Log::warning('Payment job failed', [
                     'payment_job_id' => $this->paymentJob->id,

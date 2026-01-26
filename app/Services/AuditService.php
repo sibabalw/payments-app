@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\AuditLog;
+use App\Jobs\LogAuditJob;
 use App\Models\Business;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Request;
 class AuditService
 {
     /**
-     * Log an action to the audit log.
+     * Log an action to the audit log (queued).
      */
     public function log(
         string $action,
@@ -20,20 +20,21 @@ class AuditService
         ?array $changes = null,
         ?User $user = null,
         ?Business $business = null
-    ): AuditLog {
+    ): void {
         $user = $user ?? auth()->user();
         $business = $business ?? $this->getBusinessFromModel($model) ?? $this->getBusinessFromRequest();
 
-        return AuditLog::create([
-            'user_id' => $user?->id,
-            'business_id' => $business?->id,
-            'action' => $action,
-            'model_type' => $model ? get_class($model) : null,
-            'model_id' => $model?->id,
-            'changes' => $changes,
-            'ip_address' => Request::ip(),
-            'user_agent' => Request::userAgent(),
-        ]);
+        // Queue the audit log write to avoid blocking the request
+        LogAuditJob::dispatch(
+            action: $action,
+            userId: $user?->id,
+            businessId: $business?->id,
+            modelType: $model ? get_class($model) : null,
+            modelId: $model?->id,
+            changes: $changes,
+            ipAddress: Request::ip(),
+            userAgent: Request::userAgent()
+        )->onQueue('audit');
     }
 
     /**
@@ -62,7 +63,7 @@ class AuditService
      */
     protected function getBusinessFromRequest(): ?Business
     {
-        $businessId = Request::header('X-Business-Id') 
+        $businessId = Request::header('X-Business-Id')
             ?? (Auth::check() ? Auth::user()->current_business_id : null)
             ?? session('current_business_id')
             ?? Request::input('business_id');

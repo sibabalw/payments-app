@@ -1,0 +1,43 @@
+add ai functionality where user will log in in whatsapp and will send to our ai in our app to do something like list payroll, or create delete, ai will be via api open ai.
+add filters in list pages 
+implement load more pagination to list pages and in search dropdowns
+payments page/side emails dont use business who is active in session that perfoms or own the payments authomations, in payroll this is done smoothly
+add known admins pages and look in users dashboard, also add pages about system/app management pages
+admin are not allowed in user app and users are not in admin pages and routes
+Payments page pull all jobs in all businesses not in current switched to business that is in session, this is not payments problem payroll too i realised when you refresh the page it pulls data according to business but if click of menu link Payments page, payroll page maybe other pages too pull all jobs in all businesses not in current switched to business that is in session, or i think problem is somethimes when i switch while in payments page then go to payroll i realize it has switch back to last business i was when i was in payments page virse vurser to payroll page when i go to payemnt page
+
+be like an business analyst and system designer, on the front end look to simplify user work flow, to make it easier for user, less clicks and run arounds
+
+logo in emails is never shown instead i see image placeholder indicating no image was found
+
+make admins dashboard, first read what they need in current project, admin files must be separate no file manipulation, admin can deactivate a business, block it or whatever
+
+add notification in dashboard, they will come from admins
+ no calculation or filtering execute done in php or front end, unless acceptable all that must happen in sql level
+Brand web site public site (Swift pay- focus on service offered use catchy marketing terms)
+On administrative there must be a page to view user business subscriptions
+
+Now focus on security of the web app to be very secure (current rate limit implemented in employees login is weak it blocks legit users)
+
+check efficiency (Build queries before get()  Let SQL do filtering/aggregation  Avoid pulling large datasets into PHP  Don’t loop models for computation)
+optimize (Let SQL do the heavy lifting.  Offload slow work to queues.  Use PHP-FPM + proper worker tuning, optimize other code in the project i might not have mentioned)
+Laravel/PHP handles each request in a worker, which runs synchronously. Slow tasks inside a request block only that worker, but other requests continue if other workers are free. 
+To avoid blocking, you can offload heavy work to queues, run async HTTP requests, or use background processes. 
+This makes the app effectively non-blocking from the user’s perspective while keeping Laravel fast and scalable for business workloads.
+
+improve mcp server for ai
+
+in front end make sure useeffects are used correctly the way they were mean to be used
+
+location in login email is not there at all
+
+reports page is not working
+
+rules and use case design on payroll like 1 employee be in one reccuring payroll job, adjustments be be for current month so 
+no problems can happen if employee get fired, i dont know im not saying these must be rules im no analyst or designer or business analyst
+but payroll needs rules for consistancy and efficiency, please help me
+
+recheck and test adjustments, refine and master: gobal :once off and recurring, employee specific: once off and recurring{
+  now i have a question, if an employee have once off adjustment in jan but have 3 executions, but 
+  this adjustment if the first execution, how will the code know that? answer the question!
+}

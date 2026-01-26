@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import InputError from '@/components/input-error';
-import AppLayout from '@/layouts/app-layout';
+import AdminLayout from '@/layouts/admin-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { CheckCircle, XCircle, Plus, Wallet } from 'lucide-react';
@@ -55,7 +55,7 @@ interface AdminEscrowProps {
         processed_at: string;
         fee_released_manually_at: string | null;
         payment_schedule: { name: string; business: { name: string } };
-        receiver: { name: string };
+        recipient: { name: string };
         escrow_deposit: { fee_amount: string } | null;
     }>;
     failedPayments: Array<{
@@ -66,7 +66,7 @@ interface AdminEscrowProps {
         processed_at: string;
         funds_returned_manually_at: string | null;
         payment_schedule: { name: string; business: { name: string } };
-        receiver: { name: string };
+        recipient: { name: string };
     }>;
 }
 
@@ -133,7 +133,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
     };
 
     return (
-        <AppLayout breadcrumbs={breadcrumbs}>
+        <AdminLayout breadcrumbs={breadcrumbs}>
             <Head title="Admin - Escrow Management" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
@@ -339,7 +339,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                                         <div>
                                             <p className="font-semibold">{payment.payment_schedule.business.name}</p>
                                             <p className="text-sm text-muted-foreground">
-                                                {payment.payment_schedule.name} • {payment.receiver.name}
+                                                {payment.payment_schedule.name} • {payment.recipient.name}
                                             </p>
                                             <p className="text-sm font-medium">
                                                 {formatCurrency(payment.amount)} • Fee: {payment.escrow_deposit ? formatCurrency(payment.escrow_deposit.fee_amount) : 'N/A'}
@@ -377,7 +377,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                                         <div>
                                             <p className="font-semibold">{payment.payment_schedule.business.name}</p>
                                             <p className="text-sm text-muted-foreground">
-                                                {payment.payment_schedule.name} • {payment.receiver.name}
+                                                {payment.payment_schedule.name} • {payment.recipient.name}
                                             </p>
                                             <p className="text-sm font-medium">
                                                 {formatCurrency(payment.amount)}
@@ -422,6 +422,6 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                 confirmText="Confirm"
                 variant="info"
             />
-        </AppLayout>
+        </AdminLayout>
     );
 }

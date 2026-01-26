@@ -9,7 +9,7 @@ import { useMobileNavigation } from '@/hooks/use-mobile-navigation';
 import { logout } from '@/routes';
 import { edit } from '@/routes/profile';
 import { type User } from '@/types';
-import { Link, router } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import { LogOut, Settings } from 'lucide-react';
 
 interface UserMenuContentProps {
@@ -18,6 +18,9 @@ interface UserMenuContentProps {
 
 export function UserMenuContent({ user }: UserMenuContentProps) {
     const cleanup = useMobileNavigation();
+    const { url } = usePage();
+    const isAdminArea = typeof url === 'string' && url.startsWith('/admin');
+    const settingsHref = isAdminArea ? '/admin/account/profile' : edit();
 
     const handleLogout = () => {
         cleanup();
@@ -36,7 +39,7 @@ export function UserMenuContent({ user }: UserMenuContentProps) {
                 <DropdownMenuItem asChild>
                     <Link
                         className="block w-full cursor-pointer"
-                        href={edit()}
+                        href={settingsHref}
                         prefetch
                         onClick={cleanup}
                     >

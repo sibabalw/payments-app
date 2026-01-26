@@ -17,22 +17,41 @@ class PayrollFailedEmail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    public User $user;
+
+    protected int $payrollJobId;
+
     /**
      * Create a new message instance.
      */
     public function __construct(
-        public User $user,
-        public PayrollJob $payrollJob
-    ) {}
+        User $user,
+        PayrollJob $payrollJob
+    ) {
+        $this->user = $user;
+        // Store only the ID - reload fresh to avoid any eager load metadata
+        $this->payrollJobId = $payrollJob->id;
+    }
+
+    /**
+     * Get the payroll job, always loading it fresh.
+     */
+    protected function getPayrollJob(): PayrollJob
+    {
+        // Always reload completely fresh from database
+        return PayrollJob::query()
+            ->where('id', $this->payrollJobId)
+            ->firstOrFail();
+    }
 
     /**
      * Get the message envelope.
      */
     public function envelope(): Envelope
     {
-        // Load business relationship
-        $this->payrollJob->loadMissing(['payrollSchedule.business', 'employee.business']);
-        $business = $this->payrollJob->payrollSchedule->business ?? $this->payrollJob->employee->business;
+        $payrollJob = $this->getPayrollJob();
+        $payrollJob->load('payrollSchedule.business', 'employee.business');
+        $business = $payrollJob->payrollSchedule->business ?? $payrollJob->employee->business;
 
         // Get business email and name, fallback to Swift Pay defaults
         $fromEmail = $business->email ?? config('mail.from.address');
@@ -40,7 +59,7 @@ class PayrollFailedEmail extends Mailable
 
         return new Envelope(
             from: new Address($fromEmail, $fromName),
-            subject: 'Payroll Payment Failed: '.number_format($this->payrollJob->gross_salary, 2).' '.$this->payrollJob->currency,
+            subject: 'Payroll Payment Failed: '.number_format($payrollJob->gross_salary, 2).' '.$payrollJob->currency,
         );
     }
 
@@ -49,8 +68,9 @@ class PayrollFailedEmail extends Mailable
      */
     public function content(): Content
     {
-        $this->payrollJob->loadMissing(['payrollSchedule.business', 'employee.business']);
-        $business = $this->payrollJob->payrollSchedule->business ?? $this->payrollJob->employee->business;
+        $payrollJob = $this->getPayrollJob();
+        $payrollJob->load('payrollSchedule.business', 'employee.business');
+        $business = $payrollJob->payrollSchedule->business ?? $payrollJob->employee->business;
 
         // Check for custom template
         $templateService = app(TemplateService::class);
@@ -60,13 +80,16 @@ class PayrollFailedEmail extends Mailable
         );
 
         if ($customTemplate && $customTemplate->compiled_html) {
+            // Convert logo to base64 data URI for email embedding
+            $logoDataUri = $this->getLogoDataUri($business);
+
             $html = $templateService->renderTemplate($customTemplate->compiled_html, [
                 'subject' => 'Payroll Processing Failed',
                 'business_name' => $business->name,
-                'business_logo' => $business->logo ?? '',
+                'business_logo' => $logoDataUri,
                 'year' => date('Y'),
-                'schedule_name' => $this->payrollJob->payrollSchedule?->name ?? 'Payroll',
-                'error_message' => $this->payrollJob->error_message ?? 'An error occurred',
+                'schedule_name' => $payrollJob->payrollSchedule?->name ?? 'Payroll',
+                'error_message' => $payrollJob->error_message ?? 'An error occurred',
                 'payroll_url' => route('payroll.index'),
             ]);
 
@@ -80,9 +103,34 @@ class PayrollFailedEmail extends Mailable
             view: 'emails.payroll-failed',
             with: [
                 'user' => $this->user,
-                'payrollJob' => $this->payrollJob,
+                'payrollJob' => $payrollJob,
                 'business' => $business,
             ],
         );
+    }
+
+    /**
+     * Convert business logo to base64 data URI for email embedding.
+     */
+    protected function getLogoDataUri($business): string
+    {
+        if (! $business || ! $business->logo) {
+            return '';
+        }
+
+        try {
+            $logoPath = $business->logo;
+            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($logoPath)) {
+                $logoContents = \Illuminate\Support\Facades\Storage::disk('public')->get($logoPath);
+                $mimeType = \Illuminate\Support\Facades\Storage::disk('public')->mimeType($logoPath);
+                $base64 = base64_encode($logoContents);
+
+                return "data:{$mimeType};base64,{$base64}";
+            }
+        } catch (\Exception $e) {
+            // Return empty string if logo can't be loaded
+        }
+
+        return '';
     }
 }

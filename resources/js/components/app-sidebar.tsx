@@ -12,21 +12,11 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
-import { BookOpen, Bot, Folder, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
+import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
+import AppearanceToggleDropdown from './appearance-dropdown';
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Repository',
-        href: 'https://github.com/laravel/react-starter-kit',
-        icon: Folder,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#react',
-        icon: BookOpen,
-    },
-];
+const footerNavItems: NavItem[] = [];
 
 export function AppSidebar() {
     const { businessesCount = 0 } = usePage<SharedData>().props;
@@ -44,13 +34,19 @@ export function AppSidebar() {
         },
         {
             title: 'Payments',
-            href: '/payments',
             icon: CreditCard,
+            items: [
+                { title: 'Schedules', href: '/payments' },
+                { title: 'Payment Jobs', href: '/payments/jobs' },
+            ],
         },
         {
             title: 'Payroll',
-            href: '/payroll',
             icon: DollarSign,
+            items: [
+                { title: 'Schedules', href: '/payroll' },
+                { title: 'Payroll Jobs', href: '/payroll/jobs' },
+            ],
         },
         {
             title: 'Payslips',
@@ -64,28 +60,43 @@ export function AppSidebar() {
         },
         {
             title: 'Recipients',
-            href: '/recipients',
             icon: Users,
+            items: [
+                { title: 'All Recipients', href: '/recipients' },
+                { title: 'Create Recipient', href: '/recipients/create' },
+            ],
         },
         {
             title: 'Employees',
-            href: '/employees',
             icon: UserCheck,
+            items: [
+                { title: 'All Employees', href: '/employees' },
+                { title: 'Create Employee', href: '/employees/create' },
+            ],
         },
         {
-            title: 'Deductions',
-            href: '/deductions',
+            title: 'Adjustments',
             icon: Receipt,
+            items: [
+                { title: 'List', href: '/adjustments' },
+                { title: 'Create Adjustment', href: '/adjustments/create' },
+            ],
         },
         {
             title: 'Time Tracking',
-            href: '/time-tracking',
             icon: Clock,
+            items: [
+                { title: 'Entries', href: '/time-tracking' },
+                { title: 'Manual Entry', href: '/time-tracking/manual' },
+            ],
         },
         {
             title: 'Leave',
-            href: '/leave',
             icon: FileText,
+            items: [
+                { title: 'List', href: '/leave' },
+                { title: 'Create Leave', href: '/leave/create' },
+            ],
         },
         {
             title: 'Audit Logs',
@@ -94,8 +105,14 @@ export function AppSidebar() {
         },
         {
             title: 'Compliance',
-            href: '/compliance',
             icon: Shield,
+            items: [
+                { title: 'Overview', href: '/compliance' },
+                { title: 'UIF', href: '/compliance/uif' },
+                { title: 'EMP201', href: '/compliance/emp201' },
+                { title: 'IRP5', href: '/compliance/irp5' },
+                { title: 'SARS Export', href: '/compliance/sars-export' },
+            ],
         },
         {
             title: 'Templates',
@@ -104,20 +121,26 @@ export function AppSidebar() {
         },
         {
             title: 'Businesses',
-            href: '/businesses',
             icon: Building2,
             badge: businessesCount === 0 ? '0' : undefined,
+            items: [
+                { title: 'All Businesses', href: '/businesses' },
+                { title: 'Create Business', href: '/businesses/create' },
+            ],
         },
     ];
 
     return (
         <Sidebar collapsible="icon" variant="inset">
             <SidebarHeader>
-                <SidebarMenu>
-                    <SidebarMenuItem>
-                        <BusinessSwitcher />
-                    </SidebarMenuItem>
-                </SidebarMenu>
+                <div className="flex items-center justify-between gap-2">
+                    <SidebarMenu className="flex-1">
+                        <SidebarMenuItem>
+                            <BusinessSwitcher />
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                    <AppearanceToggleDropdown />
+                </div>
             </SidebarHeader>
 
             <SidebarContent>
@@ -125,7 +148,9 @@ export function AppSidebar() {
             </SidebarContent>
 
             <SidebarFooter>
-                <NavFooter items={footerNavItems} className="mt-auto" />
+                {footerNavItems.length > 0 && (
+                    <NavFooter items={footerNavItems} className="mt-auto" />
+                )}
                 <NavUser />
             </SidebarFooter>
         </Sidebar>

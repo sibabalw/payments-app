@@ -48,6 +48,8 @@ interface IRP5IndexProps {
     employees: Employee[];
     taxYears: TaxYear[];
     selectedTaxYear: string;
+    generatedCount: number;
+    pendingCount: number;
 }
 
 export default function IRP5Index({
@@ -55,6 +57,8 @@ export default function IRP5Index({
     employees,
     taxYears,
     selectedTaxYear,
+    generatedCount,
+    pendingCount,
 }: IRP5IndexProps) {
     const [taxYear, setTaxYear] = useState(selectedTaxYear);
     const [selectedEmployees, setSelectedEmployees] = useState<number[]>([]);
@@ -139,8 +143,7 @@ export default function IRP5Index({
         );
     }
 
-    const generatedCount = employees.filter(e => e.irp5_status === 'generated' || e.irp5_status === 'submitted').length;
-    const pendingCount = employees.filter(e => e.irp5_status === 'pending').length;
+    // Counts are pre-computed by backend - no frontend filtering needed
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>

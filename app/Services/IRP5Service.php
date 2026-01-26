@@ -98,15 +98,18 @@ class IRP5Service
         $totalPaye = $payrollJobs->sum('paye_amount');
         $totalUif = $payrollJobs->sum('uif_amount');
 
-        // Calculate custom deductions
-        $customDeductionsTotals = [];
+        // Calculate adjustments (only deductions, not additions)
+        $adjustmentsTotals = [];
         foreach ($payrollJobs as $job) {
-            foreach ($job->custom_deductions ?? [] as $deduction) {
-                $name = $deduction['name'] ?? 'Other';
-                if (! isset($customDeductionsTotals[$name])) {
-                    $customDeductionsTotals[$name] = 0;
+            foreach ($job->adjustments ?? [] as $adjustment) {
+                // Only include deduction-type adjustments for IRP5
+                if (($adjustment['adjustment_type'] ?? 'deduction') === 'deduction') {
+                    $name = $adjustment['name'] ?? 'Other';
+                    if (! isset($adjustmentsTotals[$name])) {
+                        $adjustmentsTotals[$name] = 0;
+                    }
+                    $adjustmentsTotals[$name] += $adjustment['amount'] ?? 0;
                 }
-                $customDeductionsTotals[$name] += $deduction['amount'] ?? 0;
             }
         }
 
@@ -133,8 +136,8 @@ class IRP5Service
             ],
         ];
 
-        // Add custom deductions (pension, medical, etc.)
-        foreach ($customDeductionsTotals as $name => $amount) {
+        // Add adjustments (deductions only, not additions)
+        foreach ($adjustmentsTotals as $name => $amount) {
             $code = $this->mapDeductionToSarsCode($name);
             $deductions[] = [
                 'code' => $code,
@@ -143,7 +146,7 @@ class IRP5Service
             ];
         }
 
-        $totalDeductions = $totalPaye + $totalUif + array_sum($customDeductionsTotals);
+        $totalDeductions = $totalPaye + $totalUif + array_sum($adjustmentsTotals);
 
         // Get employment period within tax year
         $firstPayroll = $payrollJobs->first();
@@ -207,18 +210,17 @@ class IRP5Service
     {
         $dates = $this->getTaxYearDates($taxYear);
 
-        // Get all employees who had payroll in this tax year
+        // Get all employees who had payroll in this tax year (using JOIN)
         $employeeIds = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
             ->where(function ($q) use ($dates) {
-                $q->whereBetween('pay_period_start', [$dates['start'], $dates['end']])
-                    ->orWhereBetween('pay_period_end', [$dates['start'], $dates['end']]);
+                $q->whereBetween('payroll_jobs.pay_period_start', [$dates['start'], $dates['end']])
+                    ->orWhereBetween('payroll_jobs.pay_period_end', [$dates['start'], $dates['end']]);
             })
             ->distinct()
-            ->pluck('employee_id');
+            ->pluck('payroll_jobs.employee_id');
 
         $employees = Employee::whereIn('id', $employeeIds)->get();
 
@@ -262,18 +264,17 @@ class IRP5Service
     {
         $dates = $this->getTaxYearDates($taxYear);
 
-        // Get all employees with payroll in tax year
+        // Get all employees with payroll in tax year (using JOIN)
         $employeeIds = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
             ->where(function ($q) use ($dates) {
-                $q->whereBetween('pay_period_start', [$dates['start'], $dates['end']])
-                    ->orWhereBetween('pay_period_end', [$dates['start'], $dates['end']]);
+                $q->whereBetween('payroll_jobs.pay_period_start', [$dates['start'], $dates['end']])
+                    ->orWhereBetween('payroll_jobs.pay_period_end', [$dates['start'], $dates['end']]);
             })
             ->distinct()
-            ->pluck('employee_id');
+            ->pluck('payroll_jobs.employee_id');
 
         $employees = Employee::whereIn('id', $employeeIds)
             ->with(['business'])
@@ -319,13 +320,12 @@ class IRP5Service
      */
     public function getAvailableTaxYears(Business $business): Collection
     {
-        // Get earliest and latest payroll dates
+        // Get earliest and latest payroll dates (using JOIN)
         $dates = PayrollJob::query()
-            ->whereHas('payrollSchedule', function ($q) use ($business) {
-                $q->where('business_id', $business->id);
-            })
-            ->where('status', 'succeeded')
-            ->selectRaw('MIN(pay_period_start) as earliest, MAX(pay_period_end) as latest')
+            ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+            ->where('payroll_schedules.business_id', $business->id)
+            ->where('payroll_jobs.status', 'succeeded')
+            ->selectRaw('MIN(payroll_jobs.pay_period_start) as earliest, MAX(payroll_jobs.pay_period_end) as latest')
             ->first();
 
         if (! $dates->earliest) {

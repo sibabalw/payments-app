@@ -40,3 +40,7 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+# Next.js / Node
+.next/
+dist/
+.npm-cache/

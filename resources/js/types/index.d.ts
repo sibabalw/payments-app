@@ -17,10 +17,12 @@ export interface NavGroup {
 
 export interface NavItem {
     title: string;
-    href: NonNullable<InertiaLinkProps['href']>;
+    href?: NonNullable<InertiaLinkProps['href']>;
     icon?: LucideIcon | null;
     isActive?: boolean;
     badge?: string | number | null;
+    /** Child links shown in a collapsible section (closed by default). */
+    items?: NavItem[];
 }
 
 export interface SharedData {
@@ -31,6 +33,7 @@ export interface SharedData {
     businessesCount?: number;
     currentBusiness?: { id: number; name: string; status: string; logo?: string | null } | null;
     userBusinesses?: Array<{ id: number; name: string; status: string; logo?: string | null }>;
+    hasCompletedDashboardTour?: boolean;
     [key: string]: unknown;
 }
 
@@ -41,6 +44,9 @@ export interface User {
     avatar?: string;
     email_verified_at: string | null;
     two_factor_enabled?: boolean;
+    is_admin?: boolean;
+    has_completed_dashboard_tour?: boolean;
+    dashboard_tour_completed_at?: string | null;
     created_at: string;
     updated_at: string;
     [key: string]: unknown; // This allows for additional properties...

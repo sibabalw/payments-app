@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreBusinessRequest;
 use App\Mail\BusinessCreatedEmail;
 use App\Models\Business;
 use App\Services\AuditService;
 use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -18,8 +18,7 @@ class OnboardingController extends Controller
 {
     public function __construct(
         protected AuditService $auditService
-    ) {
-    }
+    ) {}
 
     /**
      * Display the onboarding page.
@@ -28,6 +27,11 @@ class OnboardingController extends Controller
     {
         $user = Auth::user();
 
+        // Admins skip onboarding - redirect to admin dashboard
+        if ($user->is_admin) {
+            return redirect()->route('admin.dashboard');
+        }
+
         // If user has already completed onboarding, redirect to dashboard
         if ($user->onboarding_completed_at) {
             return redirect()->route('dashboard');
@@ -35,9 +39,10 @@ class OnboardingController extends Controller
 
         // If user already has businesses, mark onboarding as completed and redirect
         $hasBusinesses = $user->businesses()->count() > 0 || $user->ownedBusinesses()->count() > 0;
-        
+
         if ($hasBusinesses) {
             $user->update(['onboarding_completed_at' => now()]);
+
             return redirect()->route('dashboard');
         }
 
@@ -47,25 +52,9 @@ class OnboardingController extends Controller
     /**
      * Store a newly created business during onboarding.
      */
-    public function store(Request $request)
+    public function store(StoreBusinessRequest $request)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
-            'business_type' => 'nullable|in:small_business,medium_business,large_business,sole_proprietorship,partnership,corporation,other',
-            'registration_number' => 'nullable|string|max:255',
-            'tax_id' => 'nullable|string|max:255',
-            'email' => 'required|email|max:255',
-            'phone' => 'required|string|max:255',
-            'website' => 'nullable|url|max:255',
-            'street_address' => 'nullable|string|max:255',
-            'city' => 'required|string|max:255',
-            'province' => 'nullable|string|max:255',
-            'postal_code' => 'nullable|string|max:255',
-            'country' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'contact_person_name' => 'required|string|max:255',
-        ]);
+        $validated = $request->validated();
 
         // Handle logo upload first (outside transaction)
         $logoPath = null;
@@ -76,12 +65,15 @@ class OnboardingController extends Controller
 
         // Remove logo from validated array since we handle it separately
         unset($validated['logo']);
-        
+
+        // Default business_type when not provided (column is NOT NULL)
+        $validated['business_type'] = $validated['business_type'] ?? 'small_business';
+
         try {
             // Wrap all database operations in a transaction
             DB::transaction(function () use ($logoPath, $validated, &$business, &$user) {
                 $user = Auth::user();
-                
+
                 // Create business
                 $business = Business::create([
                     'user_id' => $user->id,
@@ -109,13 +101,13 @@ class OnboardingController extends Controller
 
             return redirect()->route('dashboard')
                 ->with('success', 'Business created successfully. Welcome to Swift Pay!');
-                
+
         } catch (\Exception $e) {
             // If transaction failed, clean up uploaded file
             if ($logoPath && Storage::disk('public')->exists($logoPath)) {
                 Storage::disk('public')->delete($logoPath);
             }
-            
+
             // Re-throw the exception to show error to user
             throw $e;
         }

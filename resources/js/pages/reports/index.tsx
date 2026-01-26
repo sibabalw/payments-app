@@ -6,18 +6,77 @@ import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/react';
-import { Download, FileText, TrendingUp, Users, Receipt, DollarSign, FileSpreadsheet } from 'lucide-react';
-import { useState } from 'react';
+import { Download, FileText, TrendingUp, Users, Receipt, DollarSign, FileSpreadsheet, Loader2, Mail } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Reports', href: '/reports' },
 ];
 
-export default function ReportsIndex({ report, report_type, business_id, start_date, end_date, businesses }: any) {
+export default function ReportsIndex({ report: initialReport, report_type, business_id, start_date, end_date, businesses }: any) {
+    // Convert business_id to string, handle null/undefined
+    const initialBusinessId = business_id ? String(business_id) : '';
+    
     const [localReportType, setLocalReportType] = useState(report_type || 'payroll_summary');
-    const [localBusinessId, setLocalBusinessId] = useState(business_id || '');
+    const [localBusinessId, setLocalBusinessId] = useState(initialBusinessId);
     const [localStartDate, setLocalStartDate] = useState(start_date || '');
     const [localEndDate, setLocalEndDate] = useState(end_date || '');
+    const [report, setReport] = useState(initialReport);
+    const [loading, setLoading] = useState(!initialReport); // Show loading if no initial report
+    const [loadingButtons, setLoadingButtons] = useState<Record<string, boolean>>({});
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const sseRef = useRef<EventSource | null>(null);
+
+    // Fetch report data when filters change
+    const fetchReportData = async () => {
+        setLoading(true);
+        try {
+            const params: Record<string, string> = {
+                report_type: localReportType,
+            };
+            
+            if (localBusinessId) {
+                params.business_id = localBusinessId;
+            }
+            if (localStartDate) {
+                params.start_date = localStartDate;
+            }
+            if (localEndDate) {
+                params.end_date = localEndDate;
+            }
+
+            // Use fetch with proper headers for JSON API endpoint
+            const response = await fetch(`/reports/data?${new URLSearchParams(params).toString()}`, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                setReport(data);
+            } else {
+                const errorText = await response.text();
+                console.error('Failed to fetch report data:', response.status, response.statusText, errorText);
+                setReport(null);
+            }
+        } catch (error: any) {
+            console.error('Error fetching report data:', error);
+            setReport(null);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Fetch report data on mount and when filters change
+    useEffect(() => {
+        fetchReportData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [localReportType, localBusinessId, localStartDate, localEndDate]);
 
     const handleFilterChange = () => {
         router.get('/reports', {
@@ -28,15 +87,136 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
         }, { preserveState: true });
     };
 
-    const getExportUrl = (format: string) => {
+    const getExportUrl = (format: string, delivery: 'download' | 'email' = 'download') => {
         const params = new URLSearchParams({
             report_type: localReportType,
+            delivery: delivery,
             ...(localBusinessId && { business_id: localBusinessId }),
             ...(localStartDate && { start_date: localStartDate }),
             ...(localEndDate && { end_date: localEndDate }),
         });
         return `/reports/export/${format}?${params.toString()}`;
     };
+
+    const handleExportClick = async (format: string, delivery: 'download' | 'email') => {
+        const buttonKey = `${format}-${delivery}`;
+        setLoadingButtons(prev => ({ ...prev, [buttonKey]: true }));
+        setSuccessMessage(null);
+        setErrorMessage(null);
+
+        try {
+            const response = await fetch(getExportUrl(format, delivery), {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            });
+
+            if (response.ok) {
+                const contentType = response.headers.get('content-type');
+                if (!contentType?.includes('application/json')) {
+                    setErrorMessage('Unexpected response. Please try again.');
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.success === false && data.error) {
+                    setErrorMessage(data.error);
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    return;
+                }
+
+                if (delivery === 'download') {
+                    if (data.download_url && !data.sse_url) {
+                        const iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.src = data.download_url;
+                        document.body.appendChild(iframe);
+                        setTimeout(() => {
+                            if (iframe.parentNode) document.body.removeChild(iframe);
+                        }, 60000);
+                        setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                        setSuccessMessage('Report downloaded successfully!');
+                    } else {
+                        trackDownloadProgress(data.report_generation_id, data.sse_url, data.download_url, buttonKey);
+                    }
+                } else {
+                    setSuccessMessage(`Your ${format.toUpperCase()} report is being generated and will be sent to your email.`);
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                }
+            } else {
+                const errorText = await response.text();
+                setErrorMessage(`Failed to start report generation: ${errorText}`);
+                setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+            }
+        } catch (error: any) {
+            console.error('Error exporting report:', error);
+            setErrorMessage('Failed to start report generation. Please try again.');
+            setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+        }
+    };
+
+    const trackDownloadProgress = (reportGenerationId: number, sseUrl: string, downloadUrl: string, buttonKey: string) => {
+        const clearLoading = () => {
+            setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+            if (sseRef.current) {
+                sseRef.current.close();
+                sseRef.current = null;
+            }
+        };
+
+        if (sseRef.current) {
+            sseRef.current.close();
+            sseRef.current = null;
+        }
+
+        const eventSource = new EventSource(sseUrl);
+        sseRef.current = eventSource;
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.status === 'completed') {
+                    eventSource.close();
+                    sseRef.current = null;
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = data.download_url ?? downloadUrl;
+                    document.body.appendChild(iframe);
+                    setTimeout(() => {
+                        if (iframe.parentNode) document.body.removeChild(iframe);
+                    }, 60000);
+                    setLoadingButtons(prev => ({ ...prev, [buttonKey]: false }));
+                    setSuccessMessage('Report downloaded successfully!');
+                } else if (data.status === 'failed') {
+                    setErrorMessage(data.error_message || 'Report generation failed.');
+                    clearLoading();
+                }
+            } catch (e) {
+                console.error('Error parsing SSE data:', e);
+            }
+        };
+
+        eventSource.onerror = () => {
+            eventSource.close();
+            if (sseRef.current === eventSource) sseRef.current = null;
+            setErrorMessage('Connection lost. Please try again.');
+            clearLoading();
+        };
+    };
+
+    useEffect(() => {
+        return () => {
+            if (sseRef.current) {
+                sseRef.current.close();
+                sseRef.current = null;
+            }
+        };
+    }, []);
 
     const formatCurrency = (amount: number | string) => {
         return `ZAR ${parseFloat(String(amount)).toLocaleString('en-ZA', { 
@@ -55,6 +235,16 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
     };
 
     const renderReport = () => {
+        if (!report) {
+            return (
+                <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                        No report data available. Please adjust your filters or wait for data to load.
+                    </CardContent>
+                </Card>
+            );
+        }
+
         switch (localReportType) {
             case 'payroll_summary':
                 return renderPayrollSummary();
@@ -100,7 +290,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold text-red-600">
-                                {formatCurrency((report.total_paye || 0) + (report.total_uif || 0) + (report.total_custom_deductions || 0))}
+                                {formatCurrency((report.total_paye || 0) + (report.total_uif || 0) + (report.total_adjustments || 0))}
                             </div>
                         </CardContent>
                     </Card>
@@ -129,8 +319,8 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                                 <span>{formatCurrency(report.total_uif || 0)}</span>
                             </div>
                             <div className="flex justify-between">
-                                <span>Custom Deductions:</span>
-                                <span>{formatCurrency(report.total_custom_deductions || 0)}</span>
+                                <span>Adjustments:</span>
+                                <span>{formatCurrency(report.total_adjustments || 0)}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span>SDL (Employer Cost):</span>
@@ -154,7 +344,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                                             <th className="text-right p-2">Gross</th>
                                             <th className="text-right p-2">PAYE</th>
                                             <th className="text-right p-2">UIF</th>
-                                            <th className="text-right p-2">Custom</th>
+                                            <th className="text-right p-2">Adjustments</th>
                                             <th className="text-right p-2">Net</th>
                                             <th className="text-left p-2">Period</th>
                                         </tr>
@@ -166,7 +356,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                                                 <td className="text-right p-2">{formatCurrency(job.gross_salary)}</td>
                                                 <td className="text-right p-2 text-red-600">{formatCurrency(job.paye_amount)}</td>
                                                 <td className="text-right p-2 text-red-600">{formatCurrency(job.uif_amount)}</td>
-                                                <td className="text-right p-2 text-red-600">{formatCurrency(job.custom_deductions_total)}</td>
+                                                <td className="text-right p-2 text-red-600">{formatCurrency(job.adjustments_total || 0)}</td>
                                                 <td className="text-right p-2 font-medium text-green-600">{formatCurrency(job.net_salary)}</td>
                                                 <td className="p-2 text-xs text-muted-foreground">
                                                     {formatDate(job.pay_period_start)} - {formatDate(job.pay_period_end)}
@@ -240,7 +430,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                                     <div>
                                         <div className="text-sm text-muted-foreground">Total Deductions</div>
                                         <div className="text-lg font-bold text-red-600">
-                                            {formatCurrency(emp.total_paye + emp.total_uif + emp.total_custom_deductions)}
+                                            {formatCurrency(emp.total_paye + emp.total_uif + (emp.total_adjustments || 0))}
                                         </div>
                                     </div>
                                 </div>
@@ -353,7 +543,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                             <CardTitle>Custom Deductions</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">{formatCurrency(report.total_custom_deductions || 0)}</div>
+                            <div className="text-2xl font-bold">{formatCurrency(report.total_adjustments || 0)}</div>
                         </CardContent>
                     </Card>
 
@@ -370,7 +560,7 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                 {report.deductions && report.deductions.length > 0 && (
                     <Card>
                         <CardHeader>
-                            <CardTitle>Custom Deductions Breakdown</CardTitle>
+                            <CardTitle>Adjustments Breakdown</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="overflow-x-auto">
@@ -545,27 +735,134 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold">Reports</h1>
-                    <div className="flex gap-2">
-                        <a href={getExportUrl('csv')}>
-                            <Button variant="outline" size="sm">
-                                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                                Export CSV
-                            </Button>
-                        </a>
-                        <a href={getExportUrl('excel')}>
-                            <Button variant="outline" size="sm">
-                                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                                Export Excel
-                            </Button>
-                        </a>
-                        <a href={getExportUrl('pdf')}>
-                            <Button variant="outline" size="sm">
-                                <FileText className="mr-2 h-4 w-4" />
-                                Export PDF
-                            </Button>
-                        </a>
+                    <div className="flex flex-wrap gap-2">
+                        {/* CSV Buttons */}
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('csv', 'download')}
+                            disabled={loadingButtons['csv-download']}
+                        >
+                            {loadingButtons['csv-download'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                    Download CSV
+                                </>
+                            )}
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('csv', 'email')}
+                            disabled={loadingButtons['csv-email']}
+                        >
+                            {loadingButtons['csv-email'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Mail className="mr-2 h-4 w-4" />
+                                    Email CSV
+                                </>
+                            )}
+                        </Button>
+                        
+                        {/* Excel Buttons */}
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('excel', 'download')}
+                            disabled={loadingButtons['excel-download']}
+                        >
+                            {loadingButtons['excel-download'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                    Download Excel
+                                </>
+                            )}
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('excel', 'email')}
+                            disabled={loadingButtons['excel-email']}
+                        >
+                            {loadingButtons['excel-email'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Mail className="mr-2 h-4 w-4" />
+                                    Email Excel
+                                </>
+                            )}
+                        </Button>
+                        
+                        {/* PDF Buttons */}
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('pdf', 'download')}
+                            disabled={loadingButtons['pdf-download']}
+                        >
+                            {loadingButtons['pdf-download'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Download PDF
+                                </>
+                            )}
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleExportClick('pdf', 'email')}
+                            disabled={loadingButtons['pdf-email']}
+                        >
+                            {loadingButtons['pdf-email'] ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Mail className="mr-2 h-4 w-4" />
+                                    Email PDF
+                                </>
+                            )}
+                        </Button>
                     </div>
                 </div>
+
+                {/* Success/Error Messages */}
+                {successMessage && (
+                    <div className="rounded-md bg-green-50 p-4 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                        {successMessage}
+                    </div>
+                )}
+                {errorMessage && (
+                    <div className="rounded-md bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+                        {errorMessage}
+                    </div>
+                )}
 
                 <Card>
                     <CardHeader>
@@ -648,7 +945,18 @@ export default function ReportsIndex({ report, report_type, business_id, start_d
                     </CardContent>
                 </Card>
 
-                {renderReport()}
+                {loading ? (
+                    <Card>
+                        <CardContent className="flex items-center justify-center py-12">
+                            <div className="flex flex-col items-center gap-4">
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                <p className="text-sm text-muted-foreground">Loading report data...</p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    renderReport()
+                )}
             </div>
         </AppLayout>
     );

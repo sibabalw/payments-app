@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\PaymentJob;
-use App\Models\PaymentSchedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -20,28 +19,32 @@ class PaymentJobController extends Controller
         $scheduleId = $request->get('schedule_id');
         $status = $request->get('status');
 
-        $query = PaymentJob::query()->with(['paymentSchedule.business', 'receiver']);
+        // Use JOIN instead of whereHas for better performance
+        $query = PaymentJob::query()
+            ->select(['payment_jobs.*'])
+            ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+            ->with([
+                'paymentSchedule:id,business_id,name',
+                'paymentSchedule.business:id,name',
+                'recipient:id,name',
+            ]);
 
         if ($scheduleId) {
-            $query->where('payment_schedule_id', $scheduleId);
+            $query->where('payment_jobs.payment_schedule_id', $scheduleId);
         }
 
         if ($status) {
-            $query->where('status', $status);
+            $query->where('payment_jobs.status', $status);
         }
 
         if ($businessId) {
-            $query->whereHas('paymentSchedule', function ($q) use ($businessId) {
-                $q->where('business_id', $businessId);
-            });
+            $query->where('payment_schedules.business_id', $businessId);
         } else {
-            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id');
-            $query->whereHas('paymentSchedule', function ($q) use ($userBusinessIds) {
-                $q->whereIn('business_id', $userBusinessIds);
-            });
+            $userBusinessIds = Auth::user()->businesses()->pluck('businesses.id')->toArray();
+            $query->whereIn('payment_schedules.business_id', $userBusinessIds);
         }
 
-        $jobs = $query->latest()->paginate(20);
+        $jobs = $query->orderByDesc('payment_jobs.created_at')->paginate(20);
 
         return Inertia::render('payments/jobs', [
             'jobs' => $jobs,
@@ -58,7 +61,7 @@ class PaymentJobController extends Controller
      */
     public function show(PaymentJob $paymentJob): Response
     {
-        $paymentJob->load(['paymentSchedule.business', 'receiver']);
+        $paymentJob->load(['paymentSchedule.business', 'recipient']);
 
         return Inertia::render('payments/job-show', [
             'job' => $paymentJob,
