@@ -1,4 +1,3 @@
-import ProfileController from '@/actions/App/Http/Controllers/Settings/ProfileController';
 import { send } from '@/routes/verification';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Transition } from '@headlessui/react';
@@ -310,7 +309,8 @@ export default function Profile({
 
                         <div className="p-6">
                             <Form
-                                {...ProfileController.update.form()}
+                                action="/settings/profile"
+                                method="patch"
                                 options={{
                                     preserveScroll: true,
                                 }}

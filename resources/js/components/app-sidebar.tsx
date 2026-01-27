@@ -46,6 +46,8 @@ export function AppSidebar() {
             items: [
                 { title: 'Schedules', href: '/payroll' },
                 { title: 'Payroll Jobs', href: '/payroll/jobs' },
+                { title: 'Benefits & Deductions', href: '/benefits' },
+                { title: 'Bonuses', href: '/payroll/bonuses' },
             ],
         },
         {
@@ -72,14 +74,6 @@ export function AppSidebar() {
             items: [
                 { title: 'All Employees', href: '/employees' },
                 { title: 'Create Employee', href: '/employees/create' },
-            ],
-        },
-        {
-            title: 'Adjustments',
-            icon: Receipt,
-            items: [
-                { title: 'List', href: '/adjustments' },
-                { title: 'Create Adjustment', href: '/adjustments/create' },
             ],
         },
         {

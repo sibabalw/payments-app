@@ -377,7 +377,7 @@ export default function AdminAccountProfile({
                         </div>
                     </div>
 
-                    <DeleteUser formAction={{ action: '/admin/account/profile', method: 'delete' }} />
+                    <DeleteUser formAction="/admin/account/profile" />
                 </div>
             </AdminAccountLayout>
         </AdminLayout>

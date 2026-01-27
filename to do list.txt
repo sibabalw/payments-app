@@ -35,7 +35,7 @@ reports page is not working
 
 rules and use case design on payroll like 1 employee be in one reccuring payroll job, adjustments be be for current month so 
 no problems can happen if employee get fired, i dont know im not saying these must be rules im no analyst or designer or business analyst
-but payroll needs rules for consistancy and efficiency, please help me
+but payroll needs rules for consistancy and efficiency, please help me with rules ideas
 
 recheck and test adjustments, refine and master: gobal :once off and recurring, employee specific: once off and recurring{
   now i have a question, if an employee have once off adjustment in jan but have 3 executions, but 

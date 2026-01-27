@@ -54,8 +54,8 @@ export default function AdminAccountLayout({ children }: PropsWithChildren) {
 
                 <Separator className="my-6 lg:hidden" />
 
-                <div className="flex-1 md:max-w-2xl">
-                    <section className="max-w-xl space-y-12">
+                <div className="flex-1">
+                    <section className="space-y-12">
                         {children}
                     </section>
                 </div>

@@ -212,10 +212,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('employees/{employee}/schedule', [\App\Http\Controllers\EmployeeScheduleController::class, 'show'])->name('employees.schedule');
         Route::put('employees/{employee}/schedule', [\App\Http\Controllers\EmployeeScheduleController::class, 'update'])->name('employees.schedule.update');
 
-        // Adjustment routes
-        Route::get('adjustments/calculate-period', [\App\Http\Controllers\AdjustmentController::class, 'calculatePeriod'])->name('adjustments.calculate-period');
-        Route::resource('adjustments', \App\Http\Controllers\AdjustmentController::class);
-        Route::get('employees/{employee}/adjustments', [\App\Http\Controllers\AdjustmentController::class, 'employeeIndex'])->name('employees.adjustments.index');
+        // Benefits routes (company-wide recurring adjustments)
+        Route::resource('benefits', \App\Http\Controllers\BenefitsController::class)->except(['show']);
+        Route::post('benefits/{benefit}/temporarily-change', [\App\Http\Controllers\BenefitsController::class, 'temporarilyChange'])->name('benefits.temporarily-change');
+
+        // Payroll Bonuses/Adjustments routes (one-off payments for employees)
+        Route::resource('payroll/bonuses', \App\Http\Controllers\PaymentsController::class)->except(['show']);
+        Route::get('employees/{employee}/bonuses', [\App\Http\Controllers\PaymentsController::class, 'employeeIndex'])->name('employees.bonuses.index');
+
+        // Employee benefits routes
+        Route::get('employees/{employee}/benefits', [\App\Http\Controllers\EmployeeController::class, 'benefits'])->name('employees.benefits');
+        Route::post('employees/{employee}/benefits/override', [\App\Http\Controllers\EmployeeController::class, 'overrideBenefit'])->name('employees.benefits.override');
+        Route::delete('employees/{employee}/benefits/{override}/remove', [\App\Http\Controllers\EmployeeController::class, 'removeOverride'])->name('employees.benefits.remove-override');
 
         // Time tracking routes
         Route::get('time-tracking', [\App\Http\Controllers\TimeEntryController::class, 'index'])->name('time-tracking.index');

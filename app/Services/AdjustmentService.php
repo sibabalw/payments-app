@@ -11,72 +11,36 @@ class AdjustmentService
 {
     /**
      * Get all adjustments valid for a payroll period
+     * Unified query logic: single query with consistent overlap matching for all adjustments
      *
      * @param  Employee  $employee  The employee to get adjustments for
      * @param  Carbon  $periodStart  Start date of the payroll period
      * @param  Carbon  $periodEnd  End date of the payroll period
-     * @param  int|null  $payrollScheduleId  The payroll schedule ID (required for once-off adjustments)
+     * @param  int|null  $payrollScheduleId  Optional schedule ID for filtering (not stored, used for auto-detection)
      * @return Collection Collection of Adjustment models
      */
     public function getValidAdjustments(Employee $employee, Carbon $periodStart, Carbon $periodEnd, ?int $payrollScheduleId = null): Collection
     {
-        // Get company-wide adjustments (employee_id is null)
-        $companyAdjustments = Adjustment::where('business_id', $employee->business_id)
-            ->whereNull('employee_id')
+        return Adjustment::where('business_id', $employee->business_id)
             ->where('is_active', true)
-            ->where(function ($query) use ($periodStart, $periodEnd, $payrollScheduleId) {
-                // Recurring adjustments (apply to all schedules)
-                $query->where(function ($q) {
-                    $q->where('is_recurring', true)
-                        ->whereNull('payroll_schedule_id');
-                })
-                // Or once-off adjustments
-                    ->orWhere(function ($subQuery) use ($periodStart, $periodEnd, $payrollScheduleId) {
-                        $subQuery->where('is_recurring', false)
-                            ->where('payroll_period_start', '<=', $periodEnd)
-                            ->where('payroll_period_end', '>=', $periodStart);
-
-                        // If payroll_schedule_id is provided, only match that schedule
-                        // If null (for preview), show all once-off adjustments matching the period
-                        if ($payrollScheduleId !== null) {
-                            $subQuery->where('payroll_schedule_id', $payrollScheduleId);
-                        }
+            ->where(function ($q) use ($employee) {
+                // Company-wide OR employee-specific
+                $q->whereNull('employee_id')
+                    ->orWhere('employee_id', $employee->id);
+            })
+            ->where(function ($q) use ($periodStart, $periodEnd) {
+                // Forever (null period = recurring) OR overlaps with payroll period
+                $q->whereNull('period_start')  // Recurring/forever adjustments
+                    ->whereNull('period_end')
+                    ->orWhere(function ($subQ) use ($periodStart, $periodEnd) {
+                        // Once-off adjustments that overlap with the period
+                        $subQ->whereNotNull('period_start')
+                            ->whereNotNull('period_end')
+                            ->where('period_start', '<=', $periodEnd)
+                            ->where('period_end', '>=', $periodStart);
                     });
             })
             ->get();
-
-        // Get employee-specific adjustments
-        // For employee-specific once-off adjustments, we use EXACT period matching
-        // This prevents cross-schedule contamination when multiple schedules run in the same month
-        $employeeAdjustments = Adjustment::where('business_id', $employee->business_id)
-            ->where('employee_id', $employee->id)
-            ->where('is_active', true)
-            ->where(function ($query) use ($periodStart, $periodEnd, $payrollScheduleId) {
-                // Recurring adjustments (apply to all schedules)
-                $query->where(function ($q) {
-                    $q->where('is_recurring', true)
-                        ->whereNull('payroll_schedule_id');
-                })
-                // Or once-off adjustments - EXACT period match required for employee-specific
-                // This ensures that an adjustment created for Schedule A won't be picked up by Schedule B
-                // even if both schedules run in the same month for the same employee
-                    ->orWhere(function ($subQuery) use ($periodStart, $periodEnd, $payrollScheduleId) {
-                        $subQuery->where('is_recurring', false)
-                            // EXACT period match (not overlap) for employee-specific once-off
-                            ->where('payroll_period_start', '=', $periodStart->format('Y-m-d'))
-                            ->where('payroll_period_end', '=', $periodEnd->format('Y-m-d'));
-
-                        // Schedule ID is REQUIRED and must match exactly
-                        // This is the key: each schedule only gets adjustments tied to it
-                        if ($payrollScheduleId !== null) {
-                            $subQuery->where('payroll_schedule_id', $payrollScheduleId);
-                        }
-                    });
-            })
-            ->get();
-
-        // Merge and return
-        return $companyAdjustments->merge($employeeAdjustments);
     }
 
     /**
@@ -107,7 +71,7 @@ class AdjustmentService
                 'adjustment_type' => $adjustment->adjustment_type,
                 'amount' => $amount,
                 'original_amount' => $adjustment->amount,
-                'is_recurring' => $adjustment->is_recurring,
+                'is_recurring' => $adjustment->isRecurring(),
             ];
 
             if ($adjustment->adjustment_type === 'deduction') {
@@ -122,12 +86,76 @@ class AdjustmentService
         // Apply adjustments: net_after_statutory + total_additions - total_deductions
         $finalNetSalary = $netSalary + $totalAdditions - $totalDeductions;
 
+        // Negative net salary protection: Set to 0 if deductions exceed net salary
+        $hasNegativeNet = $finalNetSalary < 0;
+        if ($hasNegativeNet) {
+            \Illuminate\Support\Facades\Log::warning('Deductions exceed net salary', [
+                'net_after_statutory' => $netSalary,
+                'total_additions' => $totalAdditions,
+                'total_deductions' => $totalDeductions,
+                'calculated_net' => $finalNetSalary,
+            ]);
+            $finalNetSalary = 0;
+        }
+
         return [
             'final_net_salary' => round($finalNetSalary, 2),
             'adjustments_breakdown' => $adjustmentsBreakdown,
             'total_adjustments' => round($totalAdditions - $totalDeductions, 2),
             'total_deductions' => round($totalDeductions, 2),
             'total_additions' => round($totalAdditions, 2),
+            'has_negative_net' => $hasNegativeNet,
+            'negative_net_warning' => $hasNegativeNet ? 'Deductions exceed net salary. Net salary set to 0.' : null,
         ];
+    }
+
+    /**
+     * Detect scope from context
+     * Returns 'company' or 'employee' based on employee_id
+     *
+     * @param  int|null  $employeeId  Employee ID or null
+     * @return string 'company' or 'employee'
+     */
+    public function detectScope(?int $employeeId): string
+    {
+        return $employeeId === null ? 'company' : 'employee';
+    }
+
+    /**
+     * Detect recurrence from period
+     * Returns true if recurring (period is null), false if one-off (period is set)
+     *
+     * @param  Carbon|null  $periodStart  Period start date
+     * @param  Carbon|null  $periodEnd  Period end date
+     * @return bool True if recurring, false if one-off
+     */
+    public function detectRecurrence(?Carbon $periodStart, ?Carbon $periodEnd): bool
+    {
+        return $periodStart === null && $periodEnd === null;
+    }
+
+    /**
+     * Auto-detect schedules for an employee in a given period
+     * Returns collection of schedule IDs that process the employee for that period
+     *
+     * @param  Employee  $employee  The employee
+     * @param  Carbon  $periodStart  Period start date
+     * @param  Carbon  $periodEnd  Period end date
+     * @return \Illuminate\Support\Collection Collection of schedule IDs
+     */
+    public function autoDetectSchedules(Employee $employee, Carbon $periodStart, Carbon $periodEnd): \Illuminate\Support\Collection
+    {
+        return $employee->payrollSchedules()
+            ->where('status', 'active')
+            ->get()
+            ->filter(function ($schedule) use ($periodStart, $periodEnd) {
+                $schedulePeriod = $schedule->calculatePayPeriod();
+                $schedulePeriodStart = $schedulePeriod['start'];
+                $schedulePeriodEnd = $schedulePeriod['end'];
+
+                // Check if schedule's period overlaps with the given period
+                return $schedulePeriodStart->lte($periodEnd) && $schedulePeriodEnd->gte($periodStart);
+            })
+            ->pluck('id');
     }
 }

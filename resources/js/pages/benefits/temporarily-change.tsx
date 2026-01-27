@@ -3,130 +3,95 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
-import { CalendarIcon } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
+import { CalendarIcon } from 'lucide-react';
+import { useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Payroll', href: '/payroll' },
-    { title: 'Bonuses', href: '/payroll/bonuses' },
-    { title: 'Edit Bonus', href: '#' },
+    { title: 'Benefits & Deductions', href: '/benefits' },
+    { title: 'Temporarily Change', href: '#' },
 ];
 
-export default function PaymentsEdit({ payment, businesses, employees }: any) {
-    const [periodStart, setPeriodStart] = useState<Date | undefined>(
-        payment.period_start ? new Date(payment.period_start) : undefined
-    );
-    const [periodEnd, setPeriodEnd] = useState<Date | undefined>(
-        payment.period_end ? new Date(payment.period_end) : undefined
-    );
+export default function BenefitsTemporarilyChange({ benefit }: any) {
+    const [periodStart, setPeriodStart] = useState<Date | undefined>(undefined);
+    const [periodEnd, setPeriodEnd] = useState<Date | undefined>(undefined);
 
-    const { data, setData, put, processing, errors } = useForm({
-        business_id: payment.business_id,
-        employee_id: payment.employee_id || null,
-        name: payment.name || '',
-        type: payment.type || 'fixed',
-        amount: payment.amount || '',
-        adjustment_type: payment.adjustment_type || 'addition',
-        period_start: payment.period_start || '',
-        period_end: payment.period_end || '',
-        is_active: payment.is_active ?? true,
-        description: payment.description || '',
+    const { data, setData, post, processing, errors } = useForm({
+        amount: '',
+        period_start: '',
+        period_end: '',
+        description: '',
     });
-
-    // Update form data when dates change
-    useEffect(() => {
-        if (periodStart) {
-            setData('period_start', format(periodStart, 'yyyy-MM-dd'));
-        }
-    }, [periodStart]);
-
-    useEffect(() => {
-        if (periodEnd) {
-            setData('period_end', format(periodEnd, 'yyyy-MM-dd'));
-        }
-    }, [periodEnd]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        put(`/payroll-payments/${payment.id}`);
+        post(`/benefits/${benefit.id}/temporarily-change`);
+    };
+
+    // Update form data when dates change
+    const handleStartDateChange = (date: Date | undefined) => {
+        setPeriodStart(date);
+        if (date) {
+            setData('period_start', format(date, 'yyyy-MM-dd'));
+        }
+    };
+
+    const handleEndDateChange = (date: Date | undefined) => {
+        setPeriodEnd(date);
+        if (date) {
+            setData('period_end', format(date, 'yyyy-MM-dd'));
+        }
     };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Edit Payment" />
+            <Head title="Temporarily Change Benefit" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold">Edit Payment</h1>
+                        <h1 className="text-2xl font-bold">Temporarily Change Benefit</h1>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Update payment details
+                            Change the amount for a specific period, then it will revert to the original
                         </p>
                     </div>
                 </div>
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>Bonus Details</CardTitle>
+                        <CardTitle>Temporary Change for {benefit.name}</CardTitle>
                     </CardHeader>
                     <CardContent>
+                        <div className="mb-6 p-4 bg-muted rounded-lg">
+                            <p className="text-sm text-muted-foreground">Current amount:</p>
+                            <p className="text-lg font-semibold">
+                                {benefit.type === 'percentage' 
+                                    ? `${benefit.amount}%`
+                                    : `ZAR ${parseFloat(benefit.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                }
+                            </p>
+                        </div>
+
                         <form onSubmit={handleSubmit} className="space-y-6">
-                            {payment.employee && (
-                                <div className="p-3 bg-muted rounded-lg">
-                                    <p className="text-sm text-muted-foreground">Bonus for:</p>
-                                    <p className="font-medium">{payment.employee.name}</p>
-                                </div>
-                            )}
-
-                            <div className="space-y-2">
-                                <Label htmlFor="name">Bonus Type</Label>
-                                <Input
-                                    id="name"
-                                    value={data.name}
-                                    onChange={(e) => setData('name', e.target.value)}
-                                    placeholder="e.g., Performance Bonus"
-                                    required
-                                />
-                                <InputError message={errors.name} />
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label htmlFor="type">Amount Type</Label>
-                                <Select
-                                    value={data.type}
-                                    onValueChange={(value) => setData('type', value as 'fixed' | 'percentage')}
-                                >
-                                    <SelectTrigger id="type">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="fixed">Fixed amount</SelectItem>
-                                        <SelectItem value="percentage">Percentage of salary</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <InputError message={errors.type} />
-                            </div>
-
                             <div className="space-y-2">
                                 <Label htmlFor="amount">
-                                    {data.type === 'percentage' ? 'Percentage' : 'Amount'} 
-                                    {data.type === 'percentage' && ' (0-100)'}
+                                    New Amount
+                                    {benefit.type === 'percentage' && ' (0-100)'}
                                 </Label>
                                 <Input
                                     id="amount"
                                     type="number"
-                                    step={data.type === 'percentage' ? '0.01' : '0.01'}
+                                    step={benefit.type === 'percentage' ? '0.01' : '0.01'}
                                     min="0"
-                                    max={data.type === 'percentage' ? '100' : undefined}
+                                    max={benefit.type === 'percentage' ? '100' : undefined}
                                     value={data.amount}
                                     onChange={(e) => setData('amount', e.target.value)}
+                                    placeholder={benefit.type === 'percentage' ? 'e.g., 6' : 'e.g., 600'}
                                     required
                                 />
                                 <InputError message={errors.amount} />
@@ -138,7 +103,6 @@ export default function PaymentsEdit({ payment, businesses, employees }: any) {
                                     <Popover>
                                         <PopoverTrigger asChild>
                                             <Button
-                                                type="button"
                                                 variant="outline"
                                                 className="w-full justify-start text-left font-normal"
                                             >
@@ -150,7 +114,7 @@ export default function PaymentsEdit({ payment, businesses, employees }: any) {
                                             <Calendar
                                                 mode="single"
                                                 selected={periodStart}
-                                                onSelect={setPeriodStart}
+                                                onSelect={handleStartDateChange}
                                                 initialFocus
                                             />
                                         </PopoverContent>
@@ -163,7 +127,6 @@ export default function PaymentsEdit({ payment, businesses, employees }: any) {
                                     <Popover>
                                         <PopoverTrigger asChild>
                                             <Button
-                                                type="button"
                                                 variant="outline"
                                                 className="w-full justify-start text-left font-normal"
                                             >
@@ -175,7 +138,7 @@ export default function PaymentsEdit({ payment, businesses, employees }: any) {
                                             <Calendar
                                                 mode="single"
                                                 selected={periodEnd}
-                                                onSelect={setPeriodEnd}
+                                                onSelect={handleEndDateChange}
                                                 initialFocus
                                             />
                                         </PopoverContent>
@@ -186,23 +149,31 @@ export default function PaymentsEdit({ payment, businesses, employees }: any) {
 
                             <div className="space-y-2">
                                 <Label htmlFor="description">Description (Optional)</Label>
-                                <Textarea
+                                <Input
                                     id="description"
                                     value={data.description}
                                     onChange={(e) => setData('description', e.target.value)}
-                                    rows={3}
+                                    placeholder="e.g., Temporary increase for Q1"
                                 />
                                 <InputError message={errors.description} />
                             </div>
 
+                            <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                                <p className="text-sm text-blue-900 dark:text-blue-100">
+                                    <strong>Note:</strong> All employees will receive the new amount ({data.amount || '...'}) 
+                                    from {periodStart ? format(periodStart, 'MMM d, yyyy') : 'start date'} to {periodEnd ? format(periodEnd, 'MMM d, yyyy') : 'end date'}. 
+                                    After that, it will automatically revert to {benefit.type === 'percentage' ? `${benefit.amount}%` : `ZAR ${benefit.amount}`}.
+                                </p>
+                            </div>
+
                             <div className="flex gap-2">
-                                <Link href="/payroll/bonuses">
+                                <Link href="/benefits">
                                     <Button type="button" variant="outline">
                                         Cancel
                                     </Button>
                                 </Link>
                                 <Button type="submit" disabled={processing}>
-                                    {processing ? 'Updating...' : 'Update Bonus'}
+                                    {processing ? 'Creating...' : 'Create Temporary Change'}
                                 </Button>
                             </div>
                         </form>
