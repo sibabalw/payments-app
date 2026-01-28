@@ -19,7 +19,11 @@ class AuditService
         ?Model $model = null,
         ?array $changes = null,
         ?User $user = null,
-        ?Business $business = null
+        ?Business $business = null,
+        ?string $correlationId = null,
+        ?array $beforeValues = null,
+        ?array $afterValues = null,
+        ?array $metadata = null
     ): void {
         $user = $user ?? auth()->user();
         $business = $business ?? $this->getBusinessFromModel($model) ?? $this->getBusinessFromRequest();
@@ -33,8 +37,38 @@ class AuditService
             modelId: $model?->id,
             changes: $changes,
             ipAddress: Request::ip(),
-            userAgent: Request::userAgent()
+            userAgent: Request::userAgent(),
+            correlationId: $correlationId,
+            beforeValues: $beforeValues,
+            afterValues: $afterValues,
+            metadata: $metadata
         )->onQueue('audit');
+    }
+
+    /**
+     * Log a financial operation with full context
+     */
+    public function logFinancialOperation(
+        string $action,
+        Model $model,
+        ?array $beforeValues = null,
+        ?array $afterValues = null,
+        ?string $correlationId = null,
+        ?User $user = null,
+        ?Business $business = null,
+        ?array $metadata = null
+    ): void {
+        $this->log(
+            $action,
+            $model,
+            null, // changes will be derived from before/after
+            $user,
+            $business,
+            $correlationId,
+            $beforeValues,
+            $afterValues,
+            $metadata
+        );
     }
 
     /**

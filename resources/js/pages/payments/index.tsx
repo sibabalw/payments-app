@@ -1,207 +1,236 @@
-import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
-import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
-import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments.index().url },
+    { title: 'Payroll', href: '/payroll' },
+    { title: 'Bonuses', href: '/payroll/bonuses' },
 ];
 
-function formatNextRunDate(dateString: string): string {
-    const date = new Date(dateString);
-    const options: Intl.DateTimeFormatOptions = {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-    };
-    return date.toLocaleDateString('en-US', options);
-}
+export default function PaymentsIndex({ payments, businesses, selectedBusinessId, filters }: any) {
+    const [businessId, setBusinessId] = useState(selectedBusinessId || businesses?.[0]?.id || '');
+    const [filter, setFilter] = useState(filters?.filter || 'all');
+    // Convert empty string to 'all' for the Select component
+    const [period, setPeriod] = useState(filters?.period ? filters.period : 'all');
 
-interface PaymentSchedule {
-    id: number;
-    name: string;
-    type: string;
-    status: string;
-    schedule_type?: string;
-    amount: string;
-    currency: string;
-    frequency: string;
-    next_run_at: string | null;
-    receivers?: Array<{ id: number; name: string }>;
-    recipients?: Array<{ id: number; name: string }>;
-}
-
-interface PaymentsIndexProps {
-    schedules: {
-        data: PaymentSchedule[];
-        links: any;
-    };
-    filters: {
-        type?: string;
-        status?: string;
-        business_id?: number;
-    };
-}
-
-export default function PaymentsIndex({ schedules, filters }: PaymentsIndexProps) {
-    const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-    const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
-
-    const handlePause = (id: number) => {
-        router.post(`/payments/${id}/pause`);
+    const handleBusinessChange = (value: string) => {
+        setBusinessId(value);
+        const periodValue = period === 'all' ? '' : period;
+        router.get('/payroll/bonuses', { business_id: value, filter, period: periodValue }, { preserveState: true });
     };
 
-    const handleResume = (id: number) => {
-        router.post(`/payments/${id}/resume`);
+    const handleFilterChange = (value: string) => {
+        setFilter(value);
+        const periodValue = period === 'all' ? '' : period;
+        router.get('/payroll/bonuses', { business_id: businessId, filter: value, period: periodValue }, { preserveState: true });
     };
 
-    const handleCancel = (id: number) => {
-        setScheduleToCancel(id);
-        setCancelConfirmOpen(true);
+    const handlePeriodChange = (value: string) => {
+        setPeriod(value);
+        // Convert 'all' back to empty string for the API
+        const periodValue = value === 'all' ? '' : value;
+        router.get('/payroll/bonuses', { business_id: businessId, filter, period: periodValue }, { preserveState: true });
     };
 
-    const confirmCancel = () => {
-        if (scheduleToCancel) {
-            router.post(`/payments/${scheduleToCancel}/cancel`, {}, {
-                onSuccess: (): void => {
-                    setCancelConfirmOpen(false);
-                    setScheduleToCancel(null);
-                },
-            });
-        }
-    };
+    // Group payments by type
+    const paymentsData = payments?.data || [];
+    const companyPayments = paymentsData.filter((p: any) => !p.employee_id) || [];
+    const employeePayments = paymentsData.filter((p: any) => p.employee_id) || [];
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Payments" />
+            <Head title="Bonuses & One-Off Payments" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
-                    <h1 className="text-2xl font-bold">Payment Schedules</h1>
-                    <div className="flex gap-2">
-                        <Link href="/recipients/create">
-                            <Button variant="outline">
-                                <Plus className="mr-2 h-4 w-4" />
-                                Add Recipient
-                            </Button>
-                        </Link>
-                    <Link href="/payments/create">
+                    <div>
+                        <h1 className="text-2xl font-bold">Bonuses & One-Off Payments</h1>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            One-time bonuses, allowances, and special payments for employees
+                        </p>
+                    </div>
+                    <Link href={`/payroll/bonuses/create?business_id=${businessId}`}>
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
-                            Create Schedule
+                            Add Bonus
                         </Button>
                     </Link>
+                </div>
+
+                <div className="flex gap-4">
+                    {businesses && Array.isArray(businesses) && businesses.length > 0 && (
+                        <div className="max-w-xs">
+                            <label className="text-sm font-medium mb-2 block">Business</label>
+                            <Select value={String(businessId)} onValueChange={handleBusinessChange}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {businesses.map((business: any) => (
+                                        <SelectItem key={business.id} value={String(business.id)}>
+                                            {business.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+
+                    <div className="max-w-xs">
+                        <label className="text-sm font-medium mb-2 block">Filter</label>
+                        <Select value={filter} onValueChange={handleFilterChange}>
+                            <SelectTrigger>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Bonuses</SelectItem>
+                                <SelectItem value="company">Company Bonuses</SelectItem>
+                                <SelectItem value="employee">Employee Bonuses</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="max-w-xs">
+                        <label className="text-sm font-medium mb-2 block">Period</label>
+                        <Select value={period || 'all'} onValueChange={handlePeriodChange}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="All periods" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All periods</SelectItem>
+                                <SelectItem value={new Date().toISOString().slice(0, 7)}>
+                                    {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                </SelectItem>
+                                <SelectItem value={new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0, 7)}>
+                                    {new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                 </div>
 
-                <div className="grid gap-4">
-                    {schedules.data.map((schedule) => (
-                        <Card key={schedule.id}>
-                            <CardHeader>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <CardTitle>{schedule.name}</CardTitle>
-                                        <p className="text-sm text-muted-foreground mt-1">
-                                            {(schedule.recipients?.length || schedule.receivers?.length || 0)} recipient(s) • {cronToHumanReadable(schedule.frequency)}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                                schedule.schedule_type === 'one_time'
-                                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-                                            }`}
-                                        >
-                                            {schedule.schedule_type === 'one_time' ? 'One-time' : 'Recurring'}
-                                        </span>
-                                        <span
-                                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                                schedule.status === 'active'
-                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                                    : schedule.status === 'paused'
-                                                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                                                      : schedule.schedule_type === 'one_time' && schedule.status === 'cancelled'
-                                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                        : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
-                                            }`}
-                                        >
-                                            {schedule.schedule_type === 'one_time' && schedule.status === 'cancelled' ? 'Completed' : schedule.status}
-                                        </span>
-                                    </div>
+                {paymentsData && paymentsData.length > 0 ? (
+                    <div className="space-y-6">
+                        {companyPayments.length > 0 && (
+                            <div>
+                                <h2 className="text-lg font-semibold mb-4">Company Bonuses</h2>
+                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                    {companyPayments.map((payment: any) => (
+                                        <Card key={payment.id}>
+                                            <CardHeader>
+                                                <CardTitle>{payment.name}</CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                                <div className="space-y-2">
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Amount: </span>
+                                                        <span className="font-medium">
+                                                            {payment.type === 'percentage' 
+                                                                ? `${payment.amount}%`
+                                                                : `ZAR ${parseFloat(payment.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">For: </span>
+                                                        <span className="font-medium">All employees</span>
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Period: </span>
+                                                        <span className="font-medium">
+                                                            {new Date(payment.period_start).toLocaleDateString()} - {new Date(payment.period_end).toLocaleDateString()}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Type: </span>
+                                                        <span className={`font-medium capitalize ${
+                                                            payment.adjustment_type === 'deduction' ? 'text-red-600' : 'text-green-600'
+                                                        }`}>
+                                                            {payment.adjustment_type === 'deduction' ? 'Deduction' : 'Addition'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2 mt-4">
+                                                        <Link href={`/payroll/bonuses/${payment.id}/edit`} className="flex-1">
+                                                            <Button variant="outline" size="sm" className="w-full">
+                                                                Edit
+                                                            </Button>
+                                                        </Link>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
                                 </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-2xl font-bold">
-                                            {schedule.currency} {schedule.amount}
-                                        </p>
-                                        {schedule.next_run_at && (
-                                            <p className="text-sm text-muted-foreground">
-                                                Next run: {formatNextRunDate(schedule.next_run_at)}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-2">
-                                        {schedule.status === 'active' && (
-                                            <Button variant="outline" size="sm" onClick={() => handlePause(schedule.id)}>
-                                                Pause
-                                            </Button>
-                                        )}
-                                        {schedule.status === 'paused' && (
-                                            <Button variant="outline" size="sm" onClick={() => handleResume(schedule.id)}>
-                                                Resume
-                                            </Button>
-                                        )}
-                                        {schedule.status !== 'cancelled' && (
-                                            <>
-                                                <Button variant="outline" size="sm" onClick={() => handleCancel(schedule.id)}>
-                                                    Cancel
-                                                </Button>
-                                                <Link href={`/payments/${schedule.id}/edit`}>
-                                                    <Button variant="outline" size="sm">
-                                                        Edit
-                                                    </Button>
-                                                </Link>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                            </div>
+                        )}
 
-                {schedules.data.length === 0 && (
+                        {employeePayments.length > 0 && (
+                            <div>
+                                <h2 className="text-lg font-semibold mb-4">Employee Bonuses</h2>
+                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                    {employeePayments.map((payment: any) => (
+                                        <Card key={payment.id}>
+                                            <CardHeader>
+                                                <CardTitle>{payment.employee?.name || 'Employee'} - {payment.name}</CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                                <div className="space-y-2">
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Amount: </span>
+                                                        <span className="font-medium">
+                                                            {payment.type === 'percentage' 
+                                                                ? `${payment.amount}%`
+                                                                : `ZAR ${parseFloat(payment.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Period: </span>
+                                                        <span className="font-medium">
+                                                            {new Date(payment.period_start).toLocaleDateString()} - {new Date(payment.period_end).toLocaleDateString()}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <span className="text-muted-foreground">Type: </span>
+                                                        <span className={`font-medium capitalize ${
+                                                            payment.adjustment_type === 'deduction' ? 'text-red-600' : 'text-green-600'
+                                                        }`}>
+                                                            {payment.adjustment_type === 'deduction' ? 'Deduction' : 'Addition'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2 mt-4">
+                                                        <Link href={`/payroll/bonuses/${payment.id}/edit`} className="flex-1">
+                                                            <Button variant="outline" size="sm" className="w-full">
+                                                                Edit
+                                                            </Button>
+                                                        </Link>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ) : (
                     <Card>
                         <CardContent className="py-10 text-center">
-                            <p className="text-muted-foreground">No payment schedules found.</p>
-                            <Link href="/payments/create" className="mt-4 inline-block">
-                                <Button>Create your first schedule</Button>
+                            <p className="text-muted-foreground">No bonuses found.</p>
+                            <p className="text-sm text-muted-foreground mt-2">
+                                Bonuses are one-time payments for specific periods.
+                            </p>
+                            <Link href={`/payroll/bonuses/create?business_id=${businessId}`} className="mt-4 inline-block">
+                                <Button>Add your first bonus</Button>
                             </Link>
                         </CardContent>
                     </Card>
                 )}
             </div>
-
-            <ConfirmationDialog
-                open={cancelConfirmOpen}
-                onOpenChange={setCancelConfirmOpen}
-                onConfirm={confirmCancel}
-                title="Are you sure you want to cancel this schedule?"
-                description="This action cannot be undone. The payment schedule will be cancelled and no further payments will be processed."
-                confirmText="Cancel Schedule"
-                variant="destructive"
-            />
         </AppLayout>
     );
 }

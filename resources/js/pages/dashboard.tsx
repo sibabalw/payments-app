@@ -6,7 +6,7 @@ import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2, Loader2 } from 'lucide-react';
+import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2, Loader2, AlertTriangle, XCircle, Info, ShieldAlert, CheckCircle, X, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { 
     LineChart, 
@@ -113,16 +113,60 @@ interface DashboardProps {
         name: string;
         logo: string | null;
         status: string;
+        status_reason: string | null;
         business_type: string | null;
         email: string;
         phone: string;
         escrow_balance: number;
+        is_frozen: boolean;
+        hold_amount: number;
+        status_changed_at: string | null;
         employees_count: number;
         payment_schedules_count: number;
         payroll_schedules_count: number;
         recipients_count: number;
     } | null;
     businessesCount?: number;
+    accountStatus?: {
+        status: string;
+        status_reason: string | null;
+        is_frozen: boolean;
+        status_changed_at: string | null;
+        can_perform_actions: boolean;
+    } | null;
+    balanceBreakdown?: {
+        escrow_balance: number;
+        hold_amount: number;
+        available_balance: number;
+        upcoming_requirements: number;
+        shortfall: number;
+    } | null;
+    billingInfo?: {
+        current_month_billing: {
+            id: number;
+            billing_month: string;
+            subscription_fee: number;
+            total_deposit_fees: number;
+            status: string;
+            billed_at: string | null;
+            paid_at: string | null;
+        };
+        pending_fees: number;
+        total_monthly_cost: number;
+        billing_status: string;
+    } | null;
+    criticalAlerts?: Array<{
+        type: 'frozen' | 'low_balance' | 'reconciliation' | 'status' | 'insufficient_balance';
+        severity: 'critical' | 'warning' | 'info';
+        title: string;
+        message: string;
+        action_url?: string;
+    }>;
+    reconciliationStatus?: {
+        has_pending_discrepancies: boolean;
+        discrepancy_count: number;
+        freeze_reason: string | null;
+    } | null;
 }
 
 // Helper function to get business initials
@@ -157,7 +201,12 @@ export default function Dashboard({
     escrowBalance = 0, 
     selectedBusiness = null, 
     businessInfo, 
-    businessesCount: propBusinessesCount 
+    businessesCount: propBusinessesCount,
+    accountStatus = null,
+    balanceBreakdown = null,
+    billingInfo = null,
+    criticalAlerts = [],
+    reconciliationStatus = null
 }: DashboardProps) {
     const { businessesCount: sharedBusinessesCount = 0, hasCompletedDashboardTour, auth } = usePage<SharedData>().props;
     const businessesCount = propBusinessesCount ?? sharedBusinessesCount;
@@ -280,6 +329,54 @@ export default function Dashboard({
                     </div>
                 </div>
 
+                {/* Critical Alerts Banner */}
+                {criticalAlerts && criticalAlerts.length > 0 && (
+                    <div className="space-y-3">
+                        {criticalAlerts.map((alert, index) => {
+                            const severityStyles = {
+                                critical: 'border-red-500/50 bg-red-50 dark:bg-red-950/20 text-red-900 dark:text-red-100',
+                                warning: 'border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20 text-yellow-900 dark:text-yellow-100',
+                                info: 'border-blue-500/50 bg-blue-50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-100',
+                            };
+                            const iconMap = {
+                                critical: XCircle,
+                                warning: AlertTriangle,
+                                info: Info,
+                            };
+                            const Icon = iconMap[alert.severity] || AlertCircle;
+
+                            return (
+                                <div
+                                    key={index}
+                                    className={`rounded-lg border p-4 ${severityStyles[alert.severity]}`}
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <Icon className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="font-semibold mb-1">{alert.title}</h3>
+                                            <p className="text-sm opacity-90">{alert.message}</p>
+                                            {alert.action_url && (
+                                                <div className="mt-3">
+                                                    <Button
+                                                        asChild
+                                                        size="sm"
+                                                        variant={alert.severity === 'critical' ? 'destructive' : 'outline'}
+                                                    >
+                                                        <Link href={alert.action_url}>
+                                                            Take Action
+                                                            <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                                                        </Link>
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
                 {/* Soft Gradient Banner */}
                 {businessesCount === 0 && (
                     <div className="relative overflow-hidden rounded-lg border border-primary/20 bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 p-4 shadow-sm">
@@ -335,7 +432,27 @@ export default function Dashboard({
                         <Card className="border-primary col-span-full md:col-span-1">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium">Business Overview</CardTitle>
-                                <Wallet className="h-4 w-4 text-primary" />
+                                <div className="flex items-center gap-2">
+                                    {/* Account Health Indicator */}
+                                    {(() => {
+                                        const isHealthy = accountStatus?.can_perform_actions && !accountStatus?.is_frozen && (!balanceBreakdown || balanceBreakdown.shortfall === 0);
+                                        const hasWarnings = balanceBreakdown && (balanceBreakdown.shortfall > 0 || balanceBreakdown.available_balance < 1000);
+                                        const isCritical = accountStatus?.is_frozen || accountStatus?.status === 'suspended' || accountStatus?.status === 'banned';
+                                        
+                                        let healthColor = 'text-green-500';
+                                        if (isCritical) healthColor = 'text-red-500';
+                                        else if (hasWarnings) healthColor = 'text-yellow-500';
+                                        
+                                        return (
+                                            <div className={`flex items-center gap-1 ${healthColor}`} title={
+                                                isCritical ? 'Critical Issues' : hasWarnings ? 'Warnings' : 'All Good'
+                                            }>
+                                                {isCritical ? <XCircle className="h-4 w-4" /> : hasWarnings ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                                            </div>
+                                        );
+                                    })()}
+                                    <Wallet className="h-4 w-4 text-primary" />
+                                </div>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {/* Business Logo/Name */}
@@ -367,22 +484,76 @@ export default function Dashboard({
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <p className="font-semibold truncate" title={businessInfo.name}>
-                                            {businessInfo.name}
-                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-semibold truncate" title={businessInfo.name}>
+                                                {businessInfo.name}
+                                            </p>
+                                            {/* Account Status Badge */}
+                                            {accountStatus && (
+                                                <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                                    accountStatus.is_frozen 
+                                                        ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                                                        : accountStatus.status === 'active'
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                                        : accountStatus.status === 'suspended'
+                                                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                                                        : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                                                }`}>
+                                                    {accountStatus.is_frozen ? 'Frozen' : accountStatus.status.charAt(0).toUpperCase() + accountStatus.status.slice(1)}
+                                                </span>
+                                            )}
+                                        </div>
                                         <p className="text-xs text-muted-foreground truncate">
                                             {businessInfo.email}
                                         </p>
+                                        {accountStatus?.status_reason && (
+                                            <p className="text-xs text-muted-foreground mt-0.5 italic">
+                                                {accountStatus.status_reason}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
-                                {/* Escrow Balance */}
-                                <div>
-                                    <div className="text-2xl font-bold text-primary">{formatCurrency(businessInfo.escrow_balance || 0)}</div>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Available (after 1.5% fee)
-                                    </p>
-                                </div>
+                                {/* Balance Breakdown */}
+                                {balanceBreakdown ? (
+                                    <div className="space-y-2">
+                                        <div>
+                                            <div className="text-2xl font-bold text-primary">{formatCurrency(balanceBreakdown.available_balance)}</div>
+                                            <p className="text-xs text-muted-foreground mt-1">Available Balance</p>
+                                        </div>
+                                        <div className="space-y-1.5 pt-2 border-t text-xs">
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Total Escrow:</span>
+                                                <span className="font-medium">{formatCurrency(balanceBreakdown.escrow_balance)}</span>
+                                            </div>
+                                            {balanceBreakdown.hold_amount > 0 && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">On Hold:</span>
+                                                    <span className="font-medium text-yellow-600 dark:text-yellow-400">{formatCurrency(balanceBreakdown.hold_amount)}</span>
+                                                </div>
+                                            )}
+                                            {balanceBreakdown.upcoming_requirements > 0 && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Upcoming (7 days):</span>
+                                                    <span className="font-medium">{formatCurrency(balanceBreakdown.upcoming_requirements)}</span>
+                                                </div>
+                                            )}
+                                            {balanceBreakdown.shortfall > 0 && (
+                                                <div className="flex justify-between pt-1 border-t">
+                                                    <span className="text-red-600 dark:text-red-400 font-semibold">Shortfall:</span>
+                                                    <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(balanceBreakdown.shortfall)}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <div className="text-2xl font-bold text-primary">{formatCurrency(businessInfo.escrow_balance || 0)}</div>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Escrow Balance
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Statistics Grid */}
                                 <div className="grid grid-cols-2 gap-2 pt-2 border-t">
@@ -423,6 +594,56 @@ export default function Dashboard({
                                 <p className="text-xs text-muted-foreground mt-1">
                                     Available (after 1.5% fee)
                                 </p>
+                            </CardContent>
+                        </Card>
+                    )}
+                    {/* Billing Summary Card */}
+                    {billingInfo && (
+                        <Card className="col-span-full md:col-span-1">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Billing Summary</CardTitle>
+                                <DollarSign className="h-4 w-4 text-primary" />
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div>
+                                    <div className="text-2xl font-bold">{formatCurrency(billingInfo.total_monthly_cost)}</div>
+                                    <p className="text-xs text-muted-foreground mt-1">This Month</p>
+                                </div>
+                                <div className="space-y-1.5 pt-2 border-t text-xs">
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Subscription:</span>
+                                        <span className="font-medium">{formatCurrency(billingInfo.current_month_billing.subscription_fee)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Deposit Fees:</span>
+                                        <span className="font-medium">{formatCurrency(billingInfo.current_month_billing.total_deposit_fees)}</span>
+                                    </div>
+                                    {billingInfo.pending_fees > 0 && (
+                                        <div className="flex justify-between pt-1 border-t">
+                                            <span className="text-yellow-600 dark:text-yellow-400 font-semibold">Pending:</span>
+                                            <span className="font-bold text-yellow-600 dark:text-yellow-400">{formatCurrency(billingInfo.pending_fees)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="pt-2 border-t">
+                                    <span className={`text-xs px-2 py-1 rounded-full ${
+                                        billingInfo.billing_status === 'paid'
+                                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                            : billingInfo.billing_status === 'pending'
+                                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                                            : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                    }`}>
+                                        {billingInfo.billing_status.charAt(0).toUpperCase() + billingInfo.billing_status.slice(1)}
+                                    </span>
+                                </div>
+                                <div className="pt-2">
+                                    <Button asChild variant="outline" size="sm" className="w-full">
+                                        <Link href="/billing">
+                                            View Billing
+                                            <ChevronRight className="ml-1.5 h-3.5 w-3.5" />
+                                        </Link>
+                                    </Button>
+                                </div>
                             </CardContent>
                         </Card>
                     )}

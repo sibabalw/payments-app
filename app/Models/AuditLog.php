@@ -20,12 +20,19 @@ class AuditLog extends Model
         'changes',
         'ip_address',
         'user_agent',
+        'correlation_id',
+        'before_values',
+        'after_values',
+        'metadata',
     ];
 
     protected function casts(): array
     {
         return [
             'changes' => 'array',
+            'before_values' => 'array',
+            'after_values' => 'array',
+            'metadata' => 'array',
         ];
     }
 

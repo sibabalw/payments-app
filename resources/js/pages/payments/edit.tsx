@@ -4,199 +4,127 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DatePicker } from '@/components/ui/date-picker';
+import { Textarea } from '@/components/ui/textarea';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import AppLayout from '@/layouts/app-layout';
-import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
+import { CalendarIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments.index().url },
-    { title: 'Edit', href: '#' },
+    { title: 'Payroll', href: '/payroll' },
+    { title: 'Bonuses', href: '/payroll/bonuses' },
+    { title: 'Edit Bonus', href: '#' },
 ];
 
-interface PaymentsEditProps {
-    schedule: any;
-    businesses: Array<{ id: number; name: string }>;
-    recipients: Array<{ id: number; name: string }>;
-}
-
-export default function PaymentsEdit({ schedule, businesses, recipients }: PaymentsEditProps) {
-    // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
-    const scheduledTime = schedule.scheduled_time || '09:00';
-    const parsedFrequency = schedule.parsed_frequency || 'daily';
+export default function PaymentsEdit({ payment, businesses, employees }: any) {
+    const [periodStart, setPeriodStart] = useState<Date | undefined>(
+        payment.period_start ? new Date(payment.period_start) : undefined
+    );
+    const [periodEnd, setPeriodEnd] = useState<Date | undefined>(
+        payment.period_end ? new Date(payment.period_end) : undefined
+    );
 
     const { data, setData, put, processing, errors } = useForm({
-        business_id: schedule.business_id,
-        name: schedule.name,
-        schedule_type: schedule.schedule_type || 'recurring',
-        scheduled_date: schedule.scheduled_date || '',
-        scheduled_time: scheduledTime,
-        frequency: parsedFrequency,
-        amount: String(schedule.amount),
-        currency: schedule.currency,
-        recipient_ids: schedule.recipients?.map((r: any) => r.id) || schedule.receivers?.map((r: any) => r.id) || [],
+        business_id: payment.business_id,
+        employee_id: payment.employee_id || null,
+        name: payment.name || '',
+        type: payment.type || 'fixed',
+        amount: payment.amount || '',
+        adjustment_type: payment.adjustment_type || 'addition',
+        period_start: payment.period_start || '',
+        period_end: payment.period_end || '',
+        is_active: payment.is_active ?? true,
+        description: payment.description || '',
     });
 
-    // Calculate scheduledDate reactively from form data
-    const scheduledDate = data.scheduled_date 
-        ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00'))
-        : undefined;
-
-    const isReadOnly = schedule.status === 'cancelled';
-
-    const submit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (isReadOnly) {
-            return;
+    // Update form data when dates change
+    useEffect(() => {
+        if (periodStart) {
+            setData('period_start', format(periodStart, 'yyyy-MM-dd'));
         }
-        put(`/payments/${schedule.id}`);
+    }, [periodStart]);
+
+    useEffect(() => {
+        if (periodEnd) {
+            setData('period_end', format(periodEnd, 'yyyy-MM-dd'));
+        }
+    }, [periodEnd]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        put(`/payroll-payments/${payment.id}`);
     };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Edit Payment Schedule" />
+            <Head title="Edit Payment" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold">Edit Payment</h1>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Update payment details
+                        </p>
+                    </div>
+                </div>
+
                 <Card>
                     <CardHeader>
-                        <CardTitle>Edit Payment Schedule</CardTitle>
+                        <CardTitle>Bonus Details</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={submit} className="space-y-4">
-                            <div>
-                                <Label htmlFor="business_id">Business</Label>
-                                <Select
-                                    value={String(data.business_id)}
-                                    onValueChange={(value) => setData('business_id', Number(value))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {businesses.map((business) => (
-                                            <SelectItem key={business.id} value={String(business.id)}>
-                                                {business.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <InputError message={errors.business_id} />
-                            </div>
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            {payment.employee && (
+                                <div className="p-3 bg-muted rounded-lg">
+                                    <p className="text-sm text-muted-foreground">Bonus for:</p>
+                                    <p className="font-medium">{payment.employee.name}</p>
+                                </div>
+                            )}
 
-                            <div>
-                                <Label htmlFor="name">Schedule Name</Label>
+                            <div className="space-y-2">
+                                <Label htmlFor="name">Bonus Type</Label>
                                 <Input
                                     id="name"
                                     value={data.name}
                                     onChange={(e) => setData('name', e.target.value)}
+                                    placeholder="e.g., Performance Bonus"
                                     required
                                 />
                                 <InputError message={errors.name} />
                             </div>
 
-                            <div>
-                                <Label htmlFor="schedule_type">Schedule Type</Label>
-                                {isReadOnly ? (
-                                    <div className="flex items-center gap-2 mt-2">
-                                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                            data.schedule_type === 'one_time'
-                                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-                                        }`}>
-                                            {data.schedule_type === 'one_time' ? 'One-time' : 'Recurring'}
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <Select
-                                            value={data.schedule_type}
-                                            onValueChange={(value) => setData('schedule_type', value)}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="recurring">Recurring Payment</SelectItem>
-                                                <SelectItem value="one_time">One-time Payment</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <InputError message={errors.schedule_type} />
-                                    </>
-                                )}
+                            <div className="space-y-2">
+                                <Label htmlFor="type">Amount Type</Label>
+                                <Select
+                                    value={data.type}
+                                    onValueChange={(value) => setData('type', value as 'fixed' | 'percentage')}
+                                >
+                                    <SelectTrigger id="type">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="fixed">Fixed amount</SelectItem>
+                                        <SelectItem value="percentage">Percentage of salary</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <InputError message={errors.type} />
                             </div>
 
-                            <div>
-                                <Label>Schedule Date & Time</Label>
-                                {isReadOnly ? (
-                                    <div className="mt-2">
-                                        <p className="text-sm text-muted-foreground">
-                                            {scheduledDate ? scheduledDate.toLocaleDateString() : 'N/A'} at {data.scheduled_time}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <DatePicker
-                                            date={scheduledDate}
-                                            onDateChange={(date) => {
-                                                if (date) {
-                                                    // Use local date components to avoid timezone shifts
-                                                    // Only update the date part, preserve the time from form data
-                                                    const year = date.getFullYear();
-                                                    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                                                    const day = date.getDate().toString().padStart(2, '0');
-                                                    setData('scheduled_date', `${year}-${month}-${day}`);
-                                                    // Don't update time here - let onTimeChange handle it
-                                                }
-                                            }}
-                                            time={data.scheduled_time}
-                                            onTimeChange={(time) => {
-                                                setData('scheduled_time', time);
-                                            }}
-                                            showTime={true}
-                                        />
-                                        <InputError message={errors.scheduled_date} />
-                                        <InputError message={errors.scheduled_time} />
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            Weekends and South Africa public holidays are not allowed
-                                        </p>
-                                    </>
-                                )}
-                            </div>
-
-                            {data.schedule_type === 'recurring' && (
-                                <div>
-                                    <Label htmlFor="frequency">Frequency</Label>
-                                    {isReadOnly ? (
-                                        <div className="mt-2">
-                                            <p className="text-sm text-muted-foreground capitalize">{parsedFrequency}</p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <Select
-                                                value={data.frequency}
-                                                onValueChange={(value) => setData('frequency', value)}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="daily">Daily</SelectItem>
-                                                    <SelectItem value="weekly">Weekly</SelectItem>
-                                                    <SelectItem value="monthly">Monthly</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                            <InputError message={errors.frequency} />
-                                        </>
-                                    )}
-                                </div>
-                            )}
-
-                            <div>
-                                <Label htmlFor="amount">Amount (ZAR)</Label>
+                            <div className="space-y-2">
+                                <Label htmlFor="amount">
+                                    {data.type === 'percentage' ? 'Percentage' : 'Amount'} 
+                                    {data.type === 'percentage' && ' (0-100)'}
+                                </Label>
                                 <Input
                                     id="amount"
                                     type="number"
-                                    step="0.01"
+                                    step={data.type === 'percentage' ? '0.01' : '0.01'}
+                                    min="0"
+                                    max={data.type === 'percentage' ? '100' : undefined}
                                     value={data.amount}
                                     onChange={(e) => setData('amount', e.target.value)}
                                     required
@@ -204,44 +132,78 @@ export default function PaymentsEdit({ schedule, businesses, recipients }: Payme
                                 <InputError message={errors.amount} />
                             </div>
 
-                            <div>
-                                <Label>Recipients</Label>
-                                <div className="space-y-2 mt-2">
-                                    {recipients.length > 0 ? (
-                                        recipients.map((recipient: { id: number; name: string }) => (
-                                            <label key={recipient.id} className="flex items-center space-x-2">
-                                            <input
-                                                type="checkbox"
-                                                    checked={data.recipient_ids.includes(recipient.id)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                            setData('recipient_ids', [...data.recipient_ids, recipient.id]);
-                                                    } else {
-                                                            setData('recipient_ids', data.recipient_ids.filter((id: number) => id !== recipient.id));
-                                                    }
-                                                }}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>From Date</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="w-full justify-start text-left font-normal"
+                                            >
+                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                {periodStart ? format(periodStart, 'PPP') : 'Pick a date'}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar
+                                                mode="single"
+                                                selected={periodStart}
+                                                onSelect={setPeriodStart}
+                                                initialFocus
                                             />
-                                                <span>{recipient.name}</span>
-                                        </label>
-                                        ))
-                                    ) : (
-                                        <p className="text-sm text-muted-foreground">
-                                            No recipients found. <Link href="/recipients/create" className="text-primary underline">Create one</Link>
-                                        </p>
-                                    )}
+                                        </PopoverContent>
+                                    </Popover>
+                                    <InputError message={errors.period_start} />
                                 </div>
-                                <InputError message={errors.recipient_ids} />
+
+                                <div className="space-y-2">
+                                    <Label>To Date</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="w-full justify-start text-left font-normal"
+                                            >
+                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                {periodEnd ? format(periodEnd, 'PPP') : 'Pick a date'}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar
+                                                mode="single"
+                                                selected={periodEnd}
+                                                onSelect={setPeriodEnd}
+                                                initialFocus
+                                            />
+                                        </PopoverContent>
+                                    </Popover>
+                                    <InputError message={errors.period_end} />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="description">Description (Optional)</Label>
+                                <Textarea
+                                    id="description"
+                                    value={data.description}
+                                    onChange={(e) => setData('description', e.target.value)}
+                                    rows={3}
+                                />
+                                <InputError message={errors.description} />
                             </div>
 
                             <div className="flex gap-2">
-                                <Button type="submit" disabled={processing || isReadOnly}>
-                                    Update Schedule
-                                </Button>
-                                <Link href="/payments">
+                                <Link href="/payroll/bonuses">
                                     <Button type="button" variant="outline">
                                         Cancel
                                     </Button>
                                 </Link>
+                                <Button type="submit" disabled={processing}>
+                                    {processing ? 'Updating...' : 'Update Bonus'}
+                                </Button>
                             </div>
                         </form>
                     </CardContent>

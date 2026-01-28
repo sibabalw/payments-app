@@ -15,14 +15,12 @@ class Adjustment extends Model
     protected $fillable = [
         'business_id',
         'employee_id',
-        'payroll_schedule_id',
         'name',
         'type',
         'amount',
         'adjustment_type',
-        'is_recurring',
-        'payroll_period_start',
-        'payroll_period_end',
+        'period_start',
+        'period_end',
         'is_active',
         'description',
     ];
@@ -31,10 +29,9 @@ class Adjustment extends Model
     {
         return [
             'amount' => 'decimal:2',
-            'is_recurring' => 'boolean',
             'is_active' => 'boolean',
-            'payroll_period_start' => 'date',
-            'payroll_period_end' => 'date',
+            'period_start' => 'date',
+            'period_end' => 'date',
         ];
     }
 
@@ -46,11 +43,6 @@ class Adjustment extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
-    }
-
-    public function payrollSchedule(): BelongsTo
-    {
-        return $this->belongsTo(PayrollSchedule::class);
     }
 
     /**
@@ -79,55 +71,72 @@ class Adjustment extends Model
 
     /**
      * Check if this adjustment is valid for the given payroll period
+     * Recurring adjustments (period_start/end = null) are always valid
+     * Once-off adjustments (period_start/end set) must overlap with the given period
      */
     public function isValidForPeriod(Carbon $periodStart, Carbon $periodEnd): bool
     {
-        // Recurring adjustments are always valid (they apply to all periods)
-        if ($this->is_recurring) {
+        // Recurring adjustments (null period) are always valid
+        if ($this->period_start === null && $this->period_end === null) {
             return true;
         }
 
-        // Once-off adjustments must match the period exactly
-        if ($this->payroll_period_start === null || $this->payroll_period_end === null) {
+        // Once-off adjustments must overlap with the period
+        if ($this->period_start === null || $this->period_end === null) {
             return false;
         }
 
-        // Check if periods overlap
-        $adjustmentStart = Carbon::parse($this->payroll_period_start);
-        $adjustmentEnd = Carbon::parse($this->payroll_period_end);
+        $adjustmentStart = Carbon::parse($this->period_start);
+        $adjustmentEnd = Carbon::parse($this->period_end);
 
         return $adjustmentStart->lte($periodEnd) && $adjustmentEnd->gte($periodStart);
     }
 
     /**
+     * Check if this is a recurring adjustment
+     * Recurring = period_start and period_end are both null
+     */
+    public function isRecurring(): bool
+    {
+        return $this->period_start === null && $this->period_end === null;
+    }
+
+    /**
      * Scope a query to only include recurring adjustments
+     * Recurring = period_start and period_end are both null
      */
     public function scopeRecurring(Builder $query): Builder
     {
-        return $query->where('is_recurring', true);
+        return $query->whereNull('period_start')
+            ->whereNull('period_end');
     }
 
     /**
      * Scope a query to only include once-off adjustments
+     * Once-off = period_start and period_end are both set
      */
     public function scopeOnceOff(Builder $query): Builder
     {
-        return $query->where('is_recurring', false);
+        return $query->whereNotNull('period_start')
+            ->whereNotNull('period_end');
     }
 
     /**
      * Scope a query to only include adjustments valid for a specific period
+     * Includes recurring (null period) and once-off that overlap
      */
     public function scopeForPeriod(Builder $query, Carbon $periodStart, Carbon $periodEnd): Builder
     {
         return $query->where(function ($q) use ($periodStart, $periodEnd) {
-            // Recurring adjustments
-            $q->where('is_recurring', true)
+            // Recurring adjustments (null period)
+            $q->whereNull('period_start')
+                ->whereNull('period_end')
                 // Or once-off adjustments that overlap with the period
                 ->orWhere(function ($subQ) use ($periodStart, $periodEnd) {
-                    $subQ->where('is_recurring', false)
-                        ->where('payroll_period_start', '<=', $periodEnd)
-                        ->where('payroll_period_end', '>=', $periodStart);
+                    $subQ->whereNotNull('period_start')
+                        ->whereNotNull('period_end')
+                        ->where('period_start', '<=', $periodEnd)
+                        ->where('period_end', '>=', $periodStart);
                 });
         });
     }

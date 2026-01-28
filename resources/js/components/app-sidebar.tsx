@@ -12,7 +12,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
-import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
+import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield, Wallet } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
@@ -46,12 +46,24 @@ export function AppSidebar() {
             items: [
                 { title: 'Schedules', href: '/payroll' },
                 { title: 'Payroll Jobs', href: '/payroll/jobs' },
+                { title: 'Benefits & Deductions', href: '/benefits' },
+                { title: 'Bonuses', href: '/payroll/bonuses' },
             ],
         },
         {
             title: 'Payslips',
             href: '/payslips',
             icon: ReceiptText,
+        },
+        {
+            title: 'Billing',
+            href: '/billing',
+            icon: Receipt,
+        },
+        {
+            title: 'Escrow Deposits',
+            href: '/escrow/deposit',
+            icon: Wallet,
         },
         {
             title: 'Reports',
@@ -72,14 +84,6 @@ export function AppSidebar() {
             items: [
                 { title: 'All Employees', href: '/employees' },
                 { title: 'Create Employee', href: '/employees/create' },
-            ],
-        },
-        {
-            title: 'Adjustments',
-            icon: Receipt,
-            items: [
-                { title: 'List', href: '/adjustments' },
-                { title: 'Create Adjustment', href: '/adjustments/create' },
             ],
         },
         {

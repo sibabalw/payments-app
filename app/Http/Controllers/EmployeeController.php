@@ -344,4 +344,178 @@ class EmployeeController extends Controller
 
         return response()->json($employees);
     }
+
+    /**
+     * Display benefits for a specific employee.
+     * Shows company benefits (read-only) and employee-specific overrides.
+     */
+    public function benefits(Employee $employee): Response
+    {
+        // Get all company-wide recurring benefits (these apply to everyone)
+        $companyBenefits = \App\Models\Adjustment::where('business_id', $employee->business_id)
+            ->whereNull('employee_id')
+            ->whereNull('period_start')
+            ->whereNull('period_end')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        // Get employee-specific recurring adjustments (overrides)
+        $employeeOverrides = \App\Models\Adjustment::where('business_id', $employee->business_id)
+            ->where('employee_id', $employee->id)
+            ->whereNull('period_start')
+            ->whereNull('period_end')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        // Match overrides with company benefits by name
+        $benefitsWithOverrides = $companyBenefits->map(function ($benefit) use ($employeeOverrides) {
+            $override = $employeeOverrides->firstWhere('name', $benefit->name);
+
+            return [
+                'company_benefit' => $benefit,
+                'override' => $override,
+                'effective_amount' => $override ? $override->amount : $benefit->amount,
+                'has_override' => $override !== null,
+            ];
+        });
+
+        // Get overrides that don't match any company benefit (employee-specific only)
+        $employeeOnlyBenefits = $employeeOverrides->reject(function ($override) use ($companyBenefits) {
+            return $companyBenefits->contains('name', $override->name);
+        });
+
+        return Inertia::render('employees/benefits', [
+            'employee' => $employee->load('business'),
+            'companyBenefits' => $companyBenefits,
+            'benefitsWithOverrides' => $benefitsWithOverrides,
+            'employeeOnlyBenefits' => $employeeOnlyBenefits,
+        ]);
+    }
+
+    /**
+     * Create or update an employee benefit override.
+     * Creates an employee-specific adjustment that overrides a company benefit.
+     */
+    public function overrideBenefit(Request $request, Employee $employee)
+    {
+        $validated = $request->validate([
+            'benefit_id' => 'required|exists:adjustments,id', // The company benefit to override
+            'amount' => 'required|numeric|min:0',
+            'period_start' => 'nullable|date', // null = forever, set = specific period
+            'period_end' => 'nullable|date', // null = forever, set = specific period
+            'description' => 'nullable|string',
+        ]);
+
+        // Get the company benefit
+        $companyBenefit = \App\Models\Adjustment::findOrFail($validated['benefit_id']);
+
+        // Ensure it's a company-wide recurring benefit
+        if ($companyBenefit->employee_id !== null || $companyBenefit->period_start !== null || $companyBenefit->period_end !== null) {
+            return back()
+                ->withErrors(['benefit_id' => 'Selected benefit is not a company-wide recurring benefit.'])
+                ->withInput();
+        }
+
+        // Ensure it belongs to the same business
+        if ($companyBenefit->business_id !== $employee->business_id) {
+            return back()
+                ->withErrors(['benefit_id' => 'Benefit does not belong to the same business.'])
+                ->withInput();
+        }
+
+        // Validate percentage amount if benefit is percentage type
+        if ($companyBenefit->type === 'percentage' && $validated['amount'] > 100) {
+            return back()
+                ->withErrors(['amount' => 'Percentage cannot exceed 100%.'])
+                ->withInput();
+        }
+
+        // Validate period if provided
+        if ($validated['period_start'] !== null && $validated['period_end'] !== null) {
+            $periodStart = Carbon::parse($validated['period_start']);
+            $periodEnd = Carbon::parse($validated['period_end']);
+
+            if ($periodStart->gt($periodEnd)) {
+                return back()
+                    ->withErrors(['period_start' => 'Start date must be before or equal to end date.'])
+                    ->withInput();
+            }
+        } else {
+            // If one is null, both must be null (forever)
+            $validated['period_start'] = null;
+            $validated['period_end'] = null;
+        }
+
+        // Check if override already exists
+        $existingOverride = \App\Models\Adjustment::where('business_id', $employee->business_id)
+            ->where('employee_id', $employee->id)
+            ->where('name', $companyBenefit->name)
+            ->whereNull('period_start')
+            ->whereNull('period_end')
+            ->first();
+
+        DB::transaction(function () use ($validated, $employee, $companyBenefit, $existingOverride) {
+            if ($existingOverride) {
+                // Update existing override
+                $existingOverride->update([
+                    'amount' => $validated['amount'],
+                    'description' => $validated['description'] ?? $existingOverride->description,
+                ]);
+
+                $this->auditService->log('benefit.override_updated', $existingOverride, [
+                    'old' => $existingOverride->getOriginal(),
+                    'new' => $existingOverride->getChanges(),
+                    'company_benefit_id' => $companyBenefit->id,
+                ]);
+            } else {
+                // Create new override
+                $override = \App\Models\Adjustment::create([
+                    'business_id' => $employee->business_id,
+                    'employee_id' => $employee->id,
+                    'name' => $companyBenefit->name,
+                    'type' => $companyBenefit->type,
+                    'amount' => $validated['amount'],
+                    'adjustment_type' => $companyBenefit->adjustment_type,
+                    'period_start' => $validated['period_start'],
+                    'period_end' => $validated['period_end'],
+                    'is_active' => true,
+                    'description' => $validated['description'] ?? "Override for {$companyBenefit->name}",
+                ]);
+
+                $this->auditService->log('benefit.override_created', $override, [
+                    'company_benefit_id' => $companyBenefit->id,
+                    'company_benefit_amount' => $companyBenefit->amount,
+                    'override_amount' => $validated['amount'],
+                ]);
+            }
+        });
+
+        return redirect()->route('employees.benefits', $employee->id)
+            ->with('success', "{$companyBenefit->name} override created. Employee will receive {$validated['amount']} instead of {$companyBenefit->amount}.");
+    }
+
+    /**
+     * Remove an employee benefit override.
+     */
+    public function removeOverride(Employee $employee, \App\Models\Adjustment $override)
+    {
+        // Ensure override belongs to this employee
+        if ($override->employee_id !== $employee->id || $override->business_id !== $employee->business_id) {
+            abort(404, 'Override not found for this employee.');
+        }
+
+        // Ensure it's a recurring override (period is null)
+        if ($override->period_start !== null || $override->period_end !== null) {
+            abort(404, 'This is not a benefit override.');
+        }
+
+        $this->auditService->log('benefit.override_removed', $override, $override->getAttributes());
+
+        $override->delete();
+
+        return redirect()->route('employees.benefits', $employee->id)
+            ->with('success', 'Benefit override removed. Employee will now receive the company benefit rate.');
+    }
 }

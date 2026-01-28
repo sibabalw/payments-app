@@ -93,9 +93,20 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Edit Employee" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-2xl font-bold">Edit Employee</h1>
+                    <div className="flex gap-2">
+                        <Link href={`/employees/${employee.id}/benefits`}>
+                            <Button variant="outline">View Benefits</Button>
+                        </Link>
+                        <Link href={`/payroll/bonuses/create?employee_id=${employee.id}`}>
+                            <Button variant="outline">Add Bonus</Button>
+                        </Link>
+                    </div>
+                </div>
                 <Card>
                     <CardHeader>
-                        <CardTitle>Edit Employee</CardTitle>
+                        <CardTitle>Employee Details</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <form onSubmit={submit} className="space-y-4">
@@ -408,122 +419,6 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
                                 </Link>
                             </div>
                         </form>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <CardTitle>Adjustments</CardTitle>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                    Company-wide adjustments apply to all employees. Employee-specific adjustments override or supplement company-wide ones.
-                                </p>
-                            </div>
-                            <Link href={`/adjustments/create?business_id=${data.business_id}&employee_id=${employee.id}`}>
-                                <Button size="sm">Add Adjustment</Button>
-                            </Link>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {adjustments && adjustments.length > 0 ? (
-                            <div className="space-y-4">
-                                {/* Company-wide adjustments */}
-                                {adjustments.filter((a: any) => a.employee_id === null).length > 0 && (
-                                    <div>
-                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Company-wide Adjustments</h4>
-                                        <div className="space-y-2">
-                                            {adjustments
-                                                .filter((a: any) => a.employee_id === null)
-                                                .map((adjustment: any) => (
-                                                    <div key={adjustment.id} className="flex justify-between items-center p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-                                                        <div>
-                                                            <div className="font-medium">{adjustment.name}</div>
-                                                            <div className="text-sm text-muted-foreground">
-                                                                {adjustment.type === 'percentage' 
-                                                                    ? `${adjustment.amount}% of gross salary`
-                                                                    : `ZAR ${parseFloat(adjustment.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                                                }
-                                                                {' • '}
-                                                                <span className={`capitalize ${
-                                                                    adjustment.adjustment_type === 'deduction' ? 'text-red-600' : 'text-green-600'
-                                                                }`}>
-                                                                    {adjustment.adjustment_type === 'deduction' ? 'Deduction' : 'Addition'}
-                                                                </span>
-                                                                {' • '}
-                                                                <span className="capitalize">
-                                                                    {adjustment.is_recurring ? 'Recurring' : 'Once-off'}
-                                                                </span>
-                                                                <span className="ml-2 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded">Company-wide</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                        </div>
-                                    </div>
-                                )}
-                                
-                                {/* Employee-specific adjustments */}
-                                {adjustments.filter((a: any) => a.employee_id === employee.id).length > 0 && (
-                                    <div>
-                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Employee-specific Adjustments</h4>
-                                        <div className="space-y-2">
-                                            {adjustments
-                                                .filter((a: any) => a.employee_id === employee.id)
-                                                .map((adjustment: any) => (
-                                                    <div key={adjustment.id} className="flex justify-between items-center p-3 border rounded-lg">
-                                                        <div>
-                                                            <div className="font-medium">{adjustment.name}</div>
-                                                            <div className="text-sm text-muted-foreground">
-                                                                {adjustment.type === 'percentage' 
-                                                                    ? `${adjustment.amount}% of gross salary`
-                                                                    : `ZAR ${parseFloat(adjustment.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                                                }
-                                                                {' • '}
-                                                                <span className={`capitalize ${
-                                                                    adjustment.adjustment_type === 'deduction' ? 'text-red-600' : 'text-green-600'
-                                                                }`}>
-                                                                    {adjustment.adjustment_type === 'deduction' ? 'Deduction' : 'Addition'}
-                                                                </span>
-                                                                {' • '}
-                                                                <span className="capitalize">
-                                                                    {adjustment.is_recurring ? 'Recurring' : 'Once-off'}
-                                                                </span>
-                                                                <span className="ml-2 text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-0.5 rounded">Employee-specific</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            <Link href={`/adjustments/${adjustment.id}/edit`}>
-                                                                <Button variant="outline" size="sm">Edit</Button>
-                                                            </Link>
-                                                            <Link
-                                                                href={`/adjustments/${adjustment.id}`}
-                                                                method="delete"
-                                                                as="button"
-                                                                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3"
-                                                            >
-                                                                Delete
-                                                            </Link>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                <p className="text-sm text-muted-foreground">No adjustments configured for this employee.</p>
-                                <div className="flex gap-2">
-                                    <Link href={`/adjustments/create?business_id=${data.business_id}&employee_id=${employee.id}`}>
-                                        <Button size="sm" variant="outline">Add Employee Adjustment</Button>
-                                    </Link>
-                                    <Link href={`/adjustments?business_id=${data.business_id}`}>
-                                        <Button size="sm" variant="outline">Manage Company-wide Adjustments</Button>
-                                    </Link>
-                                </div>
-                            </div>
-                        )}
                     </CardContent>
                 </Card>
             </div>

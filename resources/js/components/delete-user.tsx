@@ -1,4 +1,3 @@
-import ProfileController from '@/actions/App/Http/Controllers/Settings/ProfileController';
 import HeadingSmall from '@/components/heading-small';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
@@ -18,12 +17,13 @@ import { useRef } from 'react';
 
 interface DeleteUserProps {
     /** When provided (e.g. admin account), use this form action instead of profile destroy */
-    formAction?: { action: string; method: 'delete' };
+    formAction?: string;
+    formMethod?: 'delete';
 }
 
-export default function DeleteUser({ formAction }: DeleteUserProps = {}) {
+export default function DeleteUser({ formAction, formMethod = 'delete' }: DeleteUserProps = {}) {
     const passwordInput = useRef<HTMLInputElement>(null);
-    const formProps = formAction ?? ProfileController.destroy.form();
+    const action = formAction ?? '/settings/profile';
 
     return (
         <div className="space-y-6">
@@ -60,7 +60,8 @@ export default function DeleteUser({ formAction }: DeleteUserProps = {}) {
                         </DialogDescription>
 
                         <Form
-                            {...formProps}
+                            action={action}
+                            method={formMethod}
                             options={{
                                 preserveScroll: true,
                             }}

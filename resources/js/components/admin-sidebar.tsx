@@ -29,6 +29,12 @@ import {
     Users,
     Wallet,
     FileText,
+    Flag,
+    Lock,
+    Gauge,
+    HardDrive,
+    CreditCard,
+    BarChart3,
 } from 'lucide-react';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
@@ -96,7 +102,29 @@ const adminNavItems: NavItem[] = [
         items: [
             { title: 'System Health', href: '/admin/system-health' },
             { title: 'Database', href: '/admin/database' },
+            { title: 'Performance', href: '/admin/performance' },
+            { title: 'Storage', href: '/admin/storage' },
         ],
+    },
+    {
+        title: 'Security',
+        href: '/admin/security',
+        icon: Lock,
+    },
+    {
+        title: 'Feature Flags',
+        href: '/admin/feature-flags',
+        icon: Flag,
+    },
+    {
+        title: 'Subscriptions',
+        href: '/admin/subscriptions',
+        icon: CreditCard,
+    },
+    {
+        title: 'System Reports',
+        href: '/admin/system-reports',
+        icon: BarChart3,
     },
 ];
 

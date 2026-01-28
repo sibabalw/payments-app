@@ -83,7 +83,7 @@ class PaymentScheduleController extends Controller
 
         $schedules = $query->latest()->paginate(15);
 
-        return Inertia::render('payments/index', [
+        return Inertia::render('payments/schedules', [
             'schedules' => $schedules,
             'filters' => [
                 'type' => $type,

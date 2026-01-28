@@ -81,6 +81,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
     const [feeReleaseConfirmOpen, setFeeReleaseConfirmOpen] = useState(false);
     const [fundReturnConfirmOpen, setFundReturnConfirmOpen] = useState(false);
     const [paymentJobId, setPaymentJobId] = useState<number | null>(null);
+    const [confirmingDepositId, setConfirmingDepositId] = useState<number | null>(null);
 
     const submitDeposit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -88,9 +89,21 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
     };
 
     const confirmDeposit = (depositId: number, bankRef?: string) => {
-        router.post(`/admin/escrow/deposits/${depositId}/confirm`, {
-            bank_reference: bankRef || '',
-        });
+        router.post(
+            `/admin/escrow/deposits/${depositId}/confirm`,
+            {
+                bank_reference: bankRef || '',
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    // Page will refresh automatically with updated data
+                },
+                onError: (errors) => {
+                    console.error('Error confirming deposit:', errors);
+                },
+            }
+        );
     };
 
     const recordFeeRelease = (id: number) => {

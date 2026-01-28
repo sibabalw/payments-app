@@ -6,6 +6,7 @@ use App\Mail\PaymentFailedEmail;
 use App\Mail\PaymentSuccessEmail;
 use App\Models\PaymentJob;
 use App\Services\EmailService;
+use App\Services\ErrorClassificationService;
 use App\Services\PaymentService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,6 +41,15 @@ class ProcessPaymentJob implements ShouldQueue
      */
     public function handle(PaymentService $paymentService): void
     {
+        // Cache error classification service instance and cache (shared across method)
+        static $errorClassification = null;
+        static $classificationCache = [];
+        static $genericErrorType = null;
+
+        if ($errorClassification === null) {
+            $errorClassification = app(ErrorClassificationService::class);
+        }
+
         try {
             $success = $paymentService->processPaymentJob($this->paymentJob);
 
@@ -64,25 +74,55 @@ class ProcessPaymentJob implements ShouldQueue
                     ]);
                 }
             } else {
+                // Cache classification result for generic payment failure
+                if ($genericErrorType === null) {
+                    $genericErrorType = $errorClassification->classify(new \Exception('Payment processing failed'));
+                }
+                $errorType = $genericErrorType;
+
                 Log::warning('Payment job failed', [
                     'payment_job_id' => $this->paymentJob->id,
                     'attempt' => $this->attempts(),
+                    'error_type' => $errorType,
                 ]);
 
-                // Throw exception to trigger retry
-                if ($this->attempts() < $this->tries) {
+                // Only retry if transient failure
+                if ($errorType === 'transient' && $this->attempts() < $this->tries) {
                     throw new \Exception('Payment processing failed. Retrying...');
                 }
             }
         } catch (\Exception $e) {
+            // Cache classification results by exception message hash to avoid repeated classification
+            $errorHash = md5(get_class($e).':'.$e->getMessage());
+
+            if (! isset($classificationCache[$errorHash])) {
+                $classificationCache[$errorHash] = [
+                    'type' => $errorClassification->classify($e),
+                    'category' => $errorClassification->getCategory($e),
+                ];
+            }
+
+            $errorType = $classificationCache[$errorHash]['type'];
+            $errorCategory = $classificationCache[$errorHash]['category'];
+
             Log::error('Payment job exception', [
                 'payment_job_id' => $this->paymentJob->id,
                 'exception' => $e->getMessage(),
                 'attempt' => $this->attempts(),
+                'error_type' => $errorType,
+                'error_category' => $errorCategory,
             ]);
 
-            // Re-throw to trigger retry mechanism
-            throw $e;
+            // Only retry if transient failure
+            if ($errorType === 'transient' && $this->attempts() < $this->tries) {
+                throw $e;
+            }
+
+            // Permanent failure - mark as failed
+            $this->paymentJob->update([
+                'status' => 'failed',
+                'error_message' => $e->getMessage(),
+            ]);
         }
     }
 

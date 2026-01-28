@@ -117,7 +117,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array|min:1',
+            'employee_ids' => 'required|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -163,7 +163,33 @@ class PayrollController extends Controller
             return back()->withErrors(['frequency' => 'Invalid cron expression.'])->withInput();
         }
 
-        // Wrap essential database operations in a transaction
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        if (empty($validated['employee_ids'])) {
+            $validated['employee_ids'] = Employee::where('business_id', $validated['business_id'])
+                ->pluck('id')
+                ->toArray();
+        }
+
+        // Enforce rule: One employee = One recurring payroll schedule
+        // Check BEFORE creating schedule to avoid inconsistent state
+        if ($validated['schedule_type'] === 'recurring') {
+            $employeesInOtherRecurringSchedules = \App\Models\Employee::whereIn('id', $validated['employee_ids'])
+                ->whereHas('payrollSchedules', function ($query) {
+                    $query->where('payroll_schedules.schedule_type', 'recurring')
+                        ->where('payroll_schedules.status', 'active');
+                })
+                ->get();
+
+            if ($employeesInOtherRecurringSchedules->isNotEmpty()) {
+                $employeeNames = $employeesInOtherRecurringSchedules->pluck('name')->join(', ');
+
+                return back()
+                    ->withErrors(['employee_ids' => "The following employees are already in another recurring payroll schedule: {$employeeNames}. Each employee can only be in one recurring schedule."])
+                    ->withInput();
+            }
+        }
+
+        // Wrap all database operations in a transaction for atomicity
         $schedule = DB::transaction(function () use ($validated, $frequency) {
             $schedule = PayrollSchedule::create([
                 'business_id' => $validated['business_id'],
@@ -186,11 +212,12 @@ class PayrollController extends Controller
                 // If calculation fails, set to null (will be handled by scheduler)
             }
 
+            // Attach employees inside transaction to ensure atomicity
+            // Employee attachment is fast (pivot table insert) and shouldn't cause lock issues
+            $schedule->employees()->attach($validated['employee_ids']);
+
             return $schedule;
         });
-
-        // Attach employees outside transaction to avoid lock timeout
-        $schedule->employees()->attach($validated['employee_ids']);
 
         // Log audit trail outside transaction (non-critical)
         $this->auditService->log('payroll_schedule.created', $schedule, $schedule->getAttributes());
@@ -259,7 +286,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array|min:1',
+            'employee_ids' => 'required|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -303,6 +330,33 @@ class PayrollController extends Controller
             CronExpression::factory($frequency);
         } catch (\Exception $e) {
             return back()->withErrors(['frequency' => 'Invalid cron expression.'])->withInput();
+        }
+
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        if (empty($validated['employee_ids'])) {
+            $validated['employee_ids'] = Employee::where('business_id', $validated['business_id'])
+                ->pluck('id')
+                ->toArray();
+        }
+
+        // Enforce rule: One employee = One recurring payroll schedule
+        // Check if any employee is already in another recurring schedule (before transaction)
+        if ($validated['schedule_type'] === 'recurring') {
+            $employeesInOtherRecurringSchedules = \App\Models\Employee::whereIn('id', $validated['employee_ids'])
+                ->whereHas('payrollSchedules', function ($query) use ($payrollSchedule) {
+                    $query->where('payroll_schedules.schedule_type', 'recurring')
+                        ->where('payroll_schedules.status', 'active')
+                        ->where('payroll_schedules.id', '!=', $payrollSchedule->id);
+                })
+                ->get();
+
+            if ($employeesInOtherRecurringSchedules->isNotEmpty()) {
+                $employeeNames = $employeesInOtherRecurringSchedules->pluck('name')->join(', ');
+
+                return back()
+                    ->withErrors(['employee_ids' => "The following employees are already in another recurring payroll schedule: {$employeeNames}. Each employee can only be in one recurring schedule."])
+                    ->withInput();
+            }
         }
 
         // Wrap all database operations in a transaction
