@@ -26,9 +26,20 @@ class ProcessPayrollJob implements ShouldQueue
     public int $tries = 3;
 
     /**
-     * The number of seconds to wait before retrying the job.
+     * The maximum number of seconds a job can run before timing out.
      */
-    public int $backoff = 60;
+    public int $timeout = 300; // 5 minutes
+
+    /**
+     * Determine if the job should be retried based on the exception.
+     */
+    public function shouldRetry(\Throwable $exception): bool
+    {
+        $errorClassification = app(\App\Services\ErrorClassificationService::class);
+        $errorType = $errorClassification->classify($exception);
+
+        return $errorType === 'transient';
+    }
 
     /**
      * Create a new job instance.
@@ -110,33 +121,100 @@ class ProcessPayrollJob implements ShouldQueue
                     'attempt' => $this->attempts(),
                 ]);
 
-                // Always throw exception - if retries exhausted, it will trigger failed() method
-                throw new \Exception('Payroll processing failed');
+                // Check if this is a permanent failure that shouldn't be retried
+                $errorMessage = 'Payroll processing failed';
+                $freshJob = PayrollJob::find($this->payrollJob->id);
+                if ($freshJob && $freshJob->error_message) {
+                    $errorMessage = $freshJob->error_message;
+                }
+
+                $exception = new \Exception($errorMessage);
+
+                // If this is a permanent failure, mark as failed immediately
+                if (! $this->shouldRetry($exception)) {
+                    if ($freshJob) {
+                        $freshJob->updateStatus('failed', $errorMessage);
+                    }
+
+                    // Don't retry - job is permanently failed
+                    return;
+                }
+
+                // Re-throw to trigger retry mechanism
+                throw $exception;
             }
         } catch (\Exception $e) {
+            // Cache error classification service instance
+            static $errorClassification = null;
+            if ($errorClassification === null) {
+                $errorClassification = app(\App\Services\ErrorClassificationService::class);
+            }
+
+            // Cache classification results by exception message hash to avoid repeated classification
+            $errorHash = md5(get_class($e).':'.$e->getMessage());
+            static $classificationCache = [];
+
+            if (! isset($classificationCache[$errorHash])) {
+                $classificationCache[$errorHash] = [
+                    'type' => $errorClassification->classify($e),
+                    'category' => $errorClassification->getCategory($e),
+                ];
+            }
+
+            $errorType = $classificationCache[$errorHash]['type'];
+            $errorCategory = $classificationCache[$errorHash]['category'];
+
             Log::error('Payroll job exception', [
                 'payroll_job_id' => $this->payrollJob->id,
                 'exception' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'attempt' => $this->attempts(),
                 'max_attempts' => $this->tries,
+                'error_type' => $errorType,
+                'error_category' => $errorCategory,
             ]);
 
-            // Re-throw to trigger retry mechanism or failed() method if retries exhausted
+            // Check if we should retry
+            if (! $this->shouldRetry($e)) {
+                // Permanent failure - mark as failed immediately
+                $freshJob = PayrollJob::find($this->payrollJob->id);
+                if ($freshJob) {
+                    $freshJob->updateStatus('failed', $e->getMessage());
+                }
+
+                // Don't retry - job is permanently failed
+                return;
+            }
+
+            // Check if we've exhausted retries
+            if ($this->attempts() >= $this->tries) {
+                // Max attempts reached - will be handled by failed() method
+                throw $e;
+            }
+
+            // Re-throw to trigger retry mechanism with exponential backoff
             throw $e;
         }
     }
 
     /**
      * Calculate the number of seconds to wait before retrying the job.
+     * Uses exponential backoff with jitter to prevent thundering herd.
      */
     public function backoff(): array
     {
-        return [
+        $baseDelays = [
             60,   // 1 minute
             300,  // 5 minutes
             900,  // 15 minutes
         ];
+
+        // Add jitter (±10%) to each delay to prevent synchronized retries
+        return array_map(function ($delay) {
+            $jitter = (int) ($delay * 0.1 * (random_int(0, 20) - 10) / 10); // ±10% jitter
+
+            return max(1, $delay + $jitter); // Ensure minimum 1 second
+        }, $baseDelays);
     }
 
     /**
@@ -153,11 +231,11 @@ class ProcessPayrollJob implements ShouldQueue
             if ($payrollJob) {
                 // Only update if not already in a terminal state
                 if (! in_array($payrollJob->status, ['succeeded', 'failed'])) {
-                    $payrollJob->update([
-                        'status' => 'failed',
-                        'error_message' => $exception->getMessage(),
-                    ]);
+                    $payrollJob->updateStatus('failed', $exception->getMessage());
                 }
+
+                // Mark as permanently failed (dead letter queue)
+                $payrollJob->markAsPermanentlyFailed('max_retries_exceeded');
             }
 
             Log::error('Payroll job permanently failed', [

@@ -7,6 +7,8 @@ use App\Models\PaymentJob;
 use App\Models\PaymentSchedule;
 use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
+use App\Models\ReconciliationDiscrepancy;
+use App\Services\BillingService;
 use App\Services\EscrowService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,8 @@ use Inertia\Inertia;
 class DashboardController extends Controller
 {
     public function __construct(
-        private EscrowService $escrowService
+        private EscrowService $escrowService,
+        private BillingService $billingService
     ) {}
 
     public function index(Request $request)
@@ -119,6 +122,13 @@ class DashboardController extends Controller
         // Businesses count
         $businessesCount = count($userBusinessIds);
 
+        // Get new dashboard data
+        $accountStatus = $this->getAccountStatusInfo($businessId, $userBusinessIds);
+        $balanceBreakdown = $this->getBalanceBreakdown($businessId, $userBusinessIds);
+        $billingInfo = $this->getBillingInfo($businessId, $userBusinessIds);
+        $criticalAlerts = $this->getCriticalAlerts($businessId, $userBusinessIds);
+        $reconciliationStatus = $this->getReconciliationStatus($businessId, $userBusinessIds);
+
         return Inertia::render('dashboard', [
             'metrics' => $metrics,
             'financial' => [
@@ -149,6 +159,11 @@ class DashboardController extends Controller
             'selectedBusiness' => $businessInfo ? ['id' => $businessInfo['id'], 'name' => $businessInfo['name']] : null,
             'businessInfo' => $businessInfo,
             'businessesCount' => $businessesCount,
+            'accountStatus' => $accountStatus,
+            'balanceBreakdown' => $balanceBreakdown,
+            'billingInfo' => $billingInfo,
+            'criticalAlerts' => $criticalAlerts,
+            'reconciliationStatus' => $reconciliationStatus,
         ]);
     }
 
@@ -660,7 +675,7 @@ class DashboardController extends Controller
         $business = null;
 
         if ($businessId) {
-            $business = Business::select('id', 'name', 'logo', 'status', 'business_type', 'email', 'phone', 'escrow_balance')
+            $business = Business::select('id', 'name', 'logo', 'status', 'status_reason', 'business_type', 'email', 'phone', 'escrow_balance', 'is_frozen', 'hold_amount', 'status_changed_at')
                 ->find($businessId);
         }
 
@@ -678,7 +693,7 @@ class DashboardController extends Controller
                 })
                 ->orderByRaw('CASE WHEN user_id = ? THEN 0 ELSE 1 END', [$user->id])
                 ->orderBy('id')
-                ->select('id', 'name', 'logo', 'status', 'business_type', 'email', 'phone', 'escrow_balance')
+                ->select('id', 'name', 'logo', 'status', 'status_reason', 'business_type', 'email', 'phone', 'escrow_balance', 'is_frozen', 'hold_amount', 'status_changed_at')
                 ->first();
 
             if ($businessData) {
@@ -724,10 +739,14 @@ class DashboardController extends Controller
             'name' => $business->name,
             'logo' => $logoUrl,
             'status' => $business->status,
+            'status_reason' => $business->status_reason,
             'business_type' => $business->business_type,
             'email' => $business->email,
             'phone' => $business->phone,
             'escrow_balance' => $escrowBalance,
+            'is_frozen' => (bool) ($business->is_frozen ?? false),
+            'hold_amount' => (float) ($business->hold_amount ?? 0),
+            'status_changed_at' => $business->status_changed_at?->toIso8601String(),
             'employees_count' => (int) ($countsMap['employees'] ?? 0),
             'payment_schedules_count' => (int) ($countsMap['payment_schedules'] ?? 0),
             'payroll_schedules_count' => (int) ($countsMap['payroll_schedules'] ?? 0),
@@ -852,6 +871,253 @@ class DashboardController extends Controller
             'label_key' => $labelKey,
             'start_date' => $startDate,
             'periods' => $periods,
+        ];
+    }
+
+    private function getAccountStatusInfo(?int $businessId, array $userBusinessIds): ?array
+    {
+        if (! $businessId) {
+            return null;
+        }
+
+        $business = Business::select('id', 'status', 'status_reason', 'is_frozen', 'status_changed_at')
+            ->find($businessId);
+
+        if (! $business) {
+            return null;
+        }
+
+        return [
+            'status' => $business->status,
+            'status_reason' => $business->status_reason,
+            'is_frozen' => (bool) $business->is_frozen,
+            'status_changed_at' => $business->status_changed_at?->toIso8601String(),
+            'can_perform_actions' => $business->canPerformActions(),
+        ];
+    }
+
+    private function getBalanceBreakdown(?int $businessId, array $userBusinessIds): ?array
+    {
+        if (! $businessId) {
+            return null;
+        }
+
+        $business = Business::find($businessId);
+
+        if (! $business) {
+            return null;
+        }
+
+        $escrowBalance = (float) ($business->escrow_balance ?? 0);
+        $holdAmount = (float) ($business->hold_amount ?? 0);
+        $availableBalance = $escrowBalance - $holdAmount;
+
+        // Calculate upcoming requirements (next 7 days)
+        $upcomingDate = now()->addDays(7);
+
+        // Upcoming payment requirements
+        $upcomingPaymentAmount = PaymentSchedule::where('business_id', $businessId)
+            ->where('status', 'active')
+            ->where('next_run_at', '<=', $upcomingDate)
+            ->where('next_run_at', '>=', now())
+            ->with('recipients')
+            ->get()
+            ->sum(function ($schedule) {
+                $recipientCount = $schedule->recipients()->count();
+
+                return (float) $schedule->amount * max($recipientCount, 1);
+            });
+
+        // Upcoming payroll requirements
+        $upcomingPayrollAmount = PayrollSchedule::where('business_id', $businessId)
+            ->where('status', 'active')
+            ->where('next_run_at', '<=', $upcomingDate)
+            ->where('next_run_at', '>=', now())
+            ->with('employees')
+            ->get()
+            ->sum(function ($schedule) {
+                return $schedule->employees->sum('gross_salary');
+            });
+
+        $upcomingRequirements = (float) $upcomingPaymentAmount + (float) $upcomingPayrollAmount;
+        $shortfall = max(0, $upcomingRequirements - $availableBalance);
+
+        return [
+            'escrow_balance' => $escrowBalance,
+            'hold_amount' => $holdAmount,
+            'available_balance' => $availableBalance,
+            'upcoming_requirements' => $upcomingRequirements,
+            'shortfall' => $shortfall,
+        ];
+    }
+
+    private function getBillingInfo(?int $businessId, array $userBusinessIds): ?array
+    {
+        if (! $businessId) {
+            return null;
+        }
+
+        $business = Business::find($businessId);
+
+        if (! $business) {
+            return null;
+        }
+
+        $currentMonth = now()->format('Y-m');
+        $currentMonthBilling = $business->monthlyBillings()
+            ->where('billing_month', $currentMonth)
+            ->first();
+
+        // Generate if doesn't exist
+        if (! $currentMonthBilling) {
+            $currentMonthBilling = $this->billingService->generateMonthlyBilling($business, $currentMonth);
+        }
+
+        $subscriptionFee = $this->billingService->getSubscriptionFee($business);
+        $pendingFees = $currentMonthBilling->status === 'pending'
+            ? (float) ($currentMonthBilling->subscription_fee + $currentMonthBilling->total_deposit_fees)
+            : 0.0;
+
+        $totalMonthlyCost = (float) ($currentMonthBilling->subscription_fee + $currentMonthBilling->total_deposit_fees);
+
+        return [
+            'current_month_billing' => [
+                'id' => $currentMonthBilling->id,
+                'billing_month' => $currentMonthBilling->billing_month,
+                'subscription_fee' => (float) $currentMonthBilling->subscription_fee,
+                'total_deposit_fees' => (float) $currentMonthBilling->total_deposit_fees,
+                'status' => $currentMonthBilling->status,
+                'billed_at' => $currentMonthBilling->billed_at?->toIso8601String(),
+                'paid_at' => $currentMonthBilling->paid_at?->toIso8601String(),
+            ],
+            'pending_fees' => $pendingFees,
+            'total_monthly_cost' => $totalMonthlyCost,
+            'billing_status' => $currentMonthBilling->status,
+        ];
+    }
+
+    private function getCriticalAlerts(?int $businessId, array $userBusinessIds): array
+    {
+        if (! $businessId) {
+            return [];
+        }
+
+        $business = Business::find($businessId);
+
+        if (! $business) {
+            return [];
+        }
+
+        $alerts = [];
+
+        // Account frozen alert
+        if ($business->is_frozen) {
+            $alerts[] = [
+                'type' => 'frozen',
+                'severity' => 'critical',
+                'title' => 'Account Frozen',
+                'message' => 'Your account has been frozen due to a reconciliation discrepancy. Transactions are currently disabled. Please contact support.',
+                'action_url' => '/support',
+            ];
+        }
+
+        // Status alerts
+        if ($business->status === 'suspended') {
+            $alerts[] = [
+                'type' => 'status',
+                'severity' => 'critical',
+                'title' => 'Account Suspended',
+                'message' => $business->status_reason
+                    ? "Your account has been suspended: {$business->status_reason}"
+                    : 'Your account has been suspended. Please contact support.',
+                'action_url' => '/support',
+            ];
+        } elseif ($business->status === 'banned') {
+            $alerts[] = [
+                'type' => 'status',
+                'severity' => 'critical',
+                'title' => 'Account Banned',
+                'message' => $business->status_reason
+                    ? "Your account has been banned: {$business->status_reason}"
+                    : 'Your account has been banned. Please contact support.',
+                'action_url' => '/support',
+            ];
+        }
+
+        // Balance breakdown for alerts
+        $balanceBreakdown = $this->getBalanceBreakdown($businessId, $userBusinessIds);
+
+        if ($balanceBreakdown) {
+            // Low balance warning (less than R1000 or less than upcoming requirements)
+            $lowBalanceThreshold = 1000.0;
+            if ($balanceBreakdown['available_balance'] < $lowBalanceThreshold) {
+                $alerts[] = [
+                    'type' => 'low_balance',
+                    'severity' => 'warning',
+                    'title' => 'Low Escrow Balance',
+                    'message' => "Your available balance is low (R {$balanceBreakdown['available_balance']}). Consider depositing funds to avoid payment failures.",
+                    'action_url' => '/escrow/deposit',
+                ];
+            }
+
+            // Insufficient balance for upcoming payments
+            if ($balanceBreakdown['shortfall'] > 0) {
+                $alerts[] = [
+                    'type' => 'insufficient_balance',
+                    'severity' => 'warning',
+                    'title' => 'Insufficient Balance for Upcoming Payments',
+                    'message' => "You have upcoming payments totaling R {$balanceBreakdown['upcoming_requirements']} in the next 7 days, but only R {$balanceBreakdown['available_balance']} available. Shortfall: R {$balanceBreakdown['shortfall']}.",
+                    'action_url' => '/escrow/deposit',
+                ];
+            }
+        }
+
+        // Reconciliation discrepancies
+        $reconciliationStatus = $this->getReconciliationStatus($businessId, $userBusinessIds);
+        if ($reconciliationStatus && $reconciliationStatus['has_pending_discrepancies']) {
+            $alerts[] = [
+                'type' => 'reconciliation',
+                'severity' => 'critical',
+                'title' => 'Reconciliation Discrepancy Detected',
+                'message' => "You have {$reconciliationStatus['discrepancy_count']} pending reconciliation discrepancy(ies). Your account may be frozen until resolved.",
+                'action_url' => '/reconciliation',
+            ];
+        }
+
+        return $alerts;
+    }
+
+    private function getReconciliationStatus(?int $businessId, array $userBusinessIds): ?array
+    {
+        if (! $businessId) {
+            return null;
+        }
+
+        $business = Business::find($businessId);
+
+        if (! $business) {
+            return null;
+        }
+
+        $pendingDiscrepancies = ReconciliationDiscrepancy::where('business_id', $businessId)
+            ->where('status', 'pending')
+            ->count();
+
+        // Get the most recent discrepancy for freeze reason
+        $latestDiscrepancy = ReconciliationDiscrepancy::where('business_id', $businessId)
+            ->where('status', 'pending')
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        $freezeReason = null;
+        if ($latestDiscrepancy && $business->is_frozen) {
+            $freezeReason = "Balance discrepancy of R {$latestDiscrepancy->difference} detected. Type: {$latestDiscrepancy->discrepancy_type}.";
+        }
+
+        return [
+            'has_pending_discrepancies' => $pendingDiscrepancies > 0,
+            'discrepancy_count' => $pendingDiscrepancies,
+            'freeze_reason' => $freezeReason,
         ];
     }
 }

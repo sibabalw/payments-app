@@ -26,6 +26,7 @@ class PaymentJob extends Model
         'fee_released_manually_at',
         'funds_returned_manually_at',
         'released_by',
+        'version',
     ];
 
     protected function casts(): array
@@ -57,5 +58,38 @@ class PaymentJob extends Model
     public function releasedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'released_by');
+    }
+
+    /**
+     * Override update to implement optimistic locking
+     */
+    public function update(array $attributes = [], array $options = []): bool
+    {
+        if (! $this->exists) {
+            return parent::update($attributes, $options);
+        }
+
+        // Optimistic locking: check version before update
+        if (! isset($attributes['version'])) {
+            $currentVersion = $this->version ?? 1;
+            $attributes['version'] = $currentVersion + 1;
+
+            // Use where clause to check version
+            $query = $this->newQueryWithoutScopes()->where($this->getKeyName(), $this->getKey())
+                ->where('version', $currentVersion);
+
+            $updated = $query->update($attributes);
+
+            if ($updated === 0) {
+                throw new \RuntimeException('Optimistic locking failed: version mismatch. Record was modified by another process.');
+            }
+
+            // Refresh model
+            $this->refresh();
+
+            return true;
+        }
+
+        return parent::update($attributes, $options);
     }
 }

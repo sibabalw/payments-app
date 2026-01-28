@@ -12,7 +12,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
-import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield } from 'lucide-react';
+import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield, Wallet } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
@@ -54,6 +54,16 @@ export function AppSidebar() {
             title: 'Payslips',
             href: '/payslips',
             icon: ReceiptText,
+        },
+        {
+            title: 'Billing',
+            href: '/billing',
+            icon: Receipt,
+        },
+        {
+            title: 'Escrow Deposits',
+            href: '/escrow/deposit',
+            icon: Wallet,
         },
         {
             title: 'Reports',

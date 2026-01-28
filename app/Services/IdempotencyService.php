@@ -6,7 +6,6 @@ use App\Services\Idempotency\DatabaseIdempotencyService;
 use App\Services\Idempotency\IdempotencyServiceInterface;
 use App\Services\Idempotency\RedisIdempotencyService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class IdempotencyService
 {
@@ -34,21 +33,27 @@ class IdempotencyService
     /**
      * Execute a callback with idempotency protection.
      * Returns cached response if key exists, otherwise executes callback and caches result.
+     * Supports content-based deduplication via request data.
      *
-     * @param string $idempotencyKey Unique key for this operation
-     * @param callable $callback Function to execute if not cached
-     * @param int $ttlSeconds Time to live in seconds (default: 24 hours)
+     * @param  string  $idempotencyKey  Unique key for this operation
+     * @param  callable  $callback  Function to execute if not cached
+     * @param  int  $ttlSeconds  Time to live in seconds (default: 24 hours)
+     * @param  array|null  $requestData  Optional request data for content-based deduplication
      * @return mixed Result from callback or cached response
      */
-    public function execute(string $idempotencyKey, callable $callback, int $ttlSeconds = 86400)
+    public function execute(string $idempotencyKey, callable $callback, int $ttlSeconds = 86400, ?array $requestData = null)
     {
-        return $this->driver->execute($idempotencyKey, $callback, $ttlSeconds);
+        $requestHash = null;
+        if ($requestData && $this->driver instanceof DatabaseIdempotencyService) {
+            $requestHash = $this->driver->generateRequestHash($requestData);
+        }
+
+        return $this->driver->execute($idempotencyKey, $callback, $ttlSeconds, $requestHash);
     }
 
     /**
      * Check if an idempotency key exists and return cached response if available.
      *
-     * @param string $idempotencyKey
      * @return mixed|null Cached response or null if not found
      */
     public function check(string $idempotencyKey)
@@ -59,14 +64,30 @@ class IdempotencyService
     /**
      * Record an idempotency key with a response.
      *
-     * @param string $idempotencyKey
-     * @param mixed $response
-     * @param int $ttlSeconds
-     * @return void
+     * @param  mixed  $response
+     * @param  array|null  $requestData  Optional request data for content-based deduplication
      */
-    public function record(string $idempotencyKey, $response, int $ttlSeconds = 86400): void
+    public function record(string $idempotencyKey, $response, int $ttlSeconds = 86400, ?array $requestData = null): void
     {
-        $this->driver->record($idempotencyKey, $response, $ttlSeconds);
+        $requestHash = null;
+        if ($requestData && $this->driver instanceof DatabaseIdempotencyService) {
+            $requestHash = $this->driver->generateRequestHash($requestData);
+        }
+
+        $this->driver->record($idempotencyKey, $response, $ttlSeconds, $requestHash);
+    }
+
+    /**
+     * Rotate idempotency key for long-running operations
+     */
+    public function rotateKey(string $oldKey, int $gracePeriodSeconds = 300): string
+    {
+        if ($this->driver instanceof DatabaseIdempotencyService) {
+            return $this->driver->rotateKey($oldKey, $gracePeriodSeconds);
+        }
+
+        // Fallback: generate new key
+        return $oldKey.'_'.time();
     }
 
     /**

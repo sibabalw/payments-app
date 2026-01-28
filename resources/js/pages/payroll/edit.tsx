@@ -7,7 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DatePicker } from '@/components/ui/date-picker';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import InputError from '@/components/input-error';
+import { Plus, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function PayrollEdit({ schedule, businesses, employees, employeeTaxBreakdowns }: any) {
     // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
@@ -17,6 +21,18 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
     const initialScheduledTime = schedule.scheduled_time || '09:00';
     const parsedFrequency = schedule.parsed_frequency || 'monthly';
 
+    // Determine if all employees are selected
+    const scheduleEmployeeIds = schedule.employees?.map((e: any) => e.id) || [];
+    const totalEmployeesCount = employees?.length || 0;
+    const isAllEmployees = scheduleEmployeeIds.length === totalEmployeesCount && totalEmployeesCount > 0;
+
+    const [whoGetsThis, setWhoGetsThis] = useState<'all' | 'select'>(isAllEmployees ? 'all' : 'select');
+    const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>(scheduleEmployeeIds);
+    const [employeeSearch, setEmployeeSearch] = useState('');
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
     const { data, setData, put, processing, errors } = useForm({
         business_id: schedule.business_id,
         name: schedule.name,
@@ -24,7 +40,7 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
         scheduled_date: schedule.scheduled_date || '',
         scheduled_time: initialScheduledTime,
         frequency: parsedFrequency,
-        employee_ids: schedule.employees?.map((e: any) => e.id) || [],
+        employee_ids: scheduleEmployeeIds,
     });
 
     // Derive current date from form data (so it updates when user changes it)
@@ -34,8 +50,74 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
 
     const isReadOnly = schedule.status === 'cancelled';
 
+    // Employee search
+    useEffect(() => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        if (!employeeSearch.trim() || !data.business_id) {
+            setSearchResults([]);
+            return;
+        }
+
+        searchTimeoutRef.current = setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const params = new URLSearchParams({
+                    business_id: String(data.business_id),
+                    query: employeeSearch.trim(),
+                });
+
+                const response = await fetch(`/employees/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+
+                if (response.ok) {
+                    const results = await response.json();
+                    setSearchResults(results);
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 300);
+    }, [employeeSearch, data.business_id]);
+
+    const handleAddEmployee = (employee: any) => {
+        if (!selectedEmployeeIds.includes(employee.id)) {
+            const newIds = [...selectedEmployeeIds, employee.id];
+            setSelectedEmployeeIds(newIds);
+            setData('employee_ids', newIds);
+        }
+        setEmployeeSearch('');
+        setSearchResults([]);
+    };
+
+    const handleRemoveEmployee = (employeeId: number) => {
+        const newIds = selectedEmployeeIds.filter(id => id !== employeeId);
+        setSelectedEmployeeIds(newIds);
+        setData('employee_ids', newIds);
+    };
+
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Set employee_ids based on selection
+        if (whoGetsThis === 'all') {
+            // All employees - set employee_ids to empty array (backend will interpret as all)
+            setData('employee_ids', []);
+        } else if (whoGetsThis === 'select') {
+            // Selected employees
+            setData('employee_ids', selectedEmployeeIds);
+        }
+        
         put(`/payroll/${schedule.id}`);
     };
 
@@ -152,11 +234,13 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
                             )}
 
                             <div>
-                                <Label>Employees</Label>
+                                <Label>Who gets this payroll?</Label>
                                 {isReadOnly ? (
                                     <div className="mt-2">
                                         <div className="space-y-1">
-                                            {schedule.employees && schedule.employees.length > 0 ? (
+                                            {isAllEmployees ? (
+                                                <p className="text-sm text-muted-foreground">All employees ({totalEmployeesCount} total)</p>
+                                            ) : schedule.employees && schedule.employees.length > 0 ? (
                                                 schedule.employees.map((employee: any) => (
                                                     <div key={employee.id} className="p-2 border rounded">
                                                         <p className="text-sm font-medium">{employee.name}</p>
@@ -166,7 +250,7 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
                                                         {employeeTaxBreakdowns && employeeTaxBreakdowns[employee.id] && (
                                                             <p className="text-xs text-green-600 mt-1">
                                                                 Net: ZAR {parseFloat(employeeTaxBreakdowns[employee.id].net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                    </p>
+                                                            </p>
                                                         )}
                                                     </div>
                                                 ))
@@ -177,41 +261,130 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="space-y-2 mt-2">
-                                            {employees.length === 0 ? (
-                                                <p className="text-sm text-muted-foreground">
-                                                    No employees found for this business. <Link href="/employees/create" className="text-primary underline">Create an employee</Link> first.
-                                                </p>
-                                            ) : (
-                                                employees.map((employee: any) => (
-                                                    <label key={employee.id} className="flex items-center space-x-2 p-2 border rounded">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={data.employee_ids.includes(employee.id)}
-                                                            onChange={(e) => {
-                                                                if (e.target.checked) {
-                                                                    setData('employee_ids', [...data.employee_ids, employee.id]);
-                                                                } else {
-                                                                    setData('employee_ids', data.employee_ids.filter((id: number) => id !== employee.id));
-                                                                }
-                                                            }}
-                                                        />
-                                                        <div className="flex-1">
-                                                            <span className="font-medium">{employee.name}</span>
-                                                            <p className="text-xs text-muted-foreground">
-                                                                Gross: ZAR {parseFloat(employee.gross_salary).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                            </p>
-                                                            {employeeTaxBreakdowns && employeeTaxBreakdowns[employee.id] && (
-                                                                <p className="text-xs text-green-600 mt-1">
-                                                                    Net: ZAR {parseFloat(employeeTaxBreakdowns[employee.id].net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </label>
-                                                ))
-                                            )}
+                                        <div className="space-y-4 mt-2">
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox
+                                                    id="all_employees"
+                                                    checked={whoGetsThis === 'all'}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) {
+                                                            setWhoGetsThis('all');
+                                                            setSelectedEmployeeIds([]);
+                                                            setData('employee_ids', []);
+                                                        }
+                                                    }}
+                                                />
+                                                <Label htmlFor="all_employees" className="cursor-pointer font-normal">
+                                                    All Employees
+                                                </Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox
+                                                    id="select_employees"
+                                                    checked={whoGetsThis === 'select'}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) {
+                                                            setWhoGetsThis('select');
+                                                        }
+                                                    }}
+                                                />
+                                                <Label htmlFor="select_employees" className="cursor-pointer font-normal">
+                                                    Select Employees
+                                                </Label>
+                                            </div>
+                                            <InputError message={errors.employee_ids} />
                                         </div>
-                                        <InputError message={errors.employee_ids} />
+
+                                        {whoGetsThis === 'select' && (
+                                            <div className="space-y-2 mt-4">
+                                                <Label>Select Employees</Label>
+                                                {employees.length === 0 ? (
+                                                    <p className="text-sm text-muted-foreground">
+                                                        No employees found for this business. <Link href="/employees/create" className="text-primary underline">Create an employee</Link> first.
+                                                    </p>
+                                                ) : (
+                                                    <>
+                                                        <Popover>
+                                                            <PopoverTrigger asChild>
+                                                                <Button type="button" variant="outline" className="w-full justify-start">
+                                                                    <Plus className="mr-2 h-4 w-4" />
+                                                                    {isSearching ? 'Searching...' : 'Search and add employees'}
+                                                                </Button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-80 p-0" align="start">
+                                                                <div className="p-2">
+                                                                    <Input
+                                                                        placeholder="Search employees..."
+                                                                        value={employeeSearch}
+                                                                        onChange={(e) => setEmployeeSearch(e.target.value)}
+                                                                    />
+                                                                </div>
+                                                                <div className="max-h-60 overflow-auto">
+                                                                    {searchResults.length > 0 ? (
+                                                                        <div className="p-2 space-y-1">
+                                                                            {searchResults.map((emp: any) => (
+                                                                                <Button
+                                                                                    key={emp.id}
+                                                                                    type="button"
+                                                                                    variant="ghost"
+                                                                                    className="w-full justify-start"
+                                                                                    onClick={() => handleAddEmployee(emp)}
+                                                                                    disabled={selectedEmployeeIds.includes(emp.id)}
+                                                                                >
+                                                                                    {emp.name}
+                                                                                    {emp.email && (
+                                                                                        <span className="text-xs text-muted-foreground ml-2">
+                                                                                            ({emp.email})
+                                                                                        </span>
+                                                                                    )}
+                                                                                </Button>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : employeeSearch && !isSearching && (
+                                                                        <div className="p-4 text-center text-sm text-muted-foreground">
+                                                                            No employees found
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </PopoverContent>
+                                                        </Popover>
+
+                                                        {selectedEmployeeIds.length > 0 && (
+                                                            <div className="space-y-2 mt-2">
+                                                                {selectedEmployeeIds.map((empId) => {
+                                                                    const emp = employees?.find((e: any) => e.id === empId);
+                                                                    if (!emp) return null;
+                                                                    return (
+                                                                        <div key={empId} className="flex items-center justify-between p-2 border rounded-md">
+                                                                            <div className="flex-1">
+                                                                                <span className="font-medium">{emp.name}</span>
+                                                                                <p className="text-xs text-muted-foreground">
+                                                                                    Gross: ZAR {parseFloat(emp.gross_salary || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                                </p>
+                                                                                {employeeTaxBreakdowns && employeeTaxBreakdowns[empId] && (
+                                                                                    <p className="text-xs text-green-600 mt-1">
+                                                                                        Net: ZAR {parseFloat(employeeTaxBreakdowns[empId].net).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-6 w-6"
+                                                                                onClick={() => handleRemoveEmployee(empId)}
+                                                                            >
+                                                                                <X className="h-4 w-4" />
+                                                                            </Button>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
                                     </>
                                 )}
                             </div>

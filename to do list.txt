@@ -41,3 +41,30 @@ recheck and test adjustments, refine and master: gobal :once off and recurring, 
   now i have a question, if an employee have once off adjustment in jan but have 3 executions, but 
   this adjustment if the first execution, how will the code know that? answer the question!
 }
+
+security tests
+app tests
+Row level security implement it (for db im using postgre)
+optimize payroll and payments execution adn do it like banks 
+do it, be like an engineer, dont include tests in this plan, note system can use postgre based on config, by dfefault it's mysql
+
+optimize payroll and payments execution adn do it like banks do it, be like an engineer, dont include tests in this plan dont be too ambitious 
+focus on current system as it is not like banks but similar, also improve what can be improve be 100% honest and leave what cant be improved by 
+code alone, dont strive for perfect system just good enough design for failure, change, and recovery. Correct enough for today
+Safe under failure
+Evolvable tomorrow
+Auditable when things go wrong
+Bank-grade systems aren’t “perfect”. They’re:
+Immutable instead of fragile
+Reversible instead of brittle
+Observable instead of magical
+Boring instead of clever
+
+That’s why the best systems:
+Assume bugs will exist
+Assume people will make mistakes
+Assume reality will break assumptions
+
+in /payment page when i clickcreate payment i am take to create bonus page, fix that so that im taken to right page
+when i create payroll with all clicked it gives error empoyees must be seleted
+payroll dont execute, test again

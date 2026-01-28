@@ -7,9 +7,9 @@ interface LockServiceInterface
     /**
      * Acquire a lock.
      *
-     * @param string $key Lock key
-     * @param int $timeout Maximum seconds to wait for lock
-     * @param int $expiration Seconds until lock expires
+     * @param  string  $key  Lock key
+     * @param  int  $timeout  Maximum seconds to wait for lock
+     * @param  int  $expiration  Seconds until lock expires
      * @return bool True if lock acquired, false otherwise
      */
     public function acquire(string $key, int $timeout = 10, int $expiration = 300): bool;
@@ -17,7 +17,7 @@ interface LockServiceInterface
     /**
      * Release a lock.
      *
-     * @param string $key Lock key
+     * @param  string  $key  Lock key
      * @return bool True if lock released, false otherwise
      */
     public function release(string $key): bool;
@@ -25,12 +25,22 @@ interface LockServiceInterface
     /**
      * Execute a callback while holding a lock.
      *
-     * @param string $key Lock key
-     * @param callable $callback Callback to execute
-     * @param int $timeout Maximum seconds to wait for lock
-     * @param int $expiration Seconds until lock expires
+     * @param  string  $key  Lock key
+     * @param  callable  $callback  Callback to execute
+     * @param  int  $timeout  Maximum seconds to wait for lock
+     * @param  int  $expiration  Seconds until lock expires
      * @return mixed Result from callback
+     *
      * @throws \Exception If lock cannot be acquired
      */
     public function block(string $key, callable $callback, int $timeout = 10, int $expiration = 300);
+
+    /**
+     * Extend lock expiration (heartbeat) to prevent lock from expiring during long operations.
+     *
+     * @param  string  $key  Lock key
+     * @param  int  $expiration  Seconds until lock expires (from now)
+     * @return bool True if heartbeat successful, false otherwise
+     */
+    public function heartbeat(string $key, int $expiration = 300): bool;
 }

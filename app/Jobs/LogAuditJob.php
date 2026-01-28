@@ -39,7 +39,11 @@ class LogAuditJob implements ShouldQueue
         public ?int $modelId = null,
         public ?array $changes = null,
         public ?string $ipAddress = null,
-        public ?string $userAgent = null
+        public ?string $userAgent = null,
+        public ?string $correlationId = null,
+        public ?array $beforeValues = null,
+        public ?array $afterValues = null,
+        public ?array $metadata = null
     ) {}
 
     /**
@@ -47,15 +51,34 @@ class LogAuditJob implements ShouldQueue
      */
     public function handle(): void
     {
+        // Merge changes from before/after values if not provided
+        $changes = $this->changes;
+        if (! $changes && $this->beforeValues && $this->afterValues) {
+            $changes = [];
+            foreach ($this->afterValues as $key => $afterValue) {
+                $beforeValue = $this->beforeValues[$key] ?? null;
+                if ($beforeValue !== $afterValue) {
+                    $changes[$key] = [
+                        'before' => $beforeValue,
+                        'after' => $afterValue,
+                    ];
+                }
+            }
+        }
+
         AuditLog::create([
             'user_id' => $this->userId,
             'business_id' => $this->businessId,
             'action' => $this->action,
             'model_type' => $this->modelType,
             'model_id' => $this->modelId,
-            'changes' => $this->changes,
+            'changes' => $changes,
             'ip_address' => $this->ipAddress,
             'user_agent' => $this->userAgent,
+            'correlation_id' => $this->correlationId,
+            'before_values' => $this->beforeValues,
+            'after_values' => $this->afterValues,
+            'metadata' => $this->metadata,
         ]);
     }
 

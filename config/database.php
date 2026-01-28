@@ -3,7 +3,7 @@
 use Illuminate\Support\Str;
 
 // Helper function to build Redis connection based on provider
-if (!function_exists('buildRedisConnection')) {
+if (! function_exists('buildRedisConnection')) {
     function buildRedisConnection(string $name): array
     {
         $provider = env('REDIS_PROVIDER', 'self-hosted');
@@ -98,6 +98,18 @@ return [
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? \Pdo\Mysql::ATTR_SSL_CA : \PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
+            // Read/write connections for bank-grade performance
+            'read' => [
+                'host' => [
+                    env('DB_READ_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'write' => [
+                'host' => [
+                    env('DB_WRITE_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'sticky' => env('DB_STICKY', true),
         ],
 
         'mariadb' => [
@@ -133,6 +145,18 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Read/write connections for bank-grade performance
+            'read' => [
+                'host' => [
+                    env('DB_READ_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'write' => [
+                'host' => [
+                    env('DB_WRITE_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'sticky' => env('DB_STICKY', true),
         ],
 
         'sqlsrv' => [

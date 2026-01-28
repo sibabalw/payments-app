@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Business extends Model
 {
@@ -32,13 +33,18 @@ class Business extends Model
         'country',
         'description',
         'contact_person_name',
-        'escrow_balance',
+        'escrow_balance', // CACHED PROJECTION: Ledger is source of truth. This is for performance only.
+        'is_frozen', // Account frozen due to reconciliation discrepancy
+        'hold_amount', // Amount on hold for pending transactions
         'bank_account_details',
+        'version',
     ];
 
     protected $casts = [
         'status_changed_at' => 'datetime',
         'escrow_balance' => 'decimal:2',
+        'is_frozen' => 'boolean',
+        'hold_amount' => 'decimal:2',
         'bank_account_details' => 'array',
     ];
 
@@ -187,5 +193,51 @@ class Business extends Model
     public function hasBankAccountDetails(): bool
     {
         return ! empty($this->bank_account_details) && is_array($this->bank_account_details);
+    }
+
+    /**
+     * Increment escrow balance with optimistic locking
+     */
+    public function incrementEscrowBalance(float $amount): bool
+    {
+        $currentVersion = $this->version ?? 1;
+        $updated = $this->newQueryWithoutScopes()
+            ->where('id', $this->id)
+            ->where('version', $currentVersion)
+            ->update([
+                'escrow_balance' => DB::raw("escrow_balance + {$amount}"),
+                'version' => $currentVersion + 1,
+            ]);
+
+        if ($updated > 0) {
+            $this->refresh();
+
+            return true;
+        }
+
+        throw new \RuntimeException('Optimistic locking failed: escrow balance was modified by another process.');
+    }
+
+    /**
+     * Decrement escrow balance with optimistic locking
+     */
+    public function decrementEscrowBalance(float $amount): bool
+    {
+        $currentVersion = $this->version ?? 1;
+        $updated = $this->newQueryWithoutScopes()
+            ->where('id', $this->id)
+            ->where('version', $currentVersion)
+            ->update([
+                'escrow_balance' => DB::raw("escrow_balance - {$amount}"),
+                'version' => $currentVersion + 1,
+            ]);
+
+        if ($updated > 0) {
+            $this->refresh();
+
+            return true;
+        }
+
+        throw new \RuntimeException('Optimistic locking failed: escrow balance was modified by another process.');
     }
 }
