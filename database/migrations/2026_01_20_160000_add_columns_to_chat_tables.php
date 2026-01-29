@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -35,15 +36,31 @@ return new class extends Migration
             Schema::table('chat_conversations', function (Blueprint $table) {
                 $table->unsignedBigInteger('business_id')->nullable()->after('user_id');
             });
-            // Set default values for existing rows
-            \DB::statement('UPDATE chat_conversations cc 
-                INNER JOIN users u ON cc.user_id = u.id 
-                SET cc.business_id = COALESCE(
-                    (SELECT id FROM businesses WHERE user_id = u.id LIMIT 1),
-                    (SELECT id FROM businesses LIMIT 1),
-                    u.current_business_id
-                )
-                WHERE cc.business_id IS NULL');
+            // Set default values for existing rows (driver-specific: PostgreSQL uses UPDATE...FROM, MySQL uses UPDATE...JOIN)
+            $driver = DB::connection()->getDriverName();
+            if ($driver === 'pgsql') {
+                DB::statement('
+                    UPDATE chat_conversations cc
+                    SET business_id = COALESCE(
+                        (SELECT id FROM businesses WHERE user_id = u.id LIMIT 1),
+                        (SELECT id FROM businesses LIMIT 1),
+                        u.current_business_id
+                    )
+                    FROM users u
+                    WHERE cc.user_id = u.id AND cc.business_id IS NULL
+                ');
+            } else {
+                DB::statement('
+                    UPDATE chat_conversations cc
+                    INNER JOIN users u ON cc.user_id = u.id
+                    SET cc.business_id = COALESCE(
+                        (SELECT id FROM businesses WHERE user_id = u.id LIMIT 1),
+                        (SELECT id FROM businesses LIMIT 1),
+                        u.current_business_id
+                    )
+                    WHERE cc.business_id IS NULL
+                ');
+            }
             // Delete rows that still have NULL business_id (orphaned rows)
             \DB::table('chat_conversations')->whereNull('business_id')->delete();
             // Now add foreign key constraint

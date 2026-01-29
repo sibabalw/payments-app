@@ -20,12 +20,17 @@ return new class extends Migration
         });
 
         // Backfill period dates for any existing null values (use created_at date as fallback)
+        $driver = DB::connection()->getDriverName();
+        $dateExpr = $driver === 'pgsql'
+            ? DB::raw('(created_at)::date')
+            : DB::raw('DATE(created_at)');
+
         DB::table('payroll_jobs')
             ->whereNull('pay_period_start')
             ->orWhereNull('pay_period_end')
             ->update([
-                'pay_period_start' => DB::raw('DATE(created_at)'),
-                'pay_period_end' => DB::raw('DATE(created_at)'),
+                'pay_period_start' => $dateExpr,
+                'pay_period_end' => $dateExpr,
             ]);
 
         Schema::table('payroll_jobs', function (Blueprint $table) {

@@ -1,10 +1,11 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
-import { Plus, Play, Pause, X, Edit, Calendar, DollarSign, Users } from 'lucide-react';
+import { Plus, Play, Pause, X, Edit, Calendar, DollarSign, Users, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { cronToHumanReadable } from '@/lib/cronUtils';
 
@@ -15,6 +16,9 @@ const breadcrumbs: BreadcrumbItem[] = [
 export default function PaymentSchedulesIndex({ schedules, filters }: any) {
     const [statusFilter, setStatusFilter] = useState(filters?.status || 'all');
     const [businessId, setBusinessId] = useState(filters?.business_id || '');
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [scheduleToDelete, setScheduleToDelete] = useState<number | null>(null);
+    const [scheduleToDeleteName, setScheduleToDeleteName] = useState<string>('');
 
     const handleStatusChange = (value: string) => {
         setStatusFilter(value);
@@ -47,6 +51,25 @@ export default function PaymentSchedulesIndex({ schedules, filters }: any) {
                 preserveScroll: true,
                 onSuccess: () => {
                     // Page will refresh automatically
+                },
+            });
+        }
+    };
+
+    const handleDelete = (scheduleId: number, name: string) => {
+        setScheduleToDelete(scheduleId);
+        setScheduleToDeleteName(name);
+        setDeleteConfirmOpen(true);
+    };
+
+    const confirmDelete = () => {
+        if (scheduleToDelete) {
+            router.delete(`/payments/${scheduleToDelete}`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setDeleteConfirmOpen(false);
+                    setScheduleToDelete(null);
+                    setScheduleToDeleteName('');
                 },
             });
         }
@@ -144,6 +167,15 @@ export default function PaymentSchedulesIndex({ schedules, filters }: any) {
                                                     Edit
                                                 </Button>
                                             </Link>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => handleDelete(schedule.id, schedule.name)}
+                                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+                                            >
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Delete
+                                            </Button>
                                             {schedule.status === 'active' && (
                                                 <Button
                                                     variant="outline"
@@ -219,6 +251,16 @@ export default function PaymentSchedulesIndex({ schedules, filters }: any) {
                         ))}
                     </div>
                 )}
+
+                <ConfirmationDialog
+                    open={deleteConfirmOpen}
+                    onOpenChange={setDeleteConfirmOpen}
+                    onConfirm={confirmDelete}
+                    title="Permanently Delete Payment Schedule"
+                    description={`Are you sure you want to permanently delete "${scheduleToDeleteName}"? This action cannot be undone and will permanently remove the schedule and all associated data.`}
+                    confirmText="Delete Permanently"
+                    variant="destructive"
+                />
             </div>
         </AppLayout>
     );

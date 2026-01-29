@@ -114,6 +114,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'payment_schedule_created' => true,
             'payment_schedule_cancelled' => true,
             'escrow_balance_low' => true,
+            'escrow_deposit_confirmed' => true,
         ];
 
         $preferences = $this->email_preferences ?? [];

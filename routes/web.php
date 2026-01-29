@@ -73,6 +73,13 @@ Route::prefix('admin')->name('admin.')->group(function () {
         ->name('otp.resend');
 });
 
+// Broadcasting authentication
+Route::middleware(['auth'])->group(function () {
+    Route::post('/broadcasting/auth', function () {
+        return \Illuminate\Support\Facades\Broadcast::auth(request());
+    });
+});
+
 Route::middleware(['auth', 'verified'])->group(function () {
     // Admin routes (protected by admin middleware) - must be first to take precedence
     Route::prefix('admin')->name('admin.')->middleware('admin')->group(function () {
@@ -105,6 +112,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Error Logs
         Route::get('/error-logs', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'index'])->name('error-logs.index');
         Route::get('/error-logs/{errorLog}', [\App\Http\Controllers\Admin\ErrorLogsController::class, 'show'])->name('error-logs.show');
+
+        // Ticket Management
+        Route::get('/tickets/poll', [\App\Http\Controllers\TicketPollingController::class, 'poll'])->name('tickets.poll');
+        Route::get('/tickets', [\App\Http\Controllers\Admin\AdminTicketController::class, 'index'])->name('tickets.index');
+        Route::get('/tickets/{ticket}', [\App\Http\Controllers\Admin\AdminTicketController::class, 'show'])
+            ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
+            ->name('tickets.show');
+        Route::post('/tickets/{ticket}/reply', [\App\Http\Controllers\Admin\AdminTicketController::class, 'reply'])
+            ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
+            ->name('tickets.reply');
+        Route::patch('/tickets/{ticket}/status', [\App\Http\Controllers\Admin\AdminTicketController::class, 'updateStatus'])
+            ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
+            ->name('tickets.status');
+        Route::patch('/tickets/{ticket}/assign', [\App\Http\Controllers\Admin\AdminTicketController::class, 'assign'])
+            ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
+            ->name('tickets.assign');
 
         // Admin Settings (system/application config)
         Route::get('/settings', [\App\Http\Controllers\Admin\SettingsController::class, 'index'])->name('settings.index');
@@ -214,6 +237,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Benefits routes (company-wide recurring adjustments)
         Route::resource('benefits', \App\Http\Controllers\BenefitsController::class)->except(['show']);
+        Route::get('benefits/{benefit}/temporarily-change', [\App\Http\Controllers\BenefitsController::class, 'showTemporarilyChange'])->name('benefits.temporarily-change.show');
         Route::post('benefits/{benefit}/temporarily-change', [\App\Http\Controllers\BenefitsController::class, 'temporarilyChange'])->name('benefits.temporarily-change');
 
         // Payroll Bonuses/Adjustments routes (one-off payments for employees)
@@ -285,6 +309,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Audit log routes
         Route::get('audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index'])->name('audit-logs.index');
         Route::get('audit-logs/{auditLog}', [\App\Http\Controllers\AuditLogController::class, 'show'])->name('audit-logs.show');
+
+        // Ticket routes
+        Route::get('tickets/poll', [\App\Http\Controllers\TicketPollingController::class, 'poll'])->name('tickets.poll');
+        Route::resource('tickets', \App\Http\Controllers\TicketController::class)->except(['edit', 'update', 'destroy'])
+            ->parameters(['tickets' => 'ticket:id']); // Use id for route model binding
+        Route::post('tickets/{ticket}/reply', [\App\Http\Controllers\TicketController::class, 'reply'])
+            ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
+            ->name('tickets.reply');
 
         // Template routes
         Route::prefix('templates')->name('templates.')->group(function () {

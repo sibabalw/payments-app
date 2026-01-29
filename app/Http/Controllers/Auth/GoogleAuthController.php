@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Laravel\Socialite\Facades\Socialite;
 
 class GoogleAuthController extends Controller
@@ -41,18 +42,21 @@ class GoogleAuthController extends Controller
                     'email_verified_at' => $user->email_verified_at ?? now(), // Verify if not already verified
                 ]);
             } else {
-                // Create new user
+                // Create new user in transaction
                 $isNewUser = true;
-                $user = User::create([
-                    'name' => $googleUser->getName(),
-                    'email' => $googleUser->getEmail(),
-                    'google_id' => $googleUser->getId(),
-                    'avatar' => $googleUser->getAvatar(),
-                    'email_verified_at' => now(),
-                    'password' => bcrypt(str()->random(32)), // Random password since OAuth
-                ]);
+                $user = DB::transaction(function () use ($googleUser) {
+                    return User::create([
+                        'name' => $googleUser->getName(),
+                        'email' => $googleUser->getEmail(),
+                        'google_id' => $googleUser->getId(),
+                        'avatar' => $googleUser->getAvatar(),
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(str()->random(32)), // Random password since OAuth
+                    ]);
+                });
 
-                // Send welcome email for new users
+                // Queue welcome email after transaction commits
+                // User is already committed, so queue directly
                 $emailService = app(EmailService::class);
                 $emailService->send($user, new WelcomeEmail($user), 'welcome');
             }

@@ -14,6 +14,28 @@ use Inertia\Response;
 
 class SecurityController extends Controller
 {
+    /**
+     * Get database-agnostic date format expression.
+     */
+    private function dateFormat(string $column, string $format = '%Y-%m-%d'): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            // PostgreSQL: to_char(column, 'YYYY-MM-DD')
+            $pgFormat = match ($format) {
+                '%Y-%m-%d' => 'YYYY-MM-DD',
+                '%Y-%m' => 'YYYY-MM',
+                default => 'YYYY-MM-DD',
+            };
+
+            return "to_char({$column}, '{$pgFormat}')";
+        } else {
+            // MySQL/MariaDB: DATE_FORMAT(column, '%Y-%m-%d')
+            return "DATE_FORMAT({$column}, '{$format}')";
+        }
+    }
+
     public function __construct(
         protected AuditService $auditService
     ) {}
@@ -46,6 +68,7 @@ class SecurityController extends Controller
             ]);
 
         // Security events (last 7 days)
+        $dateExpr = $this->dateFormat('created_at');
         $securityEvents = AuditLog::query()
             ->whereIn('action', [
                 'login.failed',
@@ -59,9 +82,9 @@ class SecurityController extends Controller
             ->select(
                 'action',
                 DB::raw('COUNT(*) as count'),
-                DB::raw("DATE_FORMAT(created_at, '%Y-%m-%d') as date")
+                DB::raw("{$dateExpr} as date")
             )
-            ->groupBy('action', 'date')
+            ->groupBy('action', DB::raw($dateExpr))
             ->orderByDesc('date')
             ->get()
             ->groupBy('action')

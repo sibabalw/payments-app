@@ -14,6 +14,14 @@ use Inertia\Response;
 
 class SubscriptionController extends Controller
 {
+    /**
+     * Get database-agnostic quote character for string literals.
+     */
+    private function getQuote(): string
+    {
+        return DB::connection()->getDriverName() === 'pgsql' ? "'" : '"';
+    }
+
     public function __construct(
         protected AuditService $auditService
     ) {}
@@ -31,24 +39,26 @@ class SubscriptionController extends Controller
             ->paginate(50);
 
         // Subscription statistics
+        $quote = $this->getQuote();
         $stats = MonthlyBilling::query()
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status = "paid" THEN 1 ELSE 0 END) as paid,
-                SUM(CASE WHEN status = "waived" THEN 1 ELSE 0 END) as waived,
-                SUM(CASE WHEN status = "paid" THEN subscription_fee ELSE 0 END) as total_revenue,
+                SUM(CASE WHEN status = {$quote}pending{$quote} THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status = {$quote}paid{$quote} THEN 1 ELSE 0 END) as paid,
+                SUM(CASE WHEN status = {$quote}waived{$quote} THEN 1 ELSE 0 END) as waived,
+                SUM(CASE WHEN status = {$quote}paid{$quote} THEN subscription_fee ELSE 0 END) as total_revenue,
                 SUM(subscription_fee) as total_billed
-            ')
+            ")
             ->first();
 
         // Monthly revenue trends (last 6 months)
+        $quote = $this->getQuote();
         $revenueTrends = MonthlyBilling::query()
             ->where('billing_month', '>=', now()->subMonths(6)->format('Y-m'))
             ->select(
                 'billing_month',
                 DB::raw('COUNT(*) as count'),
-                DB::raw('SUM(CASE WHEN status = "paid" THEN subscription_fee ELSE 0 END) as revenue'),
+                DB::raw("SUM(CASE WHEN status = {$quote}paid{$quote} THEN subscription_fee ELSE 0 END) as revenue"),
                 DB::raw('SUM(subscription_fee) as total_billed')
             )
             ->groupBy('billing_month')

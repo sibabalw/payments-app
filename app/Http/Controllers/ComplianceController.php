@@ -511,7 +511,9 @@ class ComplianceController extends Controller
         $this->authorizeSubmission($submission);
 
         $pdf = $this->irp5Service->generateIRP5Pdf($submission->data);
-        $filename = "irp5_{$submission->period}_{$submission->employee_id}.pdf";
+        // Sanitize period to remove invalid filename characters (/, \)
+        $sanitizedPeriod = str_replace(['/', '\\'], '-', $submission->period);
+        $filename = "irp5_{$sanitizedPeriod}_{$submission->employee_id}.pdf";
 
         return $pdf->download($filename);
     }

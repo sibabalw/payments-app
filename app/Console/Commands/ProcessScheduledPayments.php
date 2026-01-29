@@ -3,11 +3,16 @@
 namespace App\Console\Commands;
 
 use App\Jobs\BatchProcessPaymentJob;
-use App\Jobs\ProcessPaymentJob;
+use App\Models\Business;
+use App\Models\PaymentJob;
 use App\Models\PaymentSchedule;
 use App\Services\BatchProcessingService;
+use App\Services\ErrorClassificationService;
+use App\Services\EscrowService;
+use App\Services\LockService;
 use App\Services\SettlementService;
 use App\Services\SouthAfricaHolidayService;
+use App\Traits\RetriesTransactions;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +20,8 @@ use Illuminate\Support\Facades\Log;
 
 class ProcessScheduledPayments extends Command
 {
+    use RetriesTransactions;
+
     /**
      * The name and signature of the console command.
      *
@@ -32,7 +39,9 @@ class ProcessScheduledPayments extends Command
     public function __construct(
         protected SouthAfricaHolidayService $holidayService,
         protected BatchProcessingService $batchProcessingService,
-        protected SettlementService $settlementService
+        protected SettlementService $settlementService,
+        protected LockService $lockService,
+        protected EscrowService $escrowService
     ) {
         parent::__construct();
     }
@@ -46,7 +55,7 @@ class ProcessScheduledPayments extends Command
         // Optimized query - only select needed columns
         $dueSchedules = PaymentSchedule::due()
             ->ofType('generic')
-            ->select(['id', 'business_id', 'amount', 'currency', 'frequency', 'next_run_at', 'last_run_at', 'status'])
+            ->select(['id', 'business_id', 'amount', 'currency', 'frequency', 'next_run_at', 'last_run_at', 'status', 'schedule_type'])
             ->with([
                 'recipients:id,payment_schedule_id,name,email',
                 'business:id,status,escrow_balance',
@@ -62,168 +71,441 @@ class ProcessScheduledPayments extends Command
         $this->info("Found {$dueSchedules->count()} due payment schedule(s).");
 
         $totalJobs = 0;
-        // Adaptive batch sizing based on system load, memory, and queue depth
+        $processedSchedules = 0;
         $batchSize = $this->calculateAdaptiveBatchSize();
 
-        // Process schedules in batches
-        $dueSchedules->chunk(50)->each(function ($scheduleBatch) use (&$totalJobs, $batchSize) {
-            $jobsToCreate = [];
+        foreach ($dueSchedules as $schedule) {
+            $business = $schedule->business;
+            if ($business && $business->status !== 'active') {
+                $this->warn("Schedule #{$schedule->id} belongs to a {$business->status} business. Skipping.");
 
-            foreach ($scheduleBatch as $schedule) {
-                // Skip if business is banned or suspended - check status directly for efficiency
-                // Business is already eager loaded, so direct status check is faster than method call
-                $business = $schedule->business;
-                if ($business && $business->status !== 'active') {
-                    $this->warn("Schedule #{$schedule->id} belongs to a {$business->status} business. Skipping.");
+                continue;
+            }
+            if ($schedule->recipients->isEmpty()) {
+                $this->warn("Schedule #{$schedule->id} has no recipients assigned. Skipping.");
 
-                    continue;
-                }
-
-                $recipients = $schedule->recipients;
-
-                if ($recipients->isEmpty()) {
-                    $this->warn("Schedule #{$schedule->id} has no recipients assigned. Skipping.");
-
-                    continue;
-                }
-
-                // Prepare payment jobs for batch insert
-                foreach ($recipients as $recipient) {
-                    $jobsToCreate[] = [
-                        'payment_schedule_id' => $schedule->id,
-                        'recipient_id' => $recipient->id,
-                        'amount' => $schedule->amount,
-                        'currency' => $schedule->currency,
-                        'status' => 'pending',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                }
+                continue;
             }
 
-            // Bulk insert payment jobs
-            if (! empty($jobsToCreate)) {
+            $lockKey = "payment_schedule_{$schedule->id}_execution";
+            $lockTTL = (int) config('payroll.schedule_lock_ttl', 600);
+            $heartbeatInterval = (int) config('payroll.schedule_lock_heartbeat_interval', 300);
+            $lockAcquired = $this->lockService->acquire($lockKey, 10, $lockTTL);
+
+            if (! $lockAcquired) {
+                $this->warn("Schedule #{$schedule->id} is already being processed by another instance. Skipping.");
+                Log::info('Payment schedule execution skipped - lock already held', ['schedule_id' => $schedule->id]);
+
+                continue;
+            }
+
+            try {
+                $heartbeatTimer = $this->startLockHeartbeat($lockKey, $lockTTL, $heartbeatInterval);
                 try {
-                    // Larger chunks (200) for better performance while staying within query limits
-                    $chunks = array_chunk($jobsToCreate, max($batchSize, 200));
-
-                    foreach ($chunks as $chunk) {
-                        try {
-                            \DB::table('payment_jobs')->insert($chunk);
-                        } catch (\Illuminate\Database\QueryException $e) {
-                            // Handle unique constraint violations - insert individually for this chunk
-                            if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
-                                foreach ($chunk as $jobData) {
-                                    try {
-                                        $schedule = PaymentSchedule::find($jobData['payment_schedule_id']);
-                                        if ($schedule) {
-                                            $schedule->paymentJobs()->create($jobData);
-                                        }
-                                    } catch (\Exception $e2) {
-                                        // Skip duplicates
-                                        Log::debug('Payment job already exists', [
-                                            'recipient_id' => $jobData['recipient_id'],
-                                            'schedule_id' => $jobData['payment_schedule_id'],
-                                        ]);
-                                    }
-                                }
-                            } else {
-                                throw $e;
-                            }
-                        }
+                    $scheduleJobs = $this->processSchedule($schedule, $batchSize);
+                    $totalJobs += $scheduleJobs;
+                    $processedSchedules++;
+                } finally {
+                    if ($heartbeatTimer) {
+                        $heartbeatTimer->stop();
                     }
+                }
+            } finally {
+                $this->lockService->release($lockKey);
+            }
+        }
 
-                    // Reload created jobs and assign to settlement windows
-                    // Optimize query to use composite indexes effectively
-                    $scheduleIds = array_unique(array_column($jobsToCreate, 'payment_schedule_id'));
-                    $recipientIds = array_unique(array_column($jobsToCreate, 'recipient_id'));
+        $this->info("Dispatched {$totalJobs} payment job(s) from {$processedSchedules} schedule(s).");
 
-                    $createdJobs = \App\Models\PaymentJob::whereIn('payment_schedule_id', $scheduleIds)
-                        ->where('status', 'pending')
-                        ->whereIn('recipient_id', $recipientIds)
-                        ->whereDate('created_at', today())
-                        ->select(['id', 'payment_schedule_id', 'recipient_id', 'status', 'created_at'])
-                        ->get();
+        return Command::SUCCESS;
+    }
 
-                    // Batch assign jobs to settlement windows (optimized for performance)
-                    if ($createdJobs->isNotEmpty()) {
-                        try {
-                            $jobIds = $createdJobs->pluck('id')->toArray();
-                            $this->settlementService->assignPaymentJobsBulk($jobIds, 'hourly');
-                        } catch (\Exception $e) {
-                            Log::warning('Failed to batch assign payment jobs to settlement window', [
-                                'job_count' => $createdJobs->count(),
-                                'error' => $e->getMessage(),
-                            ]);
-                        }
-                    }
+    /**
+     * Process a single payment schedule with atomic claim (lock row, claim run, then create jobs).
+     *
+     * @return int Number of jobs created and dispatched
+     */
+    protected function processSchedule(PaymentSchedule $schedule, int $batchSize): int
+    {
+        $maxRetries = (int) config('payroll.transaction_max_retries', 3);
 
-                    // Dispatch batch jobs instead of individual jobs (bank-grade performance)
-                    $createdJobs->chunk($batchSize)->each(function ($jobBatch) use (&$totalJobs) {
-                        $jobIds = $jobBatch->pluck('id')->toArray();
+        return $this->retryTransaction(function () use ($schedule, $batchSize) {
+            $lockedSchedule = PaymentSchedule::where('id', $schedule->id)
+                ->with('recipients:id,payment_schedule_id,name,email')
+                ->lockForUpdate()
+                ->first();
 
-                        try {
-                            // Dispatch batch job on normal priority queue
-                            BatchProcessPaymentJob::dispatch($jobIds)->onQueue('normal');
-                            $totalJobs += count($jobIds);
+            if (! $lockedSchedule) {
+                Log::warning('Payment schedule not found', ['schedule_id' => $schedule->id]);
 
-                            Log::info('Batch payment job dispatched to queue', [
-                                'job_count' => count($jobIds),
-                                'job_ids' => $jobIds,
-                            ]);
-                        } catch (\Exception $e) {
-                            Log::error('Failed to dispatch batch payment job to queue', [
-                                'job_count' => count($jobIds),
-                                'error' => $e->getMessage(),
-                            ]);
+                return 0;
+            }
 
-                            // Fallback: dispatch individual jobs
-                            // foreach ($jobBatch as $paymentJob) {
-                            //     try {
-                            //         ProcessPaymentJob::dispatch($paymentJob)->onQueue('normal');
-                            //         $totalJobs++;
-                            //     } catch (\Exception $e2) {
-                            //         Log::error('Failed to dispatch payment job to queue', [
-                            //             'payment_job_id' => $paymentJob->id,
-                            //             'error' => $e2->getMessage(),
-                            //         ]);
-                            //     }
-                            // }
-                        }
-                    });
-                } catch (\Exception $e) {
-                    Log::error('Batch payment job creation failed', [
-                        'error' => $e->getMessage(),
+            $updated = 0;
+            if ($lockedSchedule->isOneTime()) {
+                $updated = PaymentSchedule::where('id', $schedule->id)
+                    ->whereNull('last_run_at')
+                    ->update([
+                        'last_run_at' => now(),
+                        'next_run_at' => null,
+                        'status' => 'cancelled',
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                $nextRun = $this->computeNextRunAt($lockedSchedule);
+                $updated = PaymentSchedule::where('id', $schedule->id)
+                    ->where(function ($query) {
+                        $query->whereNull('last_run_at')
+                            ->orWhereColumn('last_run_at', '<', 'next_run_at');
+                    })
+                    ->update([
+                        'last_run_at' => now(),
+                        'next_run_at' => $nextRun,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            if ($updated === 0) {
+                Log::info('Payment schedule already processed by another process', ['schedule_id' => $schedule->id]);
+
+                return 0;
+            }
+
+            // Check escrow balance before creating jobs
+            // Lock business row to prevent concurrent balance checks
+            $business = Business::where('id', $lockedSchedule->business_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $business) {
+                Log::warning('Business not found for payment schedule', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $lockedSchedule->business_id,
+                ]);
+
+                return 0;
+            }
+
+            // CRITICAL CHECK #1: escrow_balance must be NOT NULL
+            // This prevents creating jobs when balance is NULL (should be prevented by database constraint, but check here too)
+            if ($business->escrow_balance === null) {
+                Log::warning('Payment schedule skipped - escrow balance is NULL', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => null,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is NULL. This is a critical error - active businesses must have a non-NULL escrow balance.");
+
+                return 0;
+            }
+
+            // Get available balance with locked row (no refresh needed since we just locked it)
+            $escrowBalance = $this->escrowService->getAvailableBalance($business, false, false);
+            $recipientCount = $lockedSchedule->recipients->count();
+            $totalAmountRequired = $lockedSchedule->amount * $recipientCount;
+
+            // CRITICAL CHECK #2: escrow balance must be greater than zero (explicit zero check)
+            // This prevents creating jobs when balance is exactly zero
+            if ($escrowBalance === 0) {
+                Log::warning('Payment schedule skipped - escrow balance is exactly zero', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                    'total_amount_required' => $totalAmountRequired,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is zero");
+
+                return 0;
+            }
+
+            // CRITICAL CHECK #3: escrow balance must not be negative
+            if ($escrowBalance < 0) {
+                Log::warning('Payment schedule skipped - escrow balance is negative', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                    'total_amount_required' => $totalAmountRequired,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is negative (balance: {$escrowBalance})");
+
+                return 0;
+            }
+
+            // CRITICAL CHECK #4: available balance must be sufficient for total amount required
+            if ($escrowBalance < $totalAmountRequired) {
+                Log::warning('Payment schedule skipped - insufficient escrow balance', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                    'required_amount' => $totalAmountRequired,
+                    'shortfall' => $totalAmountRequired - $escrowBalance,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - insufficient escrow balance. Available: ".number_format($escrowBalance, 2).', Required: '.number_format($totalAmountRequired, 2));
+
+                return 0;
+            }
+
+            // Generate schedule run ID for audit trail (all jobs from this run share the same ID)
+            $scheduleRunId = \Illuminate\Support\Str::uuid()->toString();
+
+            $jobsToCreate = [];
+            foreach ($lockedSchedule->recipients as $recipient) {
+                $jobsToCreate[] = [
+                    'payment_schedule_id' => $lockedSchedule->id,
+                    'schedule_run_id' => $scheduleRunId,
+                    'recipient_id' => $recipient->id,
+                    'amount' => $lockedSchedule->amount,
+                    'currency' => $lockedSchedule->currency,
+                    'status' => 'pending',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+
+            // CRITICAL: Calculate total amount for entire batch before any inserts
+            // This prevents creating jobs when total batch exceeds balance
+            $totalBatchAmount = array_sum(array_column($jobsToCreate, 'amount'));
+
+            // Explicit check: total batch amount must not exceed available balance
+            if ($escrowBalance < $totalBatchAmount) {
+                Log::warning('Payment schedule skipped - total batch amount exceeds available balance', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                    'total_batch_amount' => $totalBatchAmount,
+                    'shortfall' => $totalBatchAmount - $escrowBalance,
+                    'job_count' => count($jobsToCreate),
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - total batch amount exceeds available balance. Available: ".number_format($escrowBalance, 2).', Total batch: '.number_format($totalBatchAmount, 2));
+
+                return 0;
+            }
+
+            $chunkSize = max($batchSize, 200);
+            $chunks = array_chunk($jobsToCreate, $chunkSize);
+            $createdCount = 0;
+
+            foreach ($chunks as $chunk) {
+                // CRITICAL: Re-check balance before each chunk insert with locked business row
+                // This prevents race conditions where balance might have changed between initial check and insert
+                $business->refresh();
+                $chunkTotalAmount = array_sum(array_column($chunk, 'amount'));
+
+                // CRITICAL CHECK: escrow_balance must be NOT NULL (re-check after refresh)
+                if ($business->escrow_balance === null) {
+                    Log::warning('Payment job chunk skipped - escrow balance is NULL after refresh', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => null,
+                        'chunk_total_amount' => $chunkTotalAmount,
+                        'chunk_size' => count($chunk),
                     ]);
 
-                    // Fallback to individual processing
-                    foreach ($jobsToCreate as $jobData) {
-                        try {
-                            $schedule = PaymentSchedule::find($jobData['payment_schedule_id']);
-                            if ($schedule) {
-                                $paymentJob = $schedule->paymentJobs()->create($jobData);
-                                ProcessPaymentJob::dispatch($paymentJob);
-                                $totalJobs++;
+                    $this->warn('Skipping chunk of '.count($chunk).' payment jobs - escrow balance is NULL');
+
+                    continue;
+                }
+
+                $currentBalance = $this->escrowService->getAvailableBalance($business, false, false);
+
+                // CRITICAL CHECK: escrow balance must be greater than zero (explicit zero check)
+                if ($currentBalance === 0) {
+                    Log::warning('Payment job chunk skipped - escrow balance is exactly zero', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'chunk_total_amount' => $chunkTotalAmount,
+                        'chunk_size' => count($chunk),
+                    ]);
+
+                    $this->warn('Skipping chunk of '.count($chunk).' payment jobs - escrow balance is zero');
+
+                    continue;
+                }
+
+                if ($currentBalance < 0) {
+                    Log::warning('Payment job chunk skipped - escrow balance is negative', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'chunk_total_amount' => $chunkTotalAmount,
+                        'chunk_size' => count($chunk),
+                    ]);
+
+                    $this->warn('Skipping chunk of '.count($chunk)." payment jobs - escrow balance is negative (balance: {$currentBalance})");
+
+                    continue;
+                }
+
+                // Explicit check: available balance must be sufficient for chunk total
+                if ($currentBalance < $chunkTotalAmount) {
+                    Log::warning('Payment job chunk skipped - insufficient escrow balance', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'chunk_total_amount' => $chunkTotalAmount,
+                        'shortfall' => $chunkTotalAmount - $currentBalance,
+                        'chunk_size' => count($chunk),
+                    ]);
+
+                    $this->warn('Skipping chunk of '.count($chunk).' payment jobs - insufficient escrow balance. Available: '.number_format($currentBalance, 2).', Required: '.number_format($chunkTotalAmount, 2));
+
+                    continue;
+                }
+
+                try {
+                    DB::table('payment_jobs')->insert($chunk);
+                    $createdCount += count($chunk);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if (app(ErrorClassificationService::class)->isUniqueConstraintViolation($e)) {
+                        foreach ($chunk as $jobData) {
+                            try {
+                                // Re-check balance before individual insert in retry path
+                                $business->refresh();
+                                $individualBalance = $this->escrowService->getAvailableBalance($business, false, false);
+                                if ($individualBalance === 0 || $individualBalance < 0 || $individualBalance < $jobData['amount']) {
+                                    Log::warning('Payment job skipped in retry - insufficient balance', [
+                                        'recipient_id' => $jobData['recipient_id'],
+                                        'schedule_id' => $jobData['payment_schedule_id'],
+                                        'balance' => $individualBalance,
+                                        'required' => $jobData['amount'],
+                                    ]);
+
+                                    continue;
+                                }
+
+                                PaymentSchedule::find($jobData['payment_schedule_id'])
+                                    ?->paymentJobs()->create($jobData);
+                                $createdCount++;
+                            } catch (\Exception $e2) {
+                                Log::debug('Payment job already exists', [
+                                    'recipient_id' => $jobData['recipient_id'],
+                                    'schedule_id' => $jobData['payment_schedule_id'],
+                                ]);
                             }
-                        } catch (\Exception $e2) {
-                            Log::warning('Failed to create/dispatch payment job', [
-                                'recipient_id' => $jobData['recipient_id'],
-                                'error' => $e2->getMessage(),
-                            ]);
                         }
+                    } else {
+                        throw $e;
                     }
                 }
             }
 
-            // Update schedules after processing
-            foreach ($scheduleBatch as $schedule) {
-                $this->updateScheduleAfterProcessing($schedule);
+            if ($createdCount === 0) {
+                return 0;
+            }
+
+            $recipientIds = array_column($jobsToCreate, 'recipient_id');
+            $createdJobs = PaymentJob::where('payment_schedule_id', $lockedSchedule->id)
+                ->where('status', 'pending')
+                ->whereIn('recipient_id', $recipientIds)
+                ->whereDate('created_at', today())
+                ->select(['id', 'payment_schedule_id', 'recipient_id', 'status', 'created_at'])
+                ->get();
+
+            if ($createdJobs->isNotEmpty()) {
+                try {
+                    $this->settlementService->assignPaymentJobsBulk($createdJobs->pluck('id')->toArray(), 'hourly');
+                } catch (\Exception $e) {
+                    Log::warning('Failed to batch assign payment jobs to settlement window', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                $createdJobs->chunk($batchSize)->each(function ($jobBatch) {
+                    $jobIds = $jobBatch->pluck('id')->toArray();
+                    try {
+                        BatchProcessPaymentJob::dispatch($jobIds)->onQueue('normal');
+                        Log::info('Batch payment job dispatched to queue', [
+                            'job_count' => count($jobIds),
+                            'job_ids' => $jobIds,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to dispatch batch payment job to queue', [
+                            'job_count' => count($jobIds),
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                });
+            }
+
+            return $createdCount;
+        }, $maxRetries);
+    }
+
+    protected function computeNextRunAt(PaymentSchedule $schedule): \Carbon\Carbon
+    {
+        $cron = CronExpression::factory($schedule->frequency);
+        $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+        if (! $this->holidayService->isBusinessDay($nextRun)) {
+            $originalTime = $nextRun->format('H:i');
+            $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
+            $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+        }
+
+        return $nextRun;
+    }
+
+    protected function startLockHeartbeat(string $lockKey, int $lockTTL, int $heartbeatInterval): ?object
+    {
+        if ($heartbeatInterval >= $lockTTL) {
+            return null;
+        }
+        register_shutdown_function(function () use ($lockKey, $lockTTL) {
+            try {
+                $this->lockService->heartbeat($lockKey, $lockTTL);
+            } catch (\Exception $e) {
             }
         });
 
-        $this->info("Dispatched {$totalJobs} payment job(s) to the queue.");
+        return new class($this->lockService, $lockKey, $lockTTL, $heartbeatInterval)
+        {
+            protected $lockService;
 
-        return Command::SUCCESS;
+            protected $lockKey;
+
+            protected $lockTTL;
+
+            protected $heartbeatInterval;
+
+            protected $running = true;
+
+            public function __construct($lockService, $lockKey, $lockTTL, $heartbeatInterval)
+            {
+                $this->lockService = $lockService;
+                $this->lockKey = $lockKey;
+                $this->lockTTL = $lockTTL;
+                $this->heartbeatInterval = $heartbeatInterval;
+                $this->start();
+            }
+
+            protected function start(): void
+            {
+                if (function_exists('pcntl_alarm')) {
+                    pcntl_alarm($this->heartbeatInterval);
+                    pcntl_signal(SIGALRM, function () {
+                        if ($this->running) {
+                            $this->lockService->heartbeat($this->lockKey, $this->lockTTL);
+                            if ($this->running) {
+                                pcntl_alarm($this->heartbeatInterval);
+                            }
+                        }
+                    });
+                }
+            }
+
+            public function stop(): void
+            {
+                $this->running = false;
+                if (function_exists('pcntl_alarm')) {
+                    pcntl_alarm(0);
+                }
+            }
+        };
     }
 
     /**
@@ -313,17 +595,43 @@ class ProcessScheduledPayments extends Command
         // Factor 5: Database connection pool awareness
         // Consider active database connections (if we can query it)
         try {
-            $activeConnections = DB::select('SHOW STATUS WHERE Variable_name = ?', ['Threads_connected']);
-            if (! empty($activeConnections) && isset($activeConnections[0]->Value)) {
-                $connections = (int) $activeConnections[0]->Value;
-                $maxConnections = (int) config('database.connections.mysql.max_connections', 151);
-                $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+            $driver = config('database.default');
+            $connectionName = config("database.connections.{$driver}.driver");
 
-                // Reduce batch size if connection pool is getting full
-                if ($connectionPercent > 80) {
-                    $batchSize = max(25, (int) ($batchSize * 0.7));
-                } elseif ($connectionPercent > 60) {
-                    $batchSize = max(25, (int) ($batchSize * 0.9));
+            // Database-specific connection check
+            if ($connectionName === 'mysql' || $connectionName === 'mariadb') {
+                $activeConnections = DB::select('SHOW STATUS WHERE Variable_name = ?', ['Threads_connected']);
+                if (! empty($activeConnections) && isset($activeConnections[0]->Value)) {
+                    $connections = (int) $activeConnections[0]->Value;
+                    $maxConnections = (int) config("database.connections.{$driver}.max_connections", 151);
+                    $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+
+                    // Reduce batch size if connection pool is getting full
+                    if ($connectionPercent > 80) {
+                        $batchSize = max(25, (int) ($batchSize * 0.7));
+                    } elseif ($connectionPercent > 60) {
+                        $batchSize = max(25, (int) ($batchSize * 0.9));
+                    }
+                }
+            } elseif ($connectionName === 'pgsql') {
+                $result = DB::selectOne('
+                    SELECT 
+                        count(*) as active_connections,
+                        (SELECT setting::int FROM pg_settings WHERE name = \'max_connections\') as max_connections
+                    FROM pg_stat_activity 
+                    WHERE datname = current_database()
+                ');
+                if ($result && isset($result->active_connections)) {
+                    $connections = (int) $result->active_connections;
+                    $maxConnections = (int) ($result->max_connections ?? 100);
+                    $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+
+                    // Reduce batch size if connection pool is getting full
+                    if ($connectionPercent > 80) {
+                        $batchSize = max(25, (int) ($batchSize * 0.7));
+                    } elseif ($connectionPercent > 60) {
+                        $batchSize = max(25, (int) ($batchSize * 0.9));
+                    }
                 }
             }
         } catch (\Exception $e) {

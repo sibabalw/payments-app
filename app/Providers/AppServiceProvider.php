@@ -9,15 +9,19 @@ use App\Models\Business;
 use App\Models\Employee;
 use App\Models\PaymentJob;
 use App\Models\PaymentSchedule;
+use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
 use App\Models\Recipient;
+use App\Models\Ticket;
 use App\Models\User;
 use App\Observers\BusinessObserver;
 use App\Observers\EmployeeObserver;
 use App\Observers\PaymentJobObserver;
 use App\Observers\PaymentScheduleObserver;
+use App\Observers\PayrollJobObserver;
 use App\Observers\PayrollScheduleObserver;
 use App\Observers\RecipientObserver;
+use App\Observers\TicketObserver;
 use App\Observers\UserObserver;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -65,6 +69,8 @@ class AppServiceProvider extends ServiceProvider
         Employee::observe(EmployeeObserver::class);
         User::observe(UserObserver::class);
         PaymentJob::observe(PaymentJobObserver::class);
+        PayrollJob::observe(PayrollJobObserver::class);
+        Ticket::observe(TicketObserver::class);
 
         // Validate Redis connection only if enabled
         $this->validateRedisConnection();

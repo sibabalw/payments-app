@@ -111,8 +111,9 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
         
         // Set employee_ids based on selection
         if (whoGetsThis === 'all') {
-            // All employees - set employee_ids to empty array (backend will interpret as all)
-            setData('employee_ids', []);
+            // All employees - send all employee IDs
+            const allEmployeeIds = employees?.map((emp: any) => emp.id) || [];
+            setData('employee_ids', allEmployeeIds);
         } else if (whoGetsThis === 'select') {
             // Selected employees
             setData('employee_ids', selectedEmployeeIds);

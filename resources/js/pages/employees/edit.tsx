@@ -97,7 +97,7 @@ export default function EmployeesEdit({ employee, businesses, taxBreakdown: init
                     <h1 className="text-2xl font-bold">Edit Employee</h1>
                     <div className="flex gap-2">
                         <Link href={`/employees/${employee.id}/benefits`}>
-                            <Button variant="outline">View Benefits</Button>
+                            <Button variant="outline">View Benefits or Deductions</Button>
                         </Link>
                         <Link href={`/payroll/bonuses/create?employee_id=${employee.id}`}>
                             <Button variant="outline">Add Bonus</Button>

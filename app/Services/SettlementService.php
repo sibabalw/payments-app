@@ -49,9 +49,9 @@ class SettlementService
 
                 return DB::table('settlement_windows')->find($windowId);
             } catch (\Illuminate\Database\QueryException $e) {
-                // Handle duplicate key error (if unique constraint exists) or race condition
+                // Handle duplicate key error (MySQL and PostgreSQL) or race condition
                 // Retry select in case another process created it
-                if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
+                if (app(ErrorClassificationService::class)->isUniqueConstraintViolation($e)) {
                     $window = DB::table('settlement_windows')
                         ->where('window_type', $windowType)
                         ->where('window_start', $windowStart)

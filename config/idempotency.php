@@ -42,8 +42,20 @@ return [
     |--------------------------------------------------------------------------
     |
     | The default time to live for idempotency keys in seconds.
+    | Increased to 7 days for financial operations (bank-grade retention).
     |
     */
 
-    'ttl' => env('IDEMPOTENCY_TTL', 86400), // 24 hours
+    'ttl' => env('IDEMPOTENCY_TTL', 604800), // 7 days (increased from 24 hours)
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deduplication Window
+    |--------------------------------------------------------------------------
+    |
+    | Time window in seconds for content-based request deduplication.
+    |
+    */
+
+    'deduplication_window_seconds' => env('IDEMPOTENCY_DEDUPLICATION_WINDOW', 3600), // 1 hour
 ];

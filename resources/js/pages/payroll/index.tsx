@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { cronToHumanReadable } from '@/lib/cronUtils';
 
@@ -28,6 +28,9 @@ function formatNextRunDate(dateString: string): string {
 export default function PayrollIndex({ schedules, filters }: any) {
     const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
     const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [scheduleToDelete, setScheduleToDelete] = useState<number | null>(null);
+    const [scheduleToDeleteName, setScheduleToDeleteName] = useState<string>('');
 
     const handlePause = (id: number) => {
         router.post(`/payroll/${id}/pause`);
@@ -48,6 +51,24 @@ export default function PayrollIndex({ schedules, filters }: any) {
                 onSuccess: () => {
                     setCancelConfirmOpen(false);
                     setScheduleToCancel(null);
+                },
+            });
+        }
+    };
+
+    const handleDelete = (id: number, name: string) => {
+        setScheduleToDelete(id);
+        setScheduleToDeleteName(name);
+        setDeleteConfirmOpen(true);
+    };
+
+    const confirmDelete = () => {
+        if (scheduleToDelete) {
+            router.delete(`/payroll/${scheduleToDelete}`, {
+                onSuccess: () => {
+                    setDeleteConfirmOpen(false);
+                    setScheduleToDelete(null);
+                    setScheduleToDeleteName('');
                 },
             });
         }
@@ -146,6 +167,15 @@ export default function PayrollIndex({ schedules, filters }: any) {
                                                     Edit
                                                 </Button>
                                             </Link>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => handleDelete(schedule.id, schedule.name)}
+                                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+                                            >
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Delete
+                                            </Button>
                                         </div>
                                     </div>
                                 </CardContent>
@@ -171,6 +201,16 @@ export default function PayrollIndex({ schedules, filters }: any) {
                 title="Are you sure you want to cancel this schedule?"
                 description="This action cannot be undone. The payroll schedule will be cancelled and no further payroll will be processed."
                 confirmText="Cancel Schedule"
+                variant="destructive"
+            />
+
+            <ConfirmationDialog
+                open={deleteConfirmOpen}
+                onOpenChange={setDeleteConfirmOpen}
+                onConfirm={confirmDelete}
+                title="Permanently Delete Payroll Schedule"
+                description={`Are you sure you want to permanently delete "${scheduleToDeleteName}"? This action cannot be undone and will permanently remove the schedule and all associated data.`}
+                confirmText="Delete Permanently"
                 variant="destructive"
             />
         </AppLayout>

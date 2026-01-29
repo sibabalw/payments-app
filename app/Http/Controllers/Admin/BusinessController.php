@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\BusinessStatusChangedEmail;
 use App\Models\Business;
 use App\Services\AuditService;
+use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -103,6 +105,24 @@ class BusinessController extends Controller
                 'reason' => $validated['reason'] ?? null,
             ]
         );
+
+        // Queue email notification to business owner
+        $business->load('owner');
+        $user = $business->owner;
+        if ($user) {
+            $emailService = app(EmailService::class);
+            $emailService->send(
+                $user,
+                new BusinessStatusChangedEmail(
+                    $user,
+                    $business,
+                    $oldStatus,
+                    $newStatus,
+                    $validated['reason'] ?? null
+                ),
+                'business_status_changed'
+            );
+        }
 
         $statusMessages = [
             'active' => 'Business has been activated successfully.',

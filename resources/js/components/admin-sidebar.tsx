@@ -18,6 +18,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useActiveUrl } from '@/hooks/use-active-url';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/react';
+import { useState } from 'react';
 import {
     Building2,
     ChevronDown,
@@ -35,6 +36,7 @@ import {
     HardDrive,
     CreditCard,
     BarChart3,
+    MessageSquare,
 } from 'lucide-react';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
@@ -66,6 +68,11 @@ const adminNavItems: NavItem[] = [
             { title: 'All Users', href: '/admin/users' },
             { title: 'Create User', href: '/admin/users/create' },
         ],
+    },
+    {
+        title: 'Tickets',
+        href: '/admin/tickets',
+        icon: MessageSquare,
     },
     {
         title: 'Logs & Queue',
@@ -130,6 +137,8 @@ const adminNavItems: NavItem[] = [
 
 function AdminNavMain({ items = [] }: { items: NavItem[] }) {
     const { urlIsActive } = useActiveUrl();
+    // All items with children are closed by default
+    const [openItems, setOpenItems] = useState<Record<string, boolean>>({});
 
     return (
         <SidebarGroup className="px-2 py-0">
@@ -142,23 +151,49 @@ function AdminNavMain({ items = [] }: { items: NavItem[] }) {
                         item.items!.some((child) => child.href && urlIsActive(child.href));
 
                     if (hasChildren) {
+                        const firstChildHref = item.items![0]?.href;
+                        // Open if explicitly set, or if a child is currently active
+                        const isOpen = openItems[item.title] ?? isParentActive;
+
                         return (
                             <Collapsible
                                 key={item.title}
-                                defaultOpen={isParentActive}
+                                open={isOpen}
+                                onOpenChange={(open) => {
+                                    setOpenItems((prev) => ({
+                                        ...prev,
+                                        [item.title]: open,
+                                    }));
+                                }}
                                 className="group/collapsible"
                             >
                                 <SidebarMenuItem>
-                                    <CollapsibleTrigger asChild>
-                                        <SidebarMenuButton
-                                            isActive={isParentActive}
-                                            tooltip={{ children: item.title }}
+                                    <SidebarMenuButton
+                                        asChild
+                                        isActive={isParentActive}
+                                        tooltip={{ children: item.title }}
+                                    >
+                                        <Link
+                                            href={firstChildHref || '#'}
+                                            onClick={(e) => {
+                                                // Expand the collapsible if closed, or toggle if open
+                                                const newOpenState = !isOpen;
+                                                setOpenItems((prev) => ({
+                                                    ...prev,
+                                                    [item.title]: newOpenState,
+                                                }));
+                                                
+                                                // If already on a child page, prevent navigation and just toggle
+                                                if (isParentActive) {
+                                                    e.preventDefault();
+                                                }
+                                            }}
                                         >
                                             {item.icon && <item.icon />}
                                             <span>{item.title}</span>
                                             <ChevronDown className="ml-auto size-4 shrink-0 transition-transform group-data-[state=closed]/collapsible:rotate-[-90deg]" />
-                                        </SidebarMenuButton>
-                                    </CollapsibleTrigger>
+                                        </Link>
+                                    </SidebarMenuButton>
                                     <CollapsibleContent>
                                         <SidebarMenuSub>
                                             {item.items!.map((child) => (

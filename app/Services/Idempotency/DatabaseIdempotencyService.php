@@ -75,6 +75,9 @@ class DatabaseIdempotencyService implements IdempotencyServiceInterface
 
                 $expiresAt = Carbon::now()->addSeconds($ttlSeconds);
 
+                // Extract operation type from key for tracking
+                $operationType = $this->extractOperationType($idempotencyKey);
+
                 DB::connection($this->connection)->table($this->table)->insert([
                     'idempotency_key' => $idempotencyKey,
                     'request_hash' => $requestHash,
@@ -87,7 +90,9 @@ class DatabaseIdempotencyService implements IdempotencyServiceInterface
                 Log::info('Idempotency key created', [
                     'idempotency_key' => $idempotencyKey,
                     'request_hash' => $requestHash,
+                    'operation_type' => $operationType,
                     'expires_at' => $expiresAt,
+                    'ttl_days' => round($ttlSeconds / 86400, 2),
                 ]);
 
                 return $result;
@@ -178,5 +183,22 @@ class DatabaseIdempotencyService implements IdempotencyServiceInterface
         ]);
 
         return $newKey;
+    }
+
+    /**
+     * Extract operation type from idempotency key
+     *
+     * @param  string  $key  Idempotency key
+     * @return string|null Operation type
+     */
+    protected function extractOperationType(string $key): ?string
+    {
+        // Keys are typically formatted as: operation_type_id_timestamp
+        // e.g., "payment_job_123_new" or "payroll_job_456_789"
+        if (preg_match('/^([a-z]+)_/', $key, $matches)) {
+            return $matches[1] ?? null;
+        }
+
+        return null;
     }
 }

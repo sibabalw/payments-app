@@ -6,6 +6,9 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeTheme } from './hooks/use-appearance';
 
+// Initialize Echo early to ensure it's ready when components need it
+import './echo';
+
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
 createInertiaApp({
@@ -26,6 +29,7 @@ createInertiaApp({
     },
     progress: {
         color: '#4B5563',
+        showSpinner: false,
     },
 });
 

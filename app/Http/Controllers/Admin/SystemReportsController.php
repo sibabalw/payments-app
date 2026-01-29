@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\EscrowDeposit;
 use App\Models\PaymentJob;
@@ -15,6 +14,28 @@ use Inertia\Response;
 
 class SystemReportsController extends Controller
 {
+    /**
+     * Get database-agnostic date format expression.
+     */
+    private function dateFormat(string $column, string $format = '%Y-%m-%d'): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            // PostgreSQL: to_char(column, 'YYYY-MM-DD')
+            $pgFormat = match ($format) {
+                '%Y-%m-%d' => 'YYYY-MM-DD',
+                '%Y-%m' => 'YYYY-MM',
+                default => 'YYYY-MM-DD',
+            };
+
+            return "to_char({$column}, '{$pgFormat}')";
+        } else {
+            // MySQL/MariaDB: DATE_FORMAT(column, '%Y-%m-%d')
+            return "DATE_FORMAT({$column}, '{$format}')";
+        }
+    }
+
     /**
      * Display system reports page.
      */
@@ -60,13 +81,14 @@ class SystemReportsController extends Controller
         $last30Days = now()->subDays(30);
 
         // New businesses
+        $dateExpr = $this->dateFormat('created_at');
         $newBusinesses = Business::query()
             ->where('created_at', '>=', $last30Days)
             ->select(
-                DB::raw("DATE_FORMAT(created_at, '%Y-%m-%d') as date"),
+                DB::raw("{$dateExpr} as date"),
                 DB::raw('COUNT(*) as count')
             )
-            ->groupBy('date')
+            ->groupBy(DB::raw($dateExpr))
             ->orderBy('date')
             ->get()
             ->map(fn ($item) => [
@@ -110,16 +132,19 @@ class SystemReportsController extends Controller
         $last30Days = now()->subDays(30);
 
         // Payment transactions by day
+        $dateExpr = $this->dateFormat('processed_at');
+        $driver = DB::connection()->getDriverName();
+        $quote = $driver === 'pgsql' ? "'" : '"';
         $paymentTrends = PaymentJob::query()
             ->where('processed_at', '>=', $last30Days)
             ->select(
-                DB::raw("DATE_FORMAT(processed_at, '%Y-%m-%d') as date"),
+                DB::raw("{$dateExpr} as date"),
                 DB::raw('COUNT(*) as count'),
-                DB::raw('SUM(CASE WHEN status = "succeeded" THEN amount ELSE 0 END) as total_amount'),
-                DB::raw('SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded'),
-                DB::raw('SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed')
+                DB::raw("SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN amount ELSE 0 END) as total_amount"),
+                DB::raw("SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN 1 ELSE 0 END) as succeeded"),
+                DB::raw("SUM(CASE WHEN status = {$quote}failed{$quote} THEN 1 ELSE 0 END) as failed")
             )
-            ->groupBy('date')
+            ->groupBy(DB::raw($dateExpr))
             ->orderBy('date')
             ->get()
             ->map(fn ($item) => [
@@ -131,16 +156,19 @@ class SystemReportsController extends Controller
             ]);
 
         // Payroll transactions by day
+        $dateExpr = $this->dateFormat('processed_at');
+        $driver = DB::connection()->getDriverName();
+        $quote = $driver === 'pgsql' ? "'" : '"';
         $payrollTrends = PayrollJob::query()
             ->where('processed_at', '>=', $last30Days)
             ->select(
-                DB::raw("DATE_FORMAT(processed_at, '%Y-%m-%d') as date"),
+                DB::raw("{$dateExpr} as date"),
                 DB::raw('COUNT(*) as count'),
-                DB::raw('SUM(CASE WHEN status = "succeeded" THEN gross_salary ELSE 0 END) as total_amount'),
-                DB::raw('SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded'),
-                DB::raw('SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed')
+                DB::raw("SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN gross_salary ELSE 0 END) as total_amount"),
+                DB::raw("SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN 1 ELSE 0 END) as succeeded"),
+                DB::raw("SUM(CASE WHEN status = {$quote}failed{$quote} THEN 1 ELSE 0 END) as failed")
             )
-            ->groupBy('date')
+            ->groupBy(DB::raw($dateExpr))
             ->orderBy('date')
             ->get()
             ->map(fn ($item) => [
@@ -152,24 +180,26 @@ class SystemReportsController extends Controller
             ]);
 
         // Summary
+        $driver = DB::connection()->getDriverName();
+        $quote = $driver === 'pgsql' ? "'" : '"';
         $paymentSummary = PaymentJob::query()
             ->where('processed_at', '>=', $last30Days)
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed,
-                SUM(CASE WHEN status = "succeeded" THEN amount ELSE 0 END) as total_amount
-            ')
+                SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN status = {$quote}failed{$quote} THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN amount ELSE 0 END) as total_amount
+            ")
             ->first();
 
         $payrollSummary = PayrollJob::query()
             ->where('processed_at', '>=', $last30Days)
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed,
-                SUM(CASE WHEN status = "succeeded" THEN gross_salary ELSE 0 END) as total_amount
-            ')
+                SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN status = {$quote}failed{$quote} THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = {$quote}succeeded{$quote} THEN gross_salary ELSE 0 END) as total_amount
+            ")
             ->first();
 
         return [
@@ -226,15 +256,16 @@ class SystemReportsController extends Controller
             ->sum('fee_amount');
 
         // Monthly fee trends
+        $monthExpr = $this->dateFormat('completed_at', '%Y-%m');
         $feeTrends = EscrowDeposit::query()
             ->where('status', 'completed')
             ->where('completed_at', '>=', now()->subMonths(6))
             ->select(
-                DB::raw("DATE_FORMAT(completed_at, '%Y-%m') as month"),
+                DB::raw("{$monthExpr} as month"),
                 DB::raw('SUM(fee_amount) as total_fees'),
                 DB::raw('COUNT(*) as transaction_count')
             )
-            ->groupBy('month')
+            ->groupBy(DB::raw($monthExpr))
             ->orderBy('month')
             ->get()
             ->map(fn ($item) => [
@@ -259,13 +290,14 @@ class SystemReportsController extends Controller
         $last30Days = now()->subDays(30);
 
         // New registrations
+        $dateExpr = $this->dateFormat('created_at');
         $newRegistrations = User::query()
             ->where('created_at', '>=', $last30Days)
             ->select(
-                DB::raw("DATE_FORMAT(created_at, '%Y-%m-%d') as date"),
+                DB::raw("{$dateExpr} as date"),
                 DB::raw('COUNT(*) as count')
             )
-            ->groupBy('date')
+            ->groupBy(DB::raw($dateExpr))
             ->orderBy('date')
             ->get()
             ->map(fn ($item) => [
@@ -274,13 +306,14 @@ class SystemReportsController extends Controller
             ]);
 
         // Email verifications
+        $dateExpr = $this->dateFormat('email_verified_at');
         $verifications = User::query()
             ->where('email_verified_at', '>=', $last30Days)
             ->select(
-                DB::raw("DATE_FORMAT(email_verified_at, '%Y-%m-%d') as date"),
+                DB::raw("{$dateExpr} as date"),
                 DB::raw('COUNT(*) as count')
             )
-            ->groupBy('date')
+            ->groupBy(DB::raw($dateExpr))
             ->orderBy('date')
             ->get()
             ->map(fn ($item) => [
@@ -292,7 +325,7 @@ class SystemReportsController extends Controller
         $userStats = User::query()
             ->selectRaw('
                 COUNT(*) as total,
-                SUM(CASE WHEN is_admin = 1 THEN 1 ELSE 0 END) as admins,
+                SUM(CASE WHEN is_admin THEN 1 ELSE 0 END) as admins,
                 SUM(CASE WHEN email_verified_at IS NOT NULL THEN 1 ELSE 0 END) as verified
             ')
             ->first();

@@ -48,7 +48,7 @@ Row level security implement it (for db im using postgre)
 optimize payroll and payments execution adn do it like banks 
 do it, be like an engineer, dont include tests in this plan, note system can use postgre based on config, by dfefault it's mysql
 
-optimize payroll and payments execution adn do it like banks do it, be like an engineer, dont include tests in this plan dont be too ambitious 
+optimize payroll and payments execution adn do it like banks do it, note im using postgre db it's no longer mysql, be like an engineer, dont include tests in this plan dont be too ambitious 
 focus on current system as it is not like banks but similar, also improve what can be improve be 100% honest and leave what cant be improved by 
 code alone, dont strive for perfect system just good enough design for failure, change, and recovery. Correct enough for today
 Safe under failure
@@ -59,12 +59,28 @@ Immutable instead of fragile
 Reversible instead of brittle
 Observable instead of magical
 Boring instead of clever
-
 That’s why the best systems:
 Assume bugs will exist
 Assume people will make mistakes
 Assume reality will break assumptions
 
-in /payment page when i clickcreate payment i am take to create bonus page, fix that so that im taken to right page
-when i create payroll with all clicked it gives error empoyees must be seleted
+in /payment page when i clickcreate payment i am take to create bonus page, fix that so that im taken to right page - done
+when i create payroll with all clicked it gives error empoyees must be seleted - done
 payroll dont execute, test again
+
+have one custom alerts used in entire app, alerts, confirm alerts, dont use browser alerts and confirms
+
+make ticket system keep it simple and functional, start from user to admin, make sure when ticket it 
+openned admins are emailed, the email is scheduled, utilize postgre -since we are using postgre database use live db changes listeners
+to update tickets in real time
+
+make app based notifications it must be simple and sometimes can notify via email
+
+for pricing and billing add one month free trial
+
+payroll and payments dont handle leap years and February, feb ends 28 or 29 next run will be march 30 if i created job in jan 30
+
+make sure no payment and payroll created when escrow balance is 0 and when they shcedule more than they have, 
+make it air tight even in database level postgres, even in do checks in executions, make this impossible because 
+this is very critical, database we use is postgre, dont overdo it or rplace what exist with no reason, i repeat i only use postgres db
+

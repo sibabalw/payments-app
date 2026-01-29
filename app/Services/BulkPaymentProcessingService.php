@@ -6,6 +6,7 @@ use App\Helpers\LogContext;
 use App\Models\Business;
 use App\Models\PaymentJob;
 use App\Models\PayrollJob;
+use App\Traits\PostgresSavepoints;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +25,8 @@ use Illuminate\Support\Facades\Log;
  */
 class BulkPaymentProcessingService
 {
+    use PostgresSavepoints;
+
     protected EscrowService $escrowService;
 
     protected FinancialLedgerService $ledgerService;
@@ -66,9 +69,23 @@ class BulkPaymentProcessingService
             ];
         }
 
+        // Generate operation ID for batch tracking
+        $operationId = \App\Helpers\LogContext::generateOperationId();
+        $correlationId = $this->ledgerService->generateCorrelationId();
+
+        // Log batch operation start
+        $logContext = \App\Helpers\LogContext::logOperationStart('process_payroll_jobs_bulk', \App\Helpers\LogContext::create(
+            $correlationId,
+            null,
+            null,
+            'bulk_payroll_process',
+            null,
+            ['operation_id' => $operationId, 'job_count' => count($jobIds), 'job_ids' => $jobIds]
+        ));
+
         // Load all jobs with relationships - optimized query with selected columns only
         // For very large batches (>5000 jobs), use lazy loading to reduce memory usage
-        // Chunk whereIn if array is too large (MySQL limit ~1000 items per IN clause)
+        // Chunk whereIn for large arrays (memory/performance)
         if (count($jobIds) > 5000) {
             // Use lazy() for very large job sets to process in chunks
             $jobs = collect();
@@ -132,7 +149,7 @@ class BulkPaymentProcessingService
         // Pre-calculate balances for all businesses in a single optimized query
         // Use BalancePrecalculationService for efficient batch balance calculation
         $businessIds = $jobsByBusiness->keys()->toArray();
-        // Chunk whereIn if array is too large (MySQL limit ~1000 items per IN clause)
+        // Chunk whereIn for large arrays (memory/performance)
         $businesses = $this->loadBusinessesWithChunkedWhereIn($businessIds);
 
         // Pre-calculate all balances using optimized service (caches within transaction)
@@ -224,20 +241,17 @@ class BulkPaymentProcessingService
         $businessCount = count($stats);
         $avgJobsPerBusiness = $businessCount > 0 ? round($totalProcessed / $businessCount, 2) : 0;
 
-        LogContext::info('Bulk payroll processing completed', LogContext::create(
-            null,
-            null,
-            null,
-            'bulk_payroll_process',
-            null,
-            [
-                'total_jobs' => count($jobIds),
-                'processed' => $totalProcessed,
-                'failed' => $totalFailed,
-                'businesses_processed' => $businessCount,
-                'avg_jobs_per_business' => $avgJobsPerBusiness,
-            ]
-        ));
+        // Log operation end
+        \App\Helpers\LogContext::logOperationEnd('process_payroll_jobs_bulk', array_merge($logContext, [
+            'correlation_id' => $correlationId,
+            'operation_id' => $operationId,
+        ]), $totalFailed === 0, [
+            'total_jobs' => count($jobIds),
+            'processed' => $totalProcessed,
+            'failed' => $totalFailed,
+            'businesses_processed' => $businessCount,
+            'avg_jobs_per_business' => $avgJobsPerBusiness,
+        ]);
 
         return [
             'processed' => $totalProcessed,
@@ -262,9 +276,23 @@ class BulkPaymentProcessingService
             ];
         }
 
+        // Generate operation ID for batch tracking
+        $operationId = \App\Helpers\LogContext::generateOperationId();
+        $correlationId = $this->ledgerService->generateCorrelationId();
+
+        // Log batch operation start
+        $logContext = \App\Helpers\LogContext::logOperationStart('process_payment_jobs_bulk', \App\Helpers\LogContext::create(
+            $correlationId,
+            null,
+            null,
+            'bulk_payment_process',
+            null,
+            ['operation_id' => $operationId, 'job_count' => count($jobIds), 'job_ids' => $jobIds]
+        ));
+
         // Load all jobs with relationships - optimized query with selected columns only
         // For very large batches (>5000 jobs), use lazy loading to reduce memory usage
-        // Chunk whereIn if array is too large (MySQL limit ~1000 items per IN clause)
+        // Chunk whereIn for large arrays (memory/performance)
         if (count($jobIds) > 5000) {
             // Use lazy() for very large job sets to process in chunks
             $jobs = collect();
@@ -328,7 +356,7 @@ class BulkPaymentProcessingService
         // Pre-calculate balances for all businesses in a single optimized query
         // Use BalancePrecalculationService for efficient batch balance calculation
         $businessIds = $jobsByBusiness->keys()->toArray();
-        // Chunk whereIn if array is too large (MySQL limit ~1000 items per IN clause)
+        // Chunk whereIn for large arrays (memory/performance)
         $businesses = $this->loadBusinessesWithChunkedWhereIn($businessIds);
 
         // Pre-calculate all balances using optimized service (caches within transaction)
@@ -419,20 +447,17 @@ class BulkPaymentProcessingService
         $businessCount = count($stats);
         $avgJobsPerBusiness = $businessCount > 0 ? round($totalProcessed / $businessCount, 2) : 0;
 
-        LogContext::info('Bulk payment processing completed', LogContext::create(
-            null,
-            null,
-            null,
-            'bulk_payment_process',
-            null,
-            [
-                'total_jobs' => count($jobIds),
-                'processed' => $totalProcessed,
-                'failed' => $totalFailed,
-                'businesses_processed' => $businessCount,
-                'avg_jobs_per_business' => $avgJobsPerBusiness,
-            ]
-        ));
+        // Log operation end
+        \App\Helpers\LogContext::logOperationEnd('process_payment_jobs_bulk', array_merge($logContext, [
+            'correlation_id' => $correlationId,
+            'operation_id' => $operationId,
+        ]), $totalFailed === 0, [
+            'total_jobs' => count($jobIds),
+            'processed' => $totalProcessed,
+            'failed' => $totalFailed,
+            'businesses_processed' => $businessCount,
+            'avg_jobs_per_business' => $avgJobsPerBusiness,
+        ]);
 
         return [
             'processed' => $totalProcessed,
@@ -606,6 +631,8 @@ class BulkPaymentProcessingService
                 'metadata' => [
                     'payroll_job_id' => $job->id,
                 ],
+                'currency' => 'ZAR',
+                'operation_type' => 'PAYROLL_PROCESS',
             ];
 
             $succeededJobIds[] = $job->id;
@@ -615,8 +642,7 @@ class BulkPaymentProcessingService
         // LOCK ORDER: business → jobs → deposits (consistent ordering prevents deadlocks)
         // Use SKIP LOCKED to avoid blocking if another process is already processing this business
         $business = Business::where('id', $business->id)
-            ->lockForUpdate()
-            ->skipLocked()
+            ->lock('for update skip locked')
             ->first();
 
         if (! $business) {
@@ -790,6 +816,8 @@ class BulkPaymentProcessingService
                     'payment_job_id' => $job->id,
                     'recipient_id' => $job->recipient_id,
                 ],
+                'currency' => 'ZAR',
+                'operation_type' => 'PAYMENT_PROCESS',
             ];
 
             $succeededJobIds[] = $job->id;
@@ -799,8 +827,7 @@ class BulkPaymentProcessingService
         // LOCK ORDER: business → jobs → deposits (consistent ordering prevents deadlocks)
         // Use SKIP LOCKED to avoid blocking if another process is already processing this business
         $business = Business::where('id', $business->id)
-            ->lockForUpdate()
-            ->skipLocked()
+            ->lock('for update skip locked')
             ->first();
 
         if (! $business) {
@@ -953,7 +980,7 @@ class BulkPaymentProcessingService
     }
 
     /**
-     * Load jobs with chunked whereIn to handle large arrays (MySQL limit ~1000 items per IN clause)
+     * Load jobs with chunked whereIn to handle large arrays (memory/performance)
      *
      * @param  string  $modelClass  Model class name
      * @param  array  $ids  Array of IDs
@@ -962,7 +989,7 @@ class BulkPaymentProcessingService
      */
     protected function loadJobsWithChunkedWhereIn(string $modelClass, array $ids, array $selectColumns, array $eagerLoad): Collection
     {
-        $chunkSize = 1000; // MySQL safe limit
+        $chunkSize = 1000; // Chunk for large IN clauses
         $allJobs = collect();
 
         foreach (array_chunk($ids, $chunkSize) as $chunk) {
@@ -985,7 +1012,7 @@ class BulkPaymentProcessingService
      */
     protected function loadBusinessesWithChunkedWhereIn(array $businessIds): Collection
     {
-        $chunkSize = 1000; // MySQL safe limit
+        $chunkSize = 1000; // Chunk for large IN clauses
         $allBusinesses = collect();
 
         foreach (array_chunk($businessIds, $chunkSize) as $chunk) {

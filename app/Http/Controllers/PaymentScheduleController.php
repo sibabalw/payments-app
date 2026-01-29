@@ -112,7 +112,7 @@ class PaymentScheduleController extends Controller
             }
         }
 
-        return Inertia::render('payments/create', [
+        return Inertia::render('payments/schedule-create', [
             'businesses' => $businesses,
             'recipients' => $recipients,
             'selectedBusinessId' => $businessId,
@@ -154,6 +154,46 @@ class PaymentScheduleController extends Controller
         if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot create payment schedule. Business is {$business->status}."])
+                ->withInput();
+        }
+
+        // Check escrow balance before creating schedule
+        // Note: This is a user-facing validation check. The actual job creation is protected
+        // by database triggers and the ProcessScheduledPayments command which locks the business row.
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $validated['amount'] * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['amount' => 'Cannot create payment schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // Calculate total from existing active schedules
+        $existingSchedulesTotal = PaymentSchedule::where('business_id', $validated['business_id'])
+            ->where('status', 'active')
+            ->with('recipients')
+            ->get()
+            ->sum(function ($schedule) {
+                return $schedule->amount * max($schedule->recipients->count(), 1);
+            });
+
+        $totalScheduledAmount = $existingSchedulesTotal + $totalAmountRequired;
+
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
+        // Explicit check: total scheduled amount (existing + new) should not exceed available balance
+        // This prevents creating schedules that would exceed balance when combined with existing schedules
+        if ($escrowBalance < $totalScheduledAmount) {
+            return back()
+                ->withErrors(['amount' => 'Creating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total scheduled (including existing): '.number_format($totalScheduledAmount, 2).' ZAR.'])
                 ->withInput();
         }
 
@@ -208,6 +248,33 @@ class PaymentScheduleController extends Controller
             return $schedule;
         });
 
+        // CRITICAL: Re-validate escrow balance before attaching recipients
+        // This provides application-level defense even if database triggers are bypassed
+        $business = Business::findOrFail($validated['business_id']);
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $schedule->amount * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            // Delete the schedule since we can't attach recipients
+            $schedule->delete();
+
+            return back()
+                ->withErrors(['amount' => 'Cannot attach recipients. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            // Delete the schedule since we can't attach recipients
+            $schedule->delete();
+
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance to attach recipients. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
         // Attach recipients outside transaction to avoid lock timeout
         $schedule->recipients()->attach($validated['recipient_ids']);
 
@@ -260,7 +327,7 @@ class PaymentScheduleController extends Controller
             $schedule->parsed_frequency = $parsed['frequency'];
         }
 
-        return Inertia::render('payments/edit', [
+        return Inertia::render('payments/schedule-edit', [
             'schedule' => $schedule,
             'businesses' => $businesses,
             'recipients' => $recipients,
@@ -306,6 +373,44 @@ class PaymentScheduleController extends Controller
         if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot update payment schedule. Business is {$business->status}."])
+                ->withInput();
+        }
+
+        // Check escrow balance before updating schedule
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $validated['amount'] * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['amount' => 'Cannot update payment schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // Calculate total from existing active schedules (excluding this one)
+        $existingSchedulesTotal = PaymentSchedule::where('business_id', $validated['business_id'])
+            ->where('status', 'active')
+            ->where('id', '!=', $paymentSchedule->id)
+            ->with('recipients')
+            ->get()
+            ->sum(function ($schedule) {
+                return $schedule->amount * max($schedule->recipients->count(), 1);
+            });
+
+        $totalScheduledAmount = $existingSchedulesTotal + $totalAmountRequired;
+
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
+        // Explicit check: total scheduled amount (existing + updated) should not exceed available balance
+        if ($escrowBalance < $totalScheduledAmount) {
+            return back()
+                ->withErrors(['amount' => 'Updating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total scheduled (including existing): '.number_format($totalScheduledAmount, 2).' ZAR.'])
                 ->withInput();
         }
 
@@ -356,6 +461,23 @@ class PaymentScheduleController extends Controller
                 }
             }
 
+            // CRITICAL: Re-validate escrow balance before syncing recipients
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+            $recipientCount = count($validated['recipient_ids']);
+            $totalAmountRequired = $paymentSchedule->amount * $recipientCount;
+
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot sync recipients. Escrow balance is zero or negative. Please deposit funds first.');
+            }
+
+            // Explicit check: available balance must be sufficient for total amount required
+            if ($escrowBalance < $totalAmountRequired) {
+                throw new \RuntimeException('Insufficient escrow balance to sync recipients. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.');
+            }
+
             // Sync recipients
             $paymentSchedule->recipients()->sync($validated['recipient_ids']);
 
@@ -374,6 +496,7 @@ class PaymentScheduleController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * Permanently deletes the schedule but keeps full audit trail.
      */
     public function destroy(PaymentSchedule $paymentSchedule)
     {
@@ -382,21 +505,68 @@ class PaymentScheduleController extends Controller
             abort(404);
         }
 
+        // Load all related data before deletion for audit logging
+        $paymentSchedule->load([
+            'business:id,name,user_id',
+            'business.owner:id,name,email',
+            'recipients:id,name,email',
+        ]);
+
         $business = $paymentSchedule->business;
         $user = $business->owner;
 
-        $this->auditService->log('payment_schedule.deleted', $paymentSchedule, $paymentSchedule->getAttributes());
+        // Capture comprehensive data for audit log before deletion
+        $auditData = [
+            'schedule' => [
+                'id' => $paymentSchedule->id,
+                'name' => $paymentSchedule->name,
+                'business_id' => $paymentSchedule->business_id,
+                'business_name' => $business->name,
+                'type' => $paymentSchedule->type,
+                'frequency' => $paymentSchedule->frequency,
+                'amount' => $paymentSchedule->amount,
+                'currency' => $paymentSchedule->currency,
+                'schedule_type' => $paymentSchedule->schedule_type,
+                'status' => $paymentSchedule->status,
+                'next_run_at' => $paymentSchedule->next_run_at?->toIso8601String(),
+                'last_run_at' => $paymentSchedule->last_run_at?->toIso8601String(),
+                'created_at' => $paymentSchedule->created_at?->toIso8601String(),
+                'updated_at' => $paymentSchedule->updated_at?->toIso8601String(),
+            ],
+            'recipients' => $paymentSchedule->recipients->map(function ($recipient) {
+                return [
+                    'id' => $recipient->id,
+                    'name' => $recipient->name,
+                    'email' => $recipient->email,
+                ];
+            })->toArray(),
+            'deleted_by' => [
+                'user_id' => Auth::id(),
+                'user_email' => Auth::user()?->email,
+            ],
+            'deleted_at' => now()->toIso8601String(),
+        ];
+
+        // Log comprehensive audit trail before deletion
+        $this->auditService->log(
+            'payment_schedule.deleted',
+            $paymentSchedule,
+            $auditData,
+            Auth::user(),
+            $business
+        );
 
         // Send payment schedule cancelled email before deleting
         $emailService = app(EmailService::class);
         $emailService->send($user, new PaymentScheduleCancelledEmail($user, $paymentSchedule), 'payment_schedule_cancelled');
 
+        // Permanently delete the schedule (no soft delete)
         $paymentSchedule->delete();
 
         $route = 'payments.index';
 
         return redirect()->route($route)
-            ->with('success', 'Payment schedule deleted successfully.');
+            ->with('success', 'Payment schedule permanently deleted. All data has been logged in audit trail.');
     }
 
     /**

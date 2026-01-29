@@ -21,6 +21,24 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 export default function PaymentsEdit({ payment, businesses, employees }: any) {
+    if (!payment) {
+        return (
+            <AppLayout breadcrumbs={breadcrumbs}>
+                <Head title="Edit Bonus" />
+                <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
+                    <Card>
+                        <CardContent className="py-10 text-center">
+                            <p className="text-muted-foreground">Bonus not found.</p>
+                            <Link href="/payroll/bonuses" className="mt-4 inline-block">
+                                <Button variant="outline">Back to Bonuses</Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                </div>
+            </AppLayout>
+        );
+    }
+
     const [periodStart, setPeriodStart] = useState<Date | undefined>(
         payment.period_start ? new Date(payment.period_start) : undefined
     );

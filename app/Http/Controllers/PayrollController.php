@@ -117,7 +117,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array',
+            'employee_ids' => 'present|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -140,6 +140,59 @@ class PayrollController extends Controller
             return back()
                 ->withErrors(['business_id' => "Cannot create payroll schedule. Business is {$business->status}."])
                 ->withInput();
+        }
+
+        // Check escrow balance before creating schedule
+        // Note: This is a user-facing validation check. The actual job creation is protected
+        // by database triggers and the ProcessScheduledPayroll command which locks the business row.
+        // For payroll schedules, we estimate based on gross salaries (conservative check).
+        // The ProcessScheduledPayroll command will validate that total net_salary doesn't exceed available balance before creating jobs.
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot create payroll schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        // We need this for the estimate check below
+        $employeeIdsForCheck = empty($validated['employee_ids'])
+            ? Employee::where('business_id', $validated['business_id'])->pluck('id')->toArray()
+            : $validated['employee_ids'];
+
+        // Conservative estimate: use gross salaries as upper bound (net will be less after deductions)
+        // This prevents creating schedules that would clearly exceed balance
+        if (! empty($employeeIdsForCheck)) {
+            $estimatedTotal = Employee::whereIn('id', $employeeIdsForCheck)
+                ->sum('gross_salary');
+
+            // Calculate total from existing active payroll schedules
+            $existingSchedulesTotal = PayrollSchedule::where('business_id', $validated['business_id'])
+                ->where('status', 'active')
+                ->with('employees')
+                ->get()
+                ->sum(function ($schedule) {
+                    return $schedule->employees->sum('gross_salary');
+                });
+
+            $totalScheduledEstimate = $existingSchedulesTotal + $estimatedTotal;
+
+            // Explicit check: estimated total should not exceed available balance
+            // This is conservative since net salary will be less than gross
+            if ($escrowBalance < $estimatedTotal) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Insufficient escrow balance for estimated payroll. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).'])
+                    ->withInput();
+            }
+
+            // Explicit check: total scheduled estimate (existing + new) should not exceed available balance
+            if ($escrowBalance < $totalScheduledEstimate) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Creating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total estimated scheduled (including existing): '.number_format($totalScheduledEstimate, 2).' ZAR.'])
+                    ->withInput();
+            }
         }
 
         // Generate cron expression from date/time or use provided frequency
@@ -168,6 +221,13 @@ class PayrollController extends Controller
             $validated['employee_ids'] = Employee::where('business_id', $validated['business_id'])
                 ->pluck('id')
                 ->toArray();
+        }
+
+        // Validate that at least one employee is selected
+        if (empty($validated['employee_ids'])) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot create payroll schedule. The business has no employees. Please add employees first.'])
+                ->withInput();
         }
 
         // Enforce rule: One employee = One recurring payroll schedule
@@ -210,6 +270,27 @@ class PayrollController extends Controller
                 $schedule->save();
             } catch (\Exception $e) {
                 // If calculation fails, set to null (will be handled by scheduler)
+            }
+
+            // CRITICAL: Re-validate escrow balance before attaching employees
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot attach employees. Escrow balance is zero or negative. Please deposit funds first.');
+            }
+
+            // Calculate estimated total based on gross salaries (conservative estimate)
+            if (! empty($validated['employee_ids'])) {
+                $estimatedTotal = Employee::whereIn('id', $validated['employee_ids'])
+                    ->sum('gross_salary');
+
+                // Explicit check: available balance must be sufficient for estimated total
+                if ($escrowBalance < $estimatedTotal) {
+                    throw new \RuntimeException('Insufficient escrow balance to attach employees. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).');
+                }
             }
 
             // Attach employees inside transaction to ensure atomicity
@@ -286,7 +367,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array',
+            'employee_ids' => 'present|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -309,6 +390,53 @@ class PayrollController extends Controller
             return back()
                 ->withErrors(['business_id' => "Cannot update payroll schedule. Business is {$business->status}."])
                 ->withInput();
+        }
+
+        // Check escrow balance before updating schedule
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot update payroll schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        $employeeIdsForCheck = empty($validated['employee_ids'])
+            ? Employee::where('business_id', $validated['business_id'])->pluck('id')->toArray()
+            : $validated['employee_ids'];
+
+        // Conservative estimate: use gross salaries as upper bound (net will be less after deductions)
+        if (! empty($employeeIdsForCheck)) {
+            $estimatedTotal = Employee::whereIn('id', $employeeIdsForCheck)
+                ->sum('gross_salary');
+
+            // Calculate total from existing active payroll schedules (excluding this one)
+            $existingSchedulesTotal = PayrollSchedule::where('business_id', $validated['business_id'])
+                ->where('status', 'active')
+                ->where('id', '!=', $payrollSchedule->id)
+                ->with('employees')
+                ->get()
+                ->sum(function ($schedule) {
+                    return $schedule->employees->sum('gross_salary');
+                });
+
+            $totalScheduledEstimate = $existingSchedulesTotal + $estimatedTotal;
+
+            // Explicit check: estimated total should not exceed available balance
+            if ($escrowBalance < $estimatedTotal) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Insufficient escrow balance for estimated payroll. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).'])
+                    ->withInput();
+            }
+
+            // Explicit check: total scheduled estimate (existing + updated) should not exceed available balance
+            if ($escrowBalance < $totalScheduledEstimate) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Updating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total estimated scheduled (including existing): '.number_format($totalScheduledEstimate, 2).' ZAR.'])
+                    ->withInput();
+            }
         }
 
         // Generate cron expression from date/time or use provided frequency
@@ -382,6 +510,27 @@ class PayrollController extends Controller
                 }
             }
 
+            // CRITICAL: Re-validate escrow balance before syncing employees
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot sync employees. Escrow balance is zero or negative. Please deposit funds first.');
+            }
+
+            // Calculate estimated total based on gross salaries (conservative estimate)
+            if (! empty($validated['employee_ids'])) {
+                $estimatedTotal = Employee::whereIn('id', $validated['employee_ids'])
+                    ->sum('gross_salary');
+
+                // Explicit check: available balance must be sufficient for estimated total
+                if ($escrowBalance < $estimatedTotal) {
+                    throw new \RuntimeException('Insufficient escrow balance to sync employees. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).');
+                }
+            }
+
             // Sync employees
             $payrollSchedule->employees()->sync($validated['employee_ids']);
 
@@ -398,22 +547,69 @@ class PayrollController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * Permanently deletes the schedule but keeps full audit trail.
      */
     public function destroy(PayrollSchedule $payrollSchedule)
     {
+        // Load all related data before deletion for audit logging
+        $payrollSchedule->load([
+            'business:id,name,user_id',
+            'business.owner:id,name,email',
+            'employees:id,name,email',
+            'payrollJobs:id,payroll_schedule_id,status,created_at',
+        ]);
+
         $business = $payrollSchedule->business;
         $user = $business->owner;
 
-        $this->auditService->log('payroll_schedule.deleted', $payrollSchedule, $payrollSchedule->getAttributes());
+        // Capture comprehensive data for audit log before deletion
+        $auditData = [
+            'schedule' => [
+                'id' => $payrollSchedule->id,
+                'name' => $payrollSchedule->name,
+                'business_id' => $payrollSchedule->business_id,
+                'business_name' => $business->name,
+                'frequency' => $payrollSchedule->frequency,
+                'schedule_type' => $payrollSchedule->schedule_type,
+                'status' => $payrollSchedule->status,
+                'next_run_at' => $payrollSchedule->next_run_at?->toIso8601String(),
+                'last_run_at' => $payrollSchedule->last_run_at?->toIso8601String(),
+                'created_at' => $payrollSchedule->created_at?->toIso8601String(),
+                'updated_at' => $payrollSchedule->updated_at?->toIso8601String(),
+            ],
+            'employees' => $payrollSchedule->employees->map(function ($employee) {
+                return [
+                    'id' => $employee->id,
+                    'name' => $employee->name,
+                    'email' => $employee->email,
+                ];
+            })->toArray(),
+            'payroll_jobs_count' => $payrollSchedule->payrollJobs->count(),
+            'deleted_by' => [
+                'user_id' => Auth::id(),
+                'user_email' => Auth::user()?->email,
+            ],
+            'deleted_at' => now()->toIso8601String(),
+        ];
+
+        // Log comprehensive audit trail before deletion
+        $this->auditService->log(
+            'payroll_schedule.deleted',
+            $payrollSchedule,
+            $auditData,
+            Auth::user(),
+            $business
+        );
 
         // Send payroll schedule cancelled email before deleting
         $emailService = app(EmailService::class);
         $emailService->send($user, new PayrollScheduleCancelledEmail($user, $payrollSchedule), 'payroll_schedule_cancelled');
 
+        // Permanently delete the schedule (no soft delete)
         $payrollSchedule->delete();
 
         return redirect()->route('payroll.index')
-            ->with('success', 'Payroll schedule deleted successfully.');
+            ->with('success', 'Payroll schedule permanently deleted. All data has been logged in audit trail.');
     }
 
     /**

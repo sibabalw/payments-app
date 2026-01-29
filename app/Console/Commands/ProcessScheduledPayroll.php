@@ -7,6 +7,7 @@ use App\Jobs\ProcessPayrollJob;
 use App\Models\PayrollSchedule;
 use App\Services\AdjustmentService;
 use App\Services\BatchProcessingService;
+use App\Services\EscrowService;
 use App\Services\LockService;
 use App\Services\PayrollCalculationService;
 use App\Services\PayrollValidationService;
@@ -17,6 +18,7 @@ use App\Services\SouthAfricanTaxService;
 use App\Traits\RetriesTransactions;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ProcessScheduledPayroll extends Command
@@ -46,7 +48,8 @@ class ProcessScheduledPayroll extends Command
         protected PayrollValidationService $validationService,
         protected LockService $lockService,
         protected BatchProcessingService $batchProcessingService,
-        protected SettlementService $settlementService
+        protected SettlementService $settlementService,
+        protected EscrowService $escrowService
     ) {
         parent::__construct();
     }
@@ -56,6 +59,20 @@ class ProcessScheduledPayroll extends Command
      */
     public function handle(): int
     {
+        // Generate operation ID for schedule execution tracking
+        $operationId = \App\Helpers\LogContext::generateOperationId();
+        $correlationId = \Illuminate\Support\Str::uuid()->toString();
+
+        // Log operation start
+        $logContext = \App\Helpers\LogContext::logOperationStart('process_scheduled_payroll', \App\Helpers\LogContext::create(
+            $correlationId,
+            null,
+            null,
+            'schedule_execution',
+            null,
+            ['operation_id' => $operationId]
+        ));
+
         // Process schedules in chunks to avoid memory issues with large datasets
         $totalJobs = 0;
         $processedSchedules = 0;
@@ -108,11 +125,27 @@ class ProcessScheduledPayroll extends Command
 
         if ($processedSchedules === 0) {
             $this->info('No due payroll schedules found.');
+            \App\Helpers\LogContext::logOperationEnd('process_scheduled_payroll', array_merge($logContext, [
+                'correlation_id' => $correlationId,
+                'operation_id' => $operationId,
+            ]), true, [
+                'schedules_processed' => 0,
+                'jobs_dispatched' => 0,
+            ]);
 
             return Command::SUCCESS;
         }
 
         $this->info("Processed {$processedSchedules} schedule(s) and dispatched {$totalJobs} payroll job(s) to the queue.");
+
+        // Log operation end
+        \App\Helpers\LogContext::logOperationEnd('process_scheduled_payroll', array_merge($logContext, [
+            'correlation_id' => $correlationId,
+            'operation_id' => $operationId,
+        ]), true, [
+            'schedules_processed' => $processedSchedules,
+            'jobs_dispatched' => $totalJobs,
+        ]);
 
         return Command::SUCCESS;
     }
@@ -171,7 +204,6 @@ class ProcessScheduledPayroll extends Command
                             'adjustments.adjustment_type',
                             'adjustments.period_start',
                             'adjustments.period_end',
-                            'adjustments.is_recurring',
                         ]);
                 },
                 'timeEntries' => function ($query) use ($payPeriodStart, $payPeriodEnd) {
@@ -197,12 +229,6 @@ class ProcessScheduledPayroll extends Command
             });
         } else {
             $employees = $employeeQuery->get();
-        }
-
-        if ($employees->isEmpty()) {
-            $this->warn("Schedule #{$schedule->id} has no employees assigned. Skipping.");
-
-            return 0;
         }
 
         Log::info('Calculated pay period for schedule', [
@@ -233,17 +259,60 @@ class ProcessScheduledPayroll extends Command
                 return 0;
             }
 
+            // Compute next_run_at before atomic claim (for recurring schedules)
+            // This ensures we set both last_run_at and next_run_at atomically
+            $updateData = [
+                'last_run_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($lockedSchedule->isOneTime()) {
+                // One-time: cancel and clear next_run_at
+                $updateData['next_run_at'] = null;
+                $updateData['status'] = 'cancelled';
+            } else {
+                // Recurring: compute next run time (same logic as updateScheduleAfterProcessing)
+                try {
+                    $cron = CronExpression::factory($lockedSchedule->frequency);
+                    $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+
+                    // Skip weekends and holidays - move to next business day if needed
+                    if (! $this->holidayService->isBusinessDay($nextRun)) {
+                        $originalTime = $nextRun->format('H:i');
+                        $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
+                        // Preserve the time from the original cron calculation
+                        $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+                    }
+
+                    $updateData['next_run_at'] = $nextRun;
+                } catch (\Exception $e) {
+                    Log::error('Failed to calculate next run time during claim', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'frequency' => $lockedSchedule->frequency,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    // If calculation fails, don't claim the schedule
+                    return 0;
+                }
+            }
+
             // Atomically claim the schedule using UPDATE with WHERE condition
             // This eliminates the check-then-act race condition
+            // For one-time: only claim if last_run_at is null
+            // For recurring: claim if last_run_at is null or last_run_at < next_run_at
+            $whereCondition = $lockedSchedule->isOneTime()
+                ? function ($query) {
+                    $query->whereNull('last_run_at');
+                }
+            : function ($query) {
+                $query->whereNull('last_run_at')
+                    ->orWhereColumn('last_run_at', '<', 'next_run_at');
+            };
+
             $updated = PayrollSchedule::where('id', $schedule->id)
-                ->where(function ($query) {
-                    $query->whereNull('last_run_at')
-                        ->orWhereColumn('last_run_at', '<', 'next_run_at');
-                })
-                ->update([
-                    'last_run_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                ->where($whereCondition)
+                ->update($updateData);
 
             if ($updated === 0) {
                 Log::info('Payroll schedule already processed by another process', [
@@ -258,6 +327,81 @@ class ProcessScheduledPayroll extends Command
             // Reload the schedule to get updated timestamp
             $lockedSchedule->refresh();
 
+            // Check if schedule has employees - if not, log and return 0 (schedule already marked as processed)
+            if ($employees->isEmpty()) {
+                Log::warning('Payroll schedule has no employees assigned - schedule marked as processed', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'schedule_name' => $lockedSchedule->name,
+                    'business_id' => $lockedSchedule->business_id,
+                ]);
+
+                $this->warn("Schedule #{$lockedSchedule->id} has no employees assigned. Schedule marked as processed.");
+
+                return 0;
+            }
+
+            // Check escrow balance before processing
+            // Lock business row to prevent concurrent balance checks
+            $business = \App\Models\Business::where('id', $lockedSchedule->business_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $business) {
+                Log::warning('Business not found for payroll schedule', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $lockedSchedule->business_id,
+                ]);
+
+                return 0;
+            }
+
+            // CRITICAL CHECK #1: escrow_balance must be NOT NULL
+            // This prevents creating jobs when balance is NULL (should be prevented by database constraint, but check here too)
+            if ($business->escrow_balance === null) {
+                Log::warning('Payroll schedule skipped - escrow balance is NULL', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => null,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is NULL. This is a critical error - active businesses must have a non-NULL escrow balance.");
+
+                return 0;
+            }
+
+            // Get available balance with locked row (no refresh needed since we just locked it)
+            $escrowBalance = $this->escrowService->getAvailableBalance($business, false, false);
+
+            // CRITICAL CHECK #2: escrow balance must be greater than zero (explicit zero check)
+            // This prevents creating jobs when balance is exactly zero
+            if ($escrowBalance === 0) {
+                Log::warning('Payroll schedule skipped - escrow balance is exactly zero', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is zero");
+
+                return 0;
+            }
+
+            // CRITICAL CHECK #3: escrow balance must not be negative
+            if ($escrowBalance < 0) {
+                Log::warning('Payroll schedule skipped - escrow balance is negative', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is negative (balance: {$escrowBalance})");
+
+                return 0;
+            }
+
+            // Generate schedule run ID for audit trail (all jobs from this run share the same ID)
+            $scheduleRunId = \Illuminate\Support\Str::uuid()->toString();
+
             $totalJobs = 0;
             $jobsToCreate = [];
             // Adaptive batch sizing based on system load, memory, and queue depth
@@ -268,6 +412,7 @@ class ProcessScheduledPayroll extends Command
                 $payPeriodStart,
                 $payPeriodEnd,
                 $lockedSchedule,
+                $scheduleRunId,
                 &$jobsToCreate,
                 &$totalJobs
             ) {
@@ -309,6 +454,7 @@ class ProcessScheduledPayroll extends Command
                         // Prepare job data for batch insert
                         $jobsToCreate[] = [
                             'payroll_schedule_id' => $lockedSchedule->id,
+                            'schedule_run_id' => $scheduleRunId,
                             'employee_id' => $employee->id,
                             'gross_salary' => $calculation['gross_salary'],
                             'paye_amount' => $calculation['paye_amount'],
@@ -341,21 +487,193 @@ class ProcessScheduledPayroll extends Command
                 }
             });
 
+            // Check escrow balance again after calculating all payroll amounts
+            // This ensures we don't create jobs if total exceeds available balance
+            // Use net_salary as that's what's actually paid out to employees
+            if (! empty($jobsToCreate)) {
+                // Refresh business to get latest balance (still within transaction with lock)
+                $business->refresh();
+
+                // CRITICAL CHECK: escrow_balance must be NOT NULL (re-check after refresh)
+                if ($business->escrow_balance === null) {
+                    Log::warning('Payroll schedule skipped - escrow balance is NULL after calculation', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => null,
+                    ]);
+
+                    $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is NULL after calculation");
+
+                    return 0;
+                }
+
+                // Calculate total net salary (what's actually paid out)
+                $totalPayrollAmount = array_sum(array_column($jobsToCreate, 'net_salary'));
+
+                // Get available balance with locked row (no refresh needed since we just refreshed it)
+                $currentBalance = $this->escrowService->getAvailableBalance($business, false, false);
+
+                // CRITICAL CHECK: escrow balance must be greater than zero (explicit zero check)
+                if ($currentBalance === 0) {
+                    Log::warning('Payroll schedule skipped - escrow balance is exactly zero after calculation', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'total_payroll_amount' => $totalPayrollAmount,
+                        'total_net_salary' => $totalPayrollAmount,
+                    ]);
+
+                    $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is zero");
+
+                    return 0;
+                }
+
+                if ($currentBalance < 0) {
+                    Log::warning('Payroll schedule skipped - escrow balance is negative after calculation', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'total_payroll_amount' => $totalPayrollAmount,
+                        'total_net_salary' => $totalPayrollAmount,
+                    ]);
+
+                    $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is negative (balance: {$currentBalance})");
+
+                    return 0;
+                }
+
+                // Explicit check: available balance must be sufficient for total net salary required
+                if ($currentBalance < $totalPayrollAmount) {
+                    Log::warning('Payroll schedule skipped - insufficient escrow balance', [
+                        'schedule_id' => $lockedSchedule->id,
+                        'business_id' => $business->id,
+                        'escrow_balance' => $currentBalance,
+                        'required_amount' => $totalPayrollAmount,
+                        'shortfall' => $totalPayrollAmount - $currentBalance,
+                    ]);
+
+                    $this->warn("Skipping schedule #{$lockedSchedule->id} - insufficient escrow balance. Available: ".number_format($currentBalance, 2).', Required: '.number_format($totalPayrollAmount, 2));
+
+                    return 0;
+                }
+            }
+
             // Bulk insert payroll jobs
             if (! empty($jobsToCreate)) {
                 try {
+                    // CRITICAL: Calculate total amount for entire batch before any inserts
+                    // This prevents creating jobs when total batch exceeds balance
+                    $totalBatchAmount = array_sum(array_column($jobsToCreate, 'net_salary'));
+
+                    // Explicit check: total batch amount must not exceed available balance
+                    if ($currentBalance < $totalBatchAmount) {
+                        Log::warning('Payroll schedule skipped - total batch amount exceeds available balance', [
+                            'schedule_id' => $lockedSchedule->id,
+                            'business_id' => $business->id,
+                            'escrow_balance' => $currentBalance,
+                            'total_batch_amount' => $totalBatchAmount,
+                            'shortfall' => $totalBatchAmount - $currentBalance,
+                            'job_count' => count($jobsToCreate),
+                        ]);
+
+                        $this->warn("Skipping schedule #{$lockedSchedule->id} - total batch amount exceeds available balance. Available: ".number_format($currentBalance, 2).', Total batch: '.number_format($totalBatchAmount, 2));
+
+                        return 0;
+                    }
+
                     // Use batch insert for better performance
                     // Larger chunks (200) for better performance while staying within query limits
                     $chunks = array_chunk($jobsToCreate, max($batchSize, 200));
 
                     foreach ($chunks as $chunk) {
+                        // CRITICAL: Re-check balance before each chunk insert with locked business row
+                        // This prevents race conditions where balance might have changed between initial check and insert
+                        $business->refresh();
+                        $chunkTotalNetSalary = array_sum(array_column($chunk, 'net_salary'));
+
+                        // CRITICAL CHECK: escrow_balance must be NOT NULL (re-check after refresh)
+                        if ($business->escrow_balance === null) {
+                            Log::warning('Payroll job chunk skipped - escrow balance is NULL after refresh', [
+                                'schedule_id' => $lockedSchedule->id,
+                                'business_id' => $business->id,
+                                'escrow_balance' => null,
+                                'chunk_total_net_salary' => $chunkTotalNetSalary,
+                                'chunk_size' => count($chunk),
+                            ]);
+
+                            $this->warn('Skipping chunk of '.count($chunk).' payroll jobs - escrow balance is NULL');
+
+                            continue;
+                        }
+
+                        $currentBalance = $this->escrowService->getAvailableBalance($business, false, false);
+
+                        // CRITICAL CHECK: escrow balance must be greater than zero (explicit zero check)
+                        if ($currentBalance === 0) {
+                            Log::warning('Payroll job chunk skipped - escrow balance is exactly zero', [
+                                'schedule_id' => $lockedSchedule->id,
+                                'business_id' => $business->id,
+                                'escrow_balance' => $currentBalance,
+                                'chunk_total_net_salary' => $chunkTotalNetSalary,
+                                'chunk_size' => count($chunk),
+                            ]);
+
+                            $this->warn('Skipping chunk of '.count($chunk).' payroll jobs - escrow balance is zero');
+
+                            continue;
+                        }
+
+                        if ($currentBalance < 0) {
+                            Log::warning('Payroll job chunk skipped - escrow balance is negative', [
+                                'schedule_id' => $lockedSchedule->id,
+                                'business_id' => $business->id,
+                                'escrow_balance' => $currentBalance,
+                                'chunk_total_net_salary' => $chunkTotalNetSalary,
+                                'chunk_size' => count($chunk),
+                            ]);
+
+                            $this->warn('Skipping chunk of '.count($chunk)." payroll jobs - escrow balance is negative (balance: {$currentBalance})");
+
+                            continue;
+                        }
+
+                        // Explicit check: available balance must be sufficient for chunk total net salary
+                        if ($currentBalance < $chunkTotalNetSalary) {
+                            Log::warning('Payroll job chunk skipped - insufficient escrow balance', [
+                                'schedule_id' => $lockedSchedule->id,
+                                'business_id' => $business->id,
+                                'escrow_balance' => $currentBalance,
+                                'chunk_total_net_salary' => $chunkTotalNetSalary,
+                                'shortfall' => $chunkTotalNetSalary - $currentBalance,
+                                'chunk_size' => count($chunk),
+                            ]);
+
+                            $this->warn('Skipping chunk of '.count($chunk).' payroll jobs - insufficient escrow balance. Available: '.number_format($currentBalance, 2).', Required: '.number_format($chunkTotalNetSalary, 2));
+
+                            continue;
+                        }
+
                         try {
                             \DB::table('payroll_jobs')->insert($chunk);
                         } catch (\Illuminate\Database\QueryException $e) {
-                            // Handle unique constraint violations - insert individually for this chunk
-                            if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
+                            // Handle unique constraint violations (MySQL and PostgreSQL) - insert individually for this chunk
+                            if (app(\App\Services\ErrorClassificationService::class)->isUniqueConstraintViolation($e)) {
                                 foreach ($chunk as $jobData) {
                                     try {
+                                        // Re-check balance before individual insert in retry path
+                                        $business->refresh();
+                                        $individualBalance = $this->escrowService->getAvailableBalance($business, false, false);
+                                        if ($individualBalance === 0 || $individualBalance < 0 || $individualBalance < $jobData['net_salary']) {
+                                            Log::warning('Payroll job skipped in retry - insufficient balance', [
+                                                'employee_id' => $jobData['employee_id'],
+                                                'schedule_id' => $lockedSchedule->id,
+                                                'balance' => $individualBalance,
+                                                'required' => $jobData['net_salary'],
+                                            ]);
+
+                                            continue;
+                                        }
+
                                         $lockedSchedule->payrollJobs()->create($jobData);
                                     } catch (\Exception $e2) {
                                         // Skip duplicates
@@ -438,9 +756,10 @@ class ProcessScheduledPayroll extends Command
                 }
             }
 
-            // Update schedule only if we successfully created at least one job or processed all employees
+            // Schedule is already updated atomically in the claim transaction above
+            // Log completion for informational purposes only
             if ($totalJobs > 0 || count($employees) === 0) {
-                $this->updateScheduleAfterProcessing($lockedSchedule);
+                $this->logScheduleCompletion($lockedSchedule, $totalJobs);
             }
 
             // Clear memory: unset large collections that are no longer needed
@@ -451,58 +770,36 @@ class ProcessScheduledPayroll extends Command
     }
 
     /**
-     * Update schedule after processing
+     * Log schedule completion (informational only - schedule already updated atomically)
+     *
+     * The schedule's last_run_at and next_run_at are already set atomically in the claim transaction.
+     * This method only provides logging and user feedback.
      */
-    protected function updateScheduleAfterProcessing(PayrollSchedule $schedule): void
+    protected function logScheduleCompletion(PayrollSchedule $schedule, int $jobsCreated): void
     {
+        // Reload to get the updated next_run_at
+        $schedule->refresh();
+
         if ($schedule->isOneTime()) {
-            // Auto-cancel one-time schedules after execution
-            $schedule->update([
-                'status' => 'cancelled',
-                'next_run_at' => null,
-                'last_run_at' => now(),
-            ]);
-
-            Log::info('One-time payroll schedule auto-cancelled after execution', [
+            Log::info('One-time payroll schedule processed and auto-cancelled', [
                 'schedule_id' => $schedule->id,
+                'jobs_created' => $jobsCreated,
             ]);
 
-            $this->info("Schedule #{$schedule->id} (one-time) processed and auto-cancelled.");
+            $this->info("Schedule #{$schedule->id} (one-time) processed and auto-cancelled. Created {$jobsCreated} job(s).");
         } else {
-            // Calculate next run time for recurring schedules
-            try {
-                $cron = CronExpression::factory($schedule->frequency);
-                $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            $nextRun = $schedule->next_run_at;
 
-                // Skip weekends and holidays - move to next business day if needed
-                if (! $this->holidayService->isBusinessDay($nextRun)) {
-                    $originalDate = $nextRun->format('Y-m-d');
-                    $originalTime = $nextRun->format('H:i');
-                    $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
-                    // Preserve the time from the original cron calculation
-                    $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+            Log::info('Recurring payroll schedule processed', [
+                'schedule_id' => $schedule->id,
+                'jobs_created' => $jobsCreated,
+                'next_run_at' => $nextRun?->format('Y-m-d H:i:s'),
+            ]);
 
-                    Log::info('Payroll schedule next run adjusted to skip weekend/holiday', [
-                        'schedule_id' => $schedule->id,
-                        'original_date' => $originalDate,
-                        'adjusted_date' => $nextRun->format('Y-m-d'),
-                    ]);
-                }
-
-                $schedule->update([
-                    'next_run_at' => $nextRun,
-                    'last_run_at' => now(),
-                ]);
-
-                $this->info("Schedule #{$schedule->id} processed. Next run: {$nextRun->format('Y-m-d H:i:s')}");
-            } catch (\Exception $e) {
-                Log::error('Failed to calculate next run time for payroll schedule', [
-                    'schedule_id' => $schedule->id,
-                    'frequency' => $schedule->frequency,
-                    'error' => $e->getMessage(),
-                ]);
-
-                $this->error("Failed to calculate next run time for schedule #{$schedule->id}: {$e->getMessage()}");
+            if ($nextRun) {
+                $this->info("Schedule #{$schedule->id} processed. Created {$jobsCreated} job(s). Next run: {$nextRun->format('Y-m-d H:i:s')}");
+            } else {
+                $this->info("Schedule #{$schedule->id} processed. Created {$jobsCreated} job(s).");
             }
         }
     }
@@ -674,17 +971,43 @@ class ProcessScheduledPayroll extends Command
         // Factor 5: Database connection pool awareness
         // Consider active database connections (if we can query it)
         try {
-            $activeConnections = DB::select('SHOW STATUS WHERE Variable_name = ?', ['Threads_connected']);
-            if (! empty($activeConnections) && isset($activeConnections[0]->Value)) {
-                $connections = (int) $activeConnections[0]->Value;
-                $maxConnections = (int) config('database.connections.mysql.max_connections', 151);
-                $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+            $driver = config('database.default');
+            $connectionName = config("database.connections.{$driver}.driver");
 
-                // Reduce batch size if connection pool is getting full
-                if ($connectionPercent > 80) {
-                    $batchSize = max(25, (int) ($batchSize * 0.7));
-                } elseif ($connectionPercent > 60) {
-                    $batchSize = max(25, (int) ($batchSize * 0.9));
+            // Database-specific connection check
+            if ($connectionName === 'mysql' || $connectionName === 'mariadb') {
+                $activeConnections = DB::select('SHOW STATUS WHERE Variable_name = ?', ['Threads_connected']);
+                if (! empty($activeConnections) && isset($activeConnections[0]->Value)) {
+                    $connections = (int) $activeConnections[0]->Value;
+                    $maxConnections = (int) config("database.connections.{$driver}.max_connections", 151);
+                    $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+
+                    // Reduce batch size if connection pool is getting full
+                    if ($connectionPercent > 80) {
+                        $batchSize = max(25, (int) ($batchSize * 0.7));
+                    } elseif ($connectionPercent > 60) {
+                        $batchSize = max(25, (int) ($batchSize * 0.9));
+                    }
+                }
+            } elseif ($connectionName === 'pgsql') {
+                $result = DB::selectOne('
+                    SELECT 
+                        count(*) as active_connections,
+                        (SELECT setting::int FROM pg_settings WHERE name = \'max_connections\') as max_connections
+                    FROM pg_stat_activity 
+                    WHERE datname = current_database()
+                ');
+                if ($result && isset($result->active_connections)) {
+                    $connections = (int) $result->active_connections;
+                    $maxConnections = (int) ($result->max_connections ?? 100);
+                    $connectionPercent = $maxConnections > 0 ? ($connections / $maxConnections) * 100 : 0;
+
+                    // Reduce batch size if connection pool is getting full
+                    if ($connectionPercent > 80) {
+                        $batchSize = max(25, (int) ($batchSize * 0.7));
+                    } elseif ($connectionPercent > 60) {
+                        $batchSize = max(25, (int) ($batchSize * 0.9));
+                    }
                 }
             }
         } catch (\Exception $e) {

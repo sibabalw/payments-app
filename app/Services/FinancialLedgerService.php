@@ -102,6 +102,7 @@ class FinancialLedgerService
      * @param  array|null  $metadata  Additional metadata (before/after balances, etc.)
      * @param  \App\Models\User|null  $user  User who initiated the transaction
      * @param  string  $currency  Currency code (default: ZAR). Must be same for both entries.
+     * @param  string|null  $operationType  Operation type (PAYROLL_PROCESS, PAYMENT_PROCESS, etc.)
      * @return array Array with 'debit' and 'credit' ledger entries
      */
     public function recordTransaction(
@@ -114,10 +115,11 @@ class FinancialLedgerService
         ?Model $reference = null,
         ?array $metadata = null,
         ?\App\Models\User $user = null,
-        string $currency = 'ZAR'
+        string $currency = 'ZAR',
+        ?string $operationType = null
     ): array {
         // Use write connection for ledger operations
-        return DB::connection('mysql')->transaction(function () use (
+        return DB::connection()->transaction(function () use (
             $correlationId,
             $debitAccount,
             $creditAccount,
@@ -166,6 +168,13 @@ class FinancialLedgerService
             $debitSequence = $this->sequenceService->getNext();
             $creditSequence = $this->sequenceService->getNext(); // Credit immediately follows debit in sequence
 
+            // Enhance metadata with operation context
+            $enhancedMetadata = array_merge($metadata ?? [], [
+                'operation_type' => $operationType ?? $this->inferOperationType($debitAccount, $creditAccount),
+                'recorded_at' => now()->toIso8601String(),
+                'recorded_by_user_id' => $user?->id,
+            ]);
+
             // Create debit entry (starts as PENDING, transitions to POSTED after settlement)
             $debit = FinancialLedger::create([
                 'correlation_id' => $correlationId,
@@ -179,7 +188,7 @@ class FinancialLedgerService
                 'amount_minor_units' => $amountMinorUnits,
                 'currency' => $currency,
                 'description' => $description ?? "Debit from {$debitAccount}",
-                'metadata' => $metadata,
+                'metadata' => $enhancedMetadata,
                 'user_id' => $user?->id,
                 'effective_at' => now(),
                 'posting_state' => FinancialLedger::POSTING_PENDING,
@@ -198,7 +207,7 @@ class FinancialLedgerService
                 'amount_minor_units' => $amountMinorUnits,
                 'currency' => $currency, // Same currency - cross-currency transactions forbidden
                 'description' => $description ?? "Credit to {$creditAccount}",
-                'metadata' => $metadata,
+                'metadata' => $enhancedMetadata,
                 'user_id' => $user?->id,
                 'effective_at' => now(),
                 'posting_state' => FinancialLedger::POSTING_PENDING,
@@ -213,6 +222,21 @@ class FinancialLedgerService
                 'debit_id' => $debit->id,
                 'credit_id' => $credit->id,
             ]);
+
+            // Send notification if enabled (after transaction commits)
+            DB::afterCommit(function () use ($correlationId, $business, $debitAccount, $creditAccount) {
+                try {
+                    $notificationService = app(\App\Services\PostgresNotificationService::class);
+                    $transactionType = "{$debitAccount}_TO_{$creditAccount}";
+                    $notificationService->notifyTransaction($correlationId, $business->id, $transactionType);
+                } catch (\Exception $e) {
+                    // Don't fail if notification fails
+                    Log::debug('Failed to send transaction notification', [
+                        'correlation_id' => $correlationId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            });
 
             return [
                 'debit' => $debit,
@@ -238,6 +262,7 @@ class FinancialLedgerService
      *                               - metadata: array|null
      *                               - user: User|null
      *                               - currency: string (default: ZAR)
+     *                               - operation_type: string|null (PAYROLL_PROCESS, PAYMENT_PROCESS, etc.)
      * @return array Array of results, each with 'debit' and 'credit' entries
      */
     public function recordBulkTransactions(array $transactions): array
@@ -247,7 +272,7 @@ class FinancialLedgerService
         }
 
         // Use write connection for ledger operations
-        return DB::connection('mysql')->transaction(function () use ($transactions) {
+        return DB::connection()->transaction(function () use ($transactions) {
             // Pre-allocate sequence numbers for all entries (2 per transaction)
             $totalEntries = count($transactions) * 2;
             $sequenceNumbers = $this->sequenceService->getNextRange($totalEntries);
@@ -273,6 +298,7 @@ class FinancialLedgerService
                 $metadata = $txn['metadata'] ?? null;
                 $user = $txn['user'] ?? null;
                 $currency = $txn['currency'] ?? 'ZAR';
+                $operationType = $txn['operation_type'] ?? $this->inferOperationType($debitAccount, $creditAccount);
 
                 // Validate amount
                 if ($amount <= 0) {
@@ -459,12 +485,18 @@ class FinancialLedgerService
      * @param  FinancialLedger  $originalEntry  Original ledger entry to reverse
      * @param  string|null  $reason  Reason for reversal
      * @param  \App\Models\User|null  $user  User initiating the reversal
+     * @param  string|null  $compensationChainId  Compensation chain ID for linking original -> reversal -> compensation
+     * @param  array|null  $beforeState  Before state snapshot for audit
+     * @param  array|null  $afterState  After state snapshot for audit
      * @return array Array with reversed 'debit' and 'credit' entries
      */
     public function reverseTransaction(
         FinancialLedger $originalEntry,
         ?string $reason = null,
-        ?\App\Models\User $user = null
+        ?\App\Models\User $user = null,
+        ?string $compensationChainId = null,
+        ?array $beforeState = null,
+        ?array $afterState = null
     ): array {
         // Find the paired entry (debit/credit pair)
         $pairedEntry = FinancialLedger::where('correlation_id', $originalEntry->correlation_id)
@@ -475,9 +507,15 @@ class FinancialLedgerService
             throw new \RuntimeException('Cannot reverse transaction: paired entry not found');
         }
 
-        $correlationId = Str::uuid()->toString();
+        // Check if already reversed
+        if ($originalEntry->posting_state === FinancialLedger::POSTING_REVERSED) {
+            throw new \RuntimeException('Cannot reverse transaction: entry is already reversed');
+        }
 
-        return DB::transaction(function () use ($originalEntry, $pairedEntry, $correlationId, $reason, $user) {
+        $correlationId = Str::uuid()->toString();
+        $chainId = $compensationChainId ?? $originalEntry->correlation_id; // Use original correlation_id as chain_id if not provided
+
+        return DB::transaction(function () use ($originalEntry, $pairedEntry, $correlationId, $reason, $user, $chainId, $beforeState, $afterState) {
             // Validate currency consistency (both entries must have same currency)
             if ($originalEntry->currency !== $pairedEntry->currency) {
                 throw new \RuntimeException('Cannot reverse transaction: currency mismatch between entries');
@@ -485,6 +523,22 @@ class FinancialLedgerService
 
             $currency = $originalEntry->currency;
             $amountMinorUnits = $originalEntry->amount_minor_units ?? $this->toMinorUnits($originalEntry->amount, $currency);
+
+            // Store before state snapshot if not provided
+            if ($beforeState === null) {
+                $beforeState = [
+                    'original_entry' => [
+                        'id' => $originalEntry->id,
+                        'posting_state' => $originalEntry->posting_state,
+                        'amount' => $originalEntry->amount,
+                    ],
+                    'paired_entry' => [
+                        'id' => $pairedEntry->id,
+                        'posting_state' => $pairedEntry->posting_state,
+                        'amount' => $pairedEntry->amount,
+                    ],
+                ];
+            }
 
             // Mark original entry as REVERSED
             $originalEntry->update(['posting_state' => FinancialLedger::POSTING_REVERSED]);
@@ -508,6 +562,11 @@ class FinancialLedgerService
                 'metadata' => array_merge($originalEntry->metadata ?? [], [
                     'reversal_reason' => $reason,
                     'original_correlation_id' => $originalEntry->correlation_id,
+                    'compensation_chain_id' => $chainId,
+                    'before_state' => $beforeState,
+                    'after_state' => $afterState,
+                    'reversed_by_user_id' => $user?->id,
+                    'reversed_at' => now()->toIso8601String(),
                 ]),
                 'reversal_of_id' => $originalEntry->id,
                 'user_id' => $user?->id,
@@ -537,6 +596,11 @@ class FinancialLedgerService
                 'metadata' => array_merge($pairedEntry->metadata ?? [], [
                     'reversal_reason' => $reason,
                     'original_correlation_id' => $pairedEntry->correlation_id,
+                    'compensation_chain_id' => $chainId,
+                    'before_state' => $beforeState,
+                    'after_state' => $afterState,
+                    'reversed_by_user_id' => $user?->id,
+                    'reversed_at' => now()->toIso8601String(),
                 ]),
                 'reversal_of_id' => $pairedEntry->id,
                 'user_id' => $user?->id,
@@ -551,15 +615,19 @@ class FinancialLedgerService
             Log::info('Transaction reversed', [
                 'original_correlation_id' => $originalEntry->correlation_id,
                 'reversal_correlation_id' => $correlationId,
+                'compensation_chain_id' => $chainId,
                 'original_debit_id' => $originalEntry->id,
                 'original_credit_id' => $pairedEntry->id,
                 'reversed_debit_id' => $reversedOriginal->id,
                 'reversed_credit_id' => $reversedPaired->id,
+                'reason' => $reason,
+                'user_id' => $user?->id,
             ]);
 
             return [
                 'debit' => $reversedOriginal->isDebit() ? $reversedOriginal : $reversedPaired,
                 'credit' => $reversedOriginal->isCredit() ? $reversedOriginal : $reversedPaired,
+                'compensation_chain_id' => $chainId,
             ];
         });
     }
@@ -899,5 +967,33 @@ class FinancialLedgerService
             'failed' => $failed,
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Infer operation type from account types
+     *
+     * @param  string  $debitAccount  Debit account
+     * @param  string  $creditAccount  Credit account
+     * @return string Operation type
+     */
+    protected function inferOperationType(string $debitAccount, string $creditAccount): string
+    {
+        if ($debitAccount === self::ACCOUNT_PAYROLL && $creditAccount === self::ACCOUNT_ESCROW) {
+            return 'PAYROLL_PROCESS';
+        }
+
+        if ($debitAccount === self::ACCOUNT_PAYMENT && $creditAccount === self::ACCOUNT_ESCROW) {
+            return 'PAYMENT_PROCESS';
+        }
+
+        if ($debitAccount === self::ACCOUNT_ESCROW && $creditAccount === self::ACCOUNT_BANK) {
+            return 'ESCROW_DEPOSIT';
+        }
+
+        if ($debitAccount === self::ACCOUNT_BANK && $creditAccount === self::ACCOUNT_ESCROW) {
+            return 'ESCROW_WITHDRAWAL';
+        }
+
+        return 'UNKNOWN';
     }
 }

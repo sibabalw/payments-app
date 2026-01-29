@@ -14,6 +14,9 @@ class PayrollScheduleObserver
 
     /**
      * Handle the PayrollSchedule "deleted" event.
+     * Note: Audit logging is handled in the controller before deletion
+     * to ensure all related data is captured. This observer only handles
+     * cascade deletion of pivot table entries.
      */
     public function deleted(PayrollSchedule $payrollSchedule): void
     {
@@ -22,10 +25,7 @@ class PayrollScheduleObserver
             ->where('payroll_schedule_id', $payrollSchedule->id)
             ->delete();
 
-        $this->auditService->log(
-            'payroll_schedule.deleted',
-            $payrollSchedule,
-            $payrollSchedule->getAttributes()
-        );
+        // Audit logging is done in PayrollController::destroy() before deletion
+        // to ensure comprehensive data capture including related employees
     }
 }

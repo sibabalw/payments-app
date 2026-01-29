@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\AuditLog;
 use App\Models\PaymentJob;
 use App\Models\PayrollJob;
 use App\Services\MetricsService;
@@ -22,25 +21,30 @@ class PerformanceController extends Controller
      */
     public function index(): Response
     {
-        // Transaction success rates (last 30 days)
+        // Transaction success rates (last 30 days) — use single-quoted strings for PostgreSQL
+        $driver = DB::connection()->getDriverName();
+        $avgTimeExpr = $driver === 'pgsql'
+            ? 'AVG(CASE WHEN processed_at IS NOT NULL THEN EXTRACT(EPOCH FROM (processed_at - created_at)) * 1000 ELSE NULL END) as avg_processing_time_ms'
+            : 'AVG(CASE WHEN processed_at IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND, created_at, processed_at) / 1000 ELSE NULL END) as avg_processing_time_ms';
+
         $paymentStats = PaymentJob::query()
             ->where('processed_at', '>=', now()->subDays(30))
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed,
-                AVG(CASE WHEN processed_at IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND, created_at, processed_at) / 1000 ELSE NULL END) as avg_processing_time_ms
-            ')
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                {$avgTimeExpr}
+            ")
             ->first();
 
         $payrollStats = PayrollJob::query()
             ->where('processed_at', '>=', now()->subDays(30))
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed,
-                AVG(CASE WHEN processed_at IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND, created_at, processed_at) / 1000 ELSE NULL END) as avg_processing_time_ms
-            ')
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                {$avgTimeExpr}
+            ")
             ->first();
 
         $paymentSuccessRate = $paymentStats->total > 0
