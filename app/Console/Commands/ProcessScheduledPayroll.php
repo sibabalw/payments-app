@@ -7,6 +7,7 @@ use App\Jobs\ProcessPayrollJob;
 use App\Models\PayrollSchedule;
 use App\Services\AdjustmentService;
 use App\Services\BatchProcessingService;
+use App\Services\CronExpressionService;
 use App\Services\EscrowService;
 use App\Services\LockService;
 use App\Services\PayrollCalculationService;
@@ -16,7 +17,6 @@ use App\Services\SettlementService;
 use App\Services\SouthAfricaHolidayService;
 use App\Services\SouthAfricanTaxService;
 use App\Traits\RetriesTransactions;
-use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -44,6 +44,7 @@ class ProcessScheduledPayroll extends Command
         protected SalaryCalculationService $salaryCalculationService,
         protected AdjustmentService $adjustmentService,
         protected SouthAfricaHolidayService $holidayService,
+        protected CronExpressionService $cronService,
         protected PayrollCalculationService $payrollCalculationService,
         protected PayrollValidationService $validationService,
         protected LockService $lockService,
@@ -273,8 +274,7 @@ class ProcessScheduledPayroll extends Command
             } else {
                 // Recurring: compute next run time (same logic as updateScheduleAfterProcessing)
                 try {
-                    $cron = CronExpression::factory($lockedSchedule->frequency);
-                    $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    $nextRun = $this->cronService->getNextRunDate($lockedSchedule->frequency, now(config('app.timezone')));
 
                     // Skip weekends and holidays - move to next business day if needed
                     if (! $this->holidayService->isBusinessDay($nextRun)) {

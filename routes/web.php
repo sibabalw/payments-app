@@ -23,6 +23,18 @@ Route::get('/contact', function () {
     return Inertia::render('public/contact');
 })->name('contact');
 
+Route::get('/how-it-works', function () {
+    return Inertia::render('public/how-it-works');
+})->name('how-it-works');
+
+Route::get('/overview', function () {
+    return Inertia::render('public/overview');
+})->name('overview');
+
+Route::get('/faq', function () {
+    return Inertia::render('public/faq');
+})->name('faq');
+
 Route::get('/privacy', function () {
     return Inertia::render('public/privacy');
 })->name('privacy');
@@ -119,6 +131,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/tickets/{ticket}', [\App\Http\Controllers\Admin\AdminTicketController::class, 'show'])
             ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
             ->name('tickets.show');
+        Route::get('/tickets/{ticket}/messages', [\App\Http\Controllers\Admin\AdminTicketController::class, 'messages'])
+            ->where('ticket', '[0-9]+')
+            ->name('tickets.messages');
         Route::post('/tickets/{ticket}/reply', [\App\Http\Controllers\Admin\AdminTicketController::class, 'reply'])
             ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
             ->name('tickets.reply');
@@ -314,6 +329,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('tickets/poll', [\App\Http\Controllers\TicketPollingController::class, 'poll'])->name('tickets.poll');
         Route::resource('tickets', \App\Http\Controllers\TicketController::class)->except(['edit', 'update', 'destroy'])
             ->parameters(['tickets' => 'ticket:id']); // Use id for route model binding
+        Route::get('tickets/{ticket}/messages', [\App\Http\Controllers\TicketController::class, 'messages'])
+            ->where('ticket', '[0-9]+')
+            ->name('tickets.messages');
         Route::post('tickets/{ticket}/reply', [\App\Http\Controllers\TicketController::class, 'reply'])
             ->where('ticket', '[0-9]+') // Only match numeric ticket IDs
             ->name('tickets.reply');

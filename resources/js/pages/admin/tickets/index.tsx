@@ -6,7 +6,11 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
 import { MessageSquare } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { disconnectEcho } from '@/echo';
+
+const TICKETS_CHANNEL = 'tickets';
+const TICKET_EVENTS = ['.ticket.created', '.ticket.updated'] as const;
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Admin', href: '/admin' },
@@ -26,25 +30,37 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function AdminTicketsIndex({ tickets, filters }: any) {
-    // Real-time updates via WebSockets (Pusher)
+    // Real-time updates via WebSockets (Pusher). Leave channel when user navigates away.
+    const channelRef = useRef<{ stopListening: (event: string) => void } | null>(null);
+
     useEffect(() => {
         let reloadTimeout: NodeJS.Timeout | null = null;
-        const reloadDebounceMs = 1000; // Debounce reloads to prevent excessive requests
+        const reloadDebounceMs = 1000;
+
+        const leaveTicketsChannel = () => {
+            if (typeof window === 'undefined' || !window.Echo) return;
+            try {
+                const ch = channelRef.current;
+                if (ch && typeof ch.stopListening === 'function') {
+                    TICKET_EVENTS.forEach((ev) => ch.stopListening(ev));
+                }
+                window.Echo.leave(TICKETS_CHANNEL);
+                channelRef.current = null;
+            } catch (e) {
+                console.error('WebSocket: Error leaving tickets channel', e);
+            }
+            disconnectEcho();
+        };
 
         const initWebSocket = async () => {
             try {
-                const echo = (await import('@/echo')).default;
+                const echo = (await import('@/echo')).default();
 
                 const handleUpdate = () => {
-                    // Clear any pending reload
-                    if (reloadTimeout) {
-                        clearTimeout(reloadTimeout);
-                    }
-                    
-                    // Schedule reload with debounce (without progress bar)
+                    if (reloadTimeout) clearTimeout(reloadTimeout);
                     reloadTimeout = setTimeout(() => {
                         reloadTimeout = null;
-                        router.reload({ 
+                        router.reload({
                             only: ['tickets'],
                             preserveScroll: true,
                             preserveState: false,
@@ -52,45 +68,34 @@ export default function AdminTicketsIndex({ tickets, filters }: any) {
                     }, reloadDebounceMs);
                 };
 
-                // Listen to public tickets channel
-                echo.channel('tickets')
+                const channel = echo
+                    .channel(TICKETS_CHANNEL)
                     .listen('.ticket.created', handleUpdate)
                     .listen('.ticket.updated', handleUpdate);
-
-                return () => {
-                    echo.leave('tickets');
-                };
+                channelRef.current = channel;
             } catch (e) {
                 console.error('Failed to initialize WebSocket:', e);
             }
         };
 
-        const cleanup = initWebSocket();
+        initWebSocket();
 
         return () => {
-            if (reloadTimeout) {
-                clearTimeout(reloadTimeout);
-            }
-            if (cleanup) {
-                cleanup.then((fn) => fn && fn());
-            }
+            if (reloadTimeout) clearTimeout(reloadTimeout);
+            leaveTicketsChannel();
         };
     }, []);
 
     const handleStatusFilter = (status: string) => {
-        if (!status || status === '' || status === 'all') {
-            router.get('/admin/tickets', { status: null });
-        } else {
-            router.get('/admin/tickets', { status });
-        }
+        const nextStatus = !status || status === '' || status === 'all' ? null : status;
+        const nextPriority = filters?.priority && filters.priority !== '' && filters.priority !== 'all' ? filters.priority : null;
+        router.get('/admin/tickets', { status: nextStatus, priority: nextPriority });
     };
 
     const handlePriorityFilter = (priority: string) => {
-        if (!priority || priority === '' || priority === 'all') {
-            router.get('/admin/tickets', { priority: null });
-        } else {
-            router.get('/admin/tickets', { priority });
-        }
+        const nextPriority = !priority || priority === '' || priority === 'all' ? null : priority;
+        const nextStatus = filters?.status && filters.status !== '' && filters.status !== 'all' ? filters.status : null;
+        router.get('/admin/tickets', { status: nextStatus, priority: nextPriority });
     };
 
     return (

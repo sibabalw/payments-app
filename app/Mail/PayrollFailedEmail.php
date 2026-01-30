@@ -53,7 +53,7 @@ class PayrollFailedEmail extends Mailable
         $payrollJob->load('payrollSchedule.business', 'employee.business');
         $business = $payrollJob->payrollSchedule->business ?? $payrollJob->employee->business;
 
-        // Get business email and name, fallback to Swift Pay defaults
+        // Get business email and name, fallback to SwiftPay defaults
         $fromEmail = $business->email ?? config('mail.from.address');
         $fromName = $business->name ?? config('mail.from.name');
 

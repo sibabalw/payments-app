@@ -37,7 +37,7 @@ class Ticket extends Model
 
     public function messages(): HasMany
     {
-        return $this->hasMany(TicketMessage::class)->orderBy('created_at');
+        return $this->hasMany(TicketMessage::class);
     }
 
     public function isOpen(): bool

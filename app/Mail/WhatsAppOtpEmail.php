@@ -28,7 +28,7 @@ class WhatsAppOtpEmail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Your Swift Pay WhatsApp Verification Code',
+            subject: 'Your SwiftPay WhatsApp Verification Code',
         );
     }
 

@@ -1,11 +1,16 @@
-import { Head, Link } from '@inertiajs/react';
-import { ArrowLeft, Mail, MessageSquare, Phone, Clock, ArrowRight } from 'lucide-react';
+import { PublicCard } from '@/components/public-card';
+import { PublicCtaBand } from '@/components/public-cta-band';
+import { PublicInnerHero } from '@/components/public-inner-hero';
+import { PublicSectionInner } from '@/components/public-section';
+import { AnimatedSection } from '@/components/public-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Mail, MessageSquare, Phone, Clock, ArrowRight } from 'lucide-react';
 import { login, register } from '@/routes';
-import { useForm } from '@inertiajs/react';
+import { PublicFooter } from '@/components/public-footer';
 import { PublicNav } from '@/components/public-nav';
 
 export default function Contact() {
@@ -23,61 +28,44 @@ export default function Contact() {
 
     return (
         <>
-            <Head title="Contact - Swift Pay" />
+            <Head title="Contact - SwiftPay" />
             <div className="flex min-h-screen flex-col">
                 <PublicNav />
 
-                {/* Hero Section */}
-                <section className="bg-gradient-to-b from-primary/5 to-background py-12">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                        <Link
-                            href="/"
-                            className="mb-8 inline-flex items-center text-sm text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to home
-                        </Link>
-                        <div className="text-center">
-                            <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-5xl">
-                                Get in Touch
-                            </h1>
-                            <p className="mx-auto mt-4 max-w-2xl text-lg text-gray-600 dark:text-gray-300">
-                                Have questions? We'd love to hear from you. Our team is here to help you get started
-                                with Swift Pay.
-                            </p>
-                        </div>
-                    </div>
-                </section>
+                <PublicInnerHero
+                    title="Get in Touch"
+                    description="Have questions? We'd love to hear from you. Our team is here to help you get started with SwiftPay. Whether you need help with onboarding, features, or support, we're here for you."
+                />
 
                 {/* Contact Section */}
-                <section className="py-16">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <AnimatedSection className="py-16">
+                    <PublicSectionInner>
                         <div className="grid gap-8 lg:grid-cols-2">
                             {/* Contact Information */}
                             <div className="space-y-6">
                                 <div>
-                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                    <h2 className="font-display text-2xl font-bold text-foreground">
                                         Let's Start a Conversation
                                     </h2>
-                                    <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-muted-foreground">
                                         Whether you're looking to get started, have questions about our features, or need
                                         support, we're here to help. Reach out and we'll get back to you as soon as
                                         possible.
                                     </p>
                                 </div>
 
-                                <Card>
-                                    <CardContent className="pt-6">
+                                <PublicCard variant="elevated" className="p-6">
+                                    <div className="pt-0">
                                         <div className="space-y-6">
                                             <div className="flex items-start gap-4">
                                                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                                                     <Mail className="h-6 w-6 text-primary" />
                                                 </div>
                                                 <div>
-                                                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                                                    <h3 className="font-semibold text-foreground">
                                                         Email Us
                                                     </h3>
-                                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         For general inquiries and support
                                                     </p>
                                                     <a
@@ -93,16 +81,16 @@ export default function Contact() {
                                                     <Clock className="h-6 w-6 text-primary" />
                                                 </div>
                                                 <div>
-                                                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                                                    <h3 className="font-semibold text-foreground">
                                                         Support Hours
                                                     </h3>
-                                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         Monday - Friday: 8:00 AM - 6:00 PM SAST
                                                     </p>
-                                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         Saturday: 9:00 AM - 1:00 PM SAST
                                                     </p>
-                                                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         Closed on Sundays and public holidays
                                                     </p>
                                                 </div>
@@ -112,26 +100,26 @@ export default function Contact() {
                                                     <MessageSquare className="h-6 w-6 text-primary" />
                                                 </div>
                                                 <div>
-                                                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                                                    <h3 className="font-semibold text-foreground">
                                                         Response Time
                                                     </h3>
-                                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         We typically respond within 24 hours during business days
                                                     </p>
-                                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                                    <p className="mt-1 text-sm text-muted-foreground">
                                                         Priority support available for Enterprise customers
                                                     </p>
                                                 </div>
                                             </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
+                                    </div>
+                                </PublicCard>
 
                                 <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-6 dark:bg-primary/10">
-                                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                                    <h3 className="font-semibold text-foreground">
                                         Ready to Get Started?
                                     </h3>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-sm text-muted-foreground">
                                         Don't wait—start your free trial today. No credit card required, and you can
                                         explore all features risk-free.
                                     </p>
@@ -147,7 +135,7 @@ export default function Contact() {
                             {/* Contact Form */}
                             <Card>
                                 <CardContent className="pt-6">
-                                    <h2 className="mb-6 text-xl font-semibold text-gray-900 dark:text-white">
+                                    <h2 className="mb-6 text-xl font-semibold text-foreground">
                                         Send Us a Message
                                     </h2>
                                     <form onSubmit={submit} className="space-y-4">
@@ -186,7 +174,7 @@ export default function Contact() {
                                         <Button type="submit" disabled={processing} className="w-full">
                                             {processing ? 'Sending...' : 'Send Message'}
                                         </Button>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        <p className="text-xs text-muted-foreground">
                                             By submitting this form, you agree to our Privacy Policy. We'll never share
                                             your information with third parties.
                                         </p>
@@ -194,17 +182,17 @@ export default function Contact() {
                                 </CardContent>
                             </Card>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* FAQ Quick Links */}
-                <section className="bg-gray-50 py-16 dark:bg-gray-900/50">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <AnimatedSection className="bg-muted/50 py-16">
+                    <PublicSectionInner>
                         <div className="text-center">
-                            <h2 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+                            <h2 className="text-3xl font-bold tracking-tight text-foreground">
                                 Common Questions
                             </h2>
-                            <p className="mt-4 text-lg text-gray-600 dark:text-gray-300">
+                            <p className="mt-4 text-lg text-muted-foreground">
                                 Find quick answers to frequently asked questions
                             </p>
                         </div>
@@ -212,7 +200,7 @@ export default function Contact() {
                             <Card>
                                 <CardContent className="pt-6">
                                     <h3 className="font-semibold">Getting Started</h3>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-sm text-muted-foreground">
                                         Learn how to set up your account, create your first payment schedule, and start
                                         automating your payments.
                                     </p>
@@ -228,7 +216,7 @@ export default function Contact() {
                             <Card>
                                 <CardContent className="pt-6">
                                     <h3 className="font-semibold">Pricing & Plans</h3>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-sm text-muted-foreground">
                                         Understand our transparent pricing model, escrow system, and find the plan that
                                         fits your business.
                                     </p>
@@ -244,8 +232,8 @@ export default function Contact() {
                             <Card>
                                 <CardContent className="pt-6">
                                     <h3 className="font-semibold">Tax Compliance</h3>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                                        Discover how Swift Pay handles PAYE, UIF, SDL, and generates SARS-compliant
+                                    <p className="mt-2 text-sm text-muted-foreground">
+                                        Discover how SwiftPay handles PAYE, UIF, SDL, and generates SARS-compliant
                                         documents automatically.
                                     </p>
                                     <Link
@@ -258,34 +246,27 @@ export default function Contact() {
                                 </CardContent>
                             </Card>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* CTA Section */}
-                <section className="bg-primary py-16">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                        <div className="text-center">
-                            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                                Ready to Transform Your Business?
-                            </h2>
-                            <p className="mx-auto mt-4 max-w-2xl text-lg text-primary-foreground/90">
-                                Join South African businesses that trust Swift Pay. Start your free trial today—no
-                                credit card required.
-                            </p>
-                            <div className="mt-8">
-                                <Link href={register()}>
-                                    <Button size="lg" variant="secondary">
-                                        Start Free Trial
-                                        <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Button>
-                                </Link>
-                            </div>
-                            <p className="mt-4 text-sm text-primary-foreground/80">
-                                14-day free trial • No credit card required • Cancel anytime
-                            </p>
-                        </div>
-                    </div>
-                </section>
+                <AnimatedSection>
+                    <PublicCtaBand
+                        title="Ready to Transform Your Business?"
+                        description="Join South African businesses that trust SwiftPay. Start your free trial today—no credit card required."
+                    >
+                        <Link href={register()}>
+                            <Button variant="gradient" size="lg">
+                                Start Free Trial
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                            </Button>
+                        </Link>
+                        <p className="text-sm text-neutral-400">
+                            14-day free trial • No credit card required • Cancel anytime
+                        </p>
+                    </PublicCtaBand>
+                </AnimatedSection>
+                <PublicFooter />
             </div>
         </>
     );

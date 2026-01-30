@@ -2,7 +2,7 @@
  * Safe Query Builder
  * 
  * This module defines the allowed queries that the AI MVP server can make
- * to the main Swift Pay application. It acts as a whitelist to ensure
+ * to the main SwiftPay application. It acts as a whitelist to ensure
  * the AI can only access predefined, safe endpoints.
  */
 

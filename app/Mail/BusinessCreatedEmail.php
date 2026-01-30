@@ -51,7 +51,7 @@ class BusinessCreatedEmail extends Mailable
             $logoDataUri = $this->getLogoDataUri($this->business);
 
             $html = $templateService->renderTemplate($customTemplate->compiled_html, [
-                'subject' => 'Welcome to Swift Pay!',
+                'subject' => 'Welcome to SwiftPay!',
                 'business_name' => $this->business->name,
                 'business_logo' => $logoDataUri,
                 'app_logo' => asset('logo.svg'),
@@ -71,7 +71,7 @@ class BusinessCreatedEmail extends Mailable
             with: [
                 'user' => $this->user,
                 'businessData' => $this->business, // For content display only
-                'business' => null, // Explicitly null for email branding (app-related email from Swift Pay)
+                'business' => null, // Explicitly null for email branding (app-related email from SwiftPay)
             ],
         );
     }

@@ -2,12 +2,13 @@ import { Head, Link } from '@inertiajs/react';
 import { ArrowLeft, Shield, Lock, Eye, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { login, register } from '@/routes';
+import { PublicFooter } from '@/components/public-footer';
 import { PublicNav } from '@/components/public-nav';
 
 export default function Privacy() {
     return (
         <>
-            <Head title="Privacy Policy - Swift Pay" />
+            <Head title="Privacy Policy - SwiftPay" />
             <div className="flex min-h-screen flex-col">
                 <PublicNav />
 
@@ -47,9 +48,9 @@ export default function Privacy() {
                             {/* Introduction */}
                             <div>
                                 <p className="text-lg text-gray-700 dark:text-gray-300">
-                                    Swift Pay ("we," "our," or "us") is committed to protecting your privacy. This
+                                    SwiftPay ("we," "our," or "us") is committed to protecting your privacy. This
                                     Privacy Policy explains how we collect, use, disclose, and safeguard your information
-                                    when you use our payment and payroll automation platform. By using Swift Pay, you
+                                    when you use our payment and payroll automation platform. By using SwiftPay, you
                                     consent to the data practices described in this policy.
                                 </p>
                             </div>
@@ -271,7 +272,7 @@ export default function Privacy() {
                             <div>
                                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Children's Privacy</h2>
                                 <p className="mt-4 text-gray-700 dark:text-gray-300">
-                                    Swift Pay is not intended for individuals under the age of 18. We do not knowingly
+                                    SwiftPay is not intended for individuals under the age of 18. We do not knowingly
                                     collect personal information from children. If you believe we have inadvertently
                                     collected information from a child, please contact us immediately.
                                 </p>
@@ -286,7 +287,7 @@ export default function Privacy() {
                                     We may update this Privacy Policy from time to time to reflect changes in our
                                     practices or legal requirements. We will notify you of any material changes by
                                     posting the new policy on this page and updating the "Last updated" date. Your
-                                    continued use of Swift Pay after such changes constitutes acceptance of the updated
+                                    continued use of SwiftPay after such changes constitutes acceptance of the updated
                                     policy.
                                 </p>
                             </div>
@@ -322,6 +323,7 @@ export default function Privacy() {
                         </div>
                     </div>
                 </section>
+                <PublicFooter />
             </div>
         </>
     );

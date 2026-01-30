@@ -200,7 +200,7 @@ class PayrollController extends Controller
 
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
 
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
@@ -261,11 +261,9 @@ class PayrollController extends Controller
 
             // Calculate next run time
             try {
-                $cron = CronExpression::factory($frequency);
-                // Use current time in app timezone for consistent calculation
-                $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                 // Skip weekends and holidays
-                $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                $nextRun = $this->adjustToBusinessDay($nextRun);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
@@ -444,7 +442,7 @@ class PayrollController extends Controller
 
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
 
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
@@ -496,13 +494,15 @@ class PayrollController extends Controller
                 'schedule_type' => $validated['schedule_type'],
             ]);
 
-            // Recalculate next run time if frequency changed
-            if ($payrollSchedule->wasChanged('frequency')) {
+            // Recalculate next run time when frequency changed or user provided new date/time
+            // so that "next run" reflects the chosen schedule (e.g. today at 9:55)
+            $shouldRecalcNextRun = $payrollSchedule->wasChanged('frequency')
+                || isset($validated['scheduled_date'], $validated['scheduled_time']);
+            if ($shouldRecalcNextRun) {
                 try {
-                    $cron = CronExpression::factory($frequency);
-                    $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                     // Skip weekends and holidays
-                    $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                    $nextRun = $this->adjustToBusinessDay($nextRun);
                     $payrollSchedule->next_run_at = $nextRun;
                     $payrollSchedule->save();
                 } catch (\Exception $e) {
@@ -682,10 +682,9 @@ class PayrollController extends Controller
     {
         // Recalculate next run time when resuming
         try {
-            $cron = CronExpression::factory($payrollSchedule->frequency);
-            $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            $nextRun = $this->cronService->getNextRunDate($payrollSchedule->frequency, now(config('app.timezone')));
             // Skip weekends and holidays
-            $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+            $nextRun = $this->adjustToBusinessDay($nextRun);
             $payrollSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
@@ -756,7 +755,7 @@ class PayrollController extends Controller
     /**
      * Adjust a date to the next business day if it falls on a weekend or holiday.
      */
-    private function adjustToBusinessDay(Carbon $date, CronExpression $cron): Carbon
+    private function adjustToBusinessDay(Carbon $date): Carbon
     {
         if ($this->holidayService->isBusinessDay($date)) {
             return $date;

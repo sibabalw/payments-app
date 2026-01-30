@@ -4,7 +4,7 @@ const MAIN_APP_URL = process.env.MAIN_APP_URL || 'http://localhost:8000';
 const MAIN_APP_API_KEY = process.env.MAIN_APP_API_KEY || '';
 
 /**
- * Fetches business context from the main Swift Pay application.
+ * Fetches business context from the main SwiftPay application.
  * This service only has access to read-only, aggregated data endpoints.
  */
 export class BusinessContextService {

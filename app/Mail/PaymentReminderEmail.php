@@ -34,7 +34,7 @@ class PaymentReminderEmail extends Mailable
         $this->paymentSchedule->loadMissing('business');
         $business = $this->paymentSchedule->business;
 
-        // Get business email and name, fallback to Swift Pay defaults
+        // Get business email and name, fallback to SwiftPay defaults
         $fromEmail = $business->email ?? config('mail.from.address');
         $fromName = $business->name ?? config('mail.from.name');
 

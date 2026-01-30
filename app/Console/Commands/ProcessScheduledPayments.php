@@ -7,13 +7,13 @@ use App\Models\Business;
 use App\Models\PaymentJob;
 use App\Models\PaymentSchedule;
 use App\Services\BatchProcessingService;
+use App\Services\CronExpressionService;
 use App\Services\ErrorClassificationService;
 use App\Services\EscrowService;
 use App\Services\LockService;
 use App\Services\SettlementService;
 use App\Services\SouthAfricaHolidayService;
 use App\Traits\RetriesTransactions;
-use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -38,6 +38,7 @@ class ProcessScheduledPayments extends Command
 
     public function __construct(
         protected SouthAfricaHolidayService $holidayService,
+        protected CronExpressionService $cronService,
         protected BatchProcessingService $batchProcessingService,
         protected SettlementService $settlementService,
         protected LockService $lockService,
@@ -439,8 +440,7 @@ class ProcessScheduledPayments extends Command
 
     protected function computeNextRunAt(PaymentSchedule $schedule): \Carbon\Carbon
     {
-        $cron = CronExpression::factory($schedule->frequency);
-        $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+        $nextRun = $this->cronService->getNextRunDate($schedule->frequency, now(config('app.timezone')));
         if (! $this->holidayService->isBusinessDay($nextRun)) {
             $originalTime = $nextRun->format('H:i');
             $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
@@ -701,8 +701,7 @@ class ProcessScheduledPayments extends Command
         } else {
             // Calculate next run time for recurring schedules
             try {
-                $cron = CronExpression::factory($schedule->frequency);
-                $nextRun = \Carbon\Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                $nextRun = $this->cronService->getNextRunDate($schedule->frequency, now(config('app.timezone')));
 
                 // Skip weekends and holidays - move to next business day if needed
                 if (! $this->holidayService->isBusinessDay($nextRun)) {

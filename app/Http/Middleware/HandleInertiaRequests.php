@@ -91,9 +91,12 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
+        $appName = config('app.name');
+        $appName = in_array($appName, ['Swift Pay', 'swift pay', 'Swift pay'], true) ? 'SwiftPay' : $appName;
+
         return [
             ...parent::share($request),
-            'name' => config('app.name'),
+            'name' => $appName,
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             'auth' => [
                 'user' => $user,

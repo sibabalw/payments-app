@@ -6,7 +6,7 @@ use App\Http\Requests\ReplyTicketRequest;
 use App\Http\Requests\StoreTicketRequest;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
-use App\Events\TicketMessageCreated;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,7 +16,6 @@ use Inertia\Response;
 
 class TicketController extends Controller
 {
-
     /**
      * Display a listing of the user's tickets.
      */
@@ -33,7 +32,7 @@ class TicketController extends Controller
             $query->where('status', $status);
         }
 
-        $tickets = $query->paginate(15);
+        $tickets = $query->paginate(15)->withQueryString();
 
         return Inertia::render('tickets/index', [
             'tickets' => $tickets,
@@ -71,24 +70,47 @@ class TicketController extends Controller
     /**
      * Display the specified ticket.
      */
-    public function show(Ticket $ticket): Response
+    public function show(Request $request, Ticket $ticket): Response
     {
         // Ensure user can only view their own tickets
         if ($ticket->user_id !== Auth::id()) {
             abort(403);
         }
 
-        $ticket->load(['user:id,name,email', 'messages.user:id,name,email']);
+        $ticket->load(['user:id,name,email']);
+
+        $messages = $ticket->messages()
+            ->with('user:id,name,email')
+            ->orderByDesc('created_at')
+            ->paginate(4, ['*'], 'messages_page', $request->get('messages_page', 1));
 
         return Inertia::render('tickets/show', [
             'ticket' => $ticket,
+            'messages' => $messages,
         ]);
+    }
+
+    /**
+     * Get paginated messages for a ticket (JSON, for "Load more").
+     */
+    public function messages(Request $request, Ticket $ticket): JsonResponse
+    {
+        if ($ticket->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $messages = $ticket->messages()
+            ->with('user:id,name,email')
+            ->orderByDesc('created_at')
+            ->paginate(4, ['*'], 'page', $request->get('page', 1));
+
+        return response()->json($messages);
     }
 
     /**
      * Add a reply to a ticket.
      */
-    public function reply(ReplyTicketRequest $request, Ticket $ticket): RedirectResponse
+    public function reply(ReplyTicketRequest $request, Ticket $ticket): JsonResponse|RedirectResponse
     {
         // Ensure user can only reply to their own tickets
         if ($ticket->user_id !== Auth::id()) {
@@ -117,6 +139,20 @@ class TicketController extends Controller
             broadcast(new \App\Events\TicketMessageCreated($message, $ticket))->toOthers();
         });
 
-        return back()->with('success', 'Reply added successfully.');
+        $message->load('user:id,name,email');
+
+        return response()->json([
+            'message' => [
+                'id' => $message->id,
+                'message' => $message->message,
+                'is_admin' => $message->is_admin,
+                'created_at' => $message->created_at->toIso8601String(),
+                'user' => $message->user ? [
+                    'id' => $message->user->id,
+                    'name' => $message->user->name,
+                    'email' => $message->user->email,
+                ] : null,
+            ],
+        ], 201);
     }
 }

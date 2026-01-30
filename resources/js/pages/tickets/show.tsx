@@ -1,14 +1,22 @@
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { formatRelativeTime } from '@/lib/format-relative-time';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, useForm, router } from '@inertiajs/react';
-import { MessageSquare, ArrowLeft } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Head, Link } from '@inertiajs/react';
+import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { disconnectEcho } from '@/echo';
+
+const TICKET_EVENTS = ['.ticket.updated', '.ticket.message.created'] as const;
+
+function stopListeningAll(ch: { stopListening?: (event: string) => void } | null) {
+    if (ch && typeof ch.stopListening === 'function') {
+        TICKET_EVENTS.forEach((ev) => ch.stopListening!(ev));
+    }
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Support Tickets', href: '/tickets' },
@@ -27,213 +35,321 @@ const priorityColors: Record<string, string> = {
     high: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
 };
 
-export default function TicketsShow({ ticket: initialTicket }: any) {
-    // Use state to manage ticket and messages for real-time updates
-    const [ticket, setTicket] = useState(initialTicket);
-    const [messages, setMessages] = useState(initialTicket.messages || []);
+/** Backend returns newest first (DESC). Display order: oldest at top, newest at bottom (WhatsApp). */
+function toDisplayOrder(data: any[]): any[] {
+    return data ? [...data].reverse() : [];
+}
 
-    // Sync state when props change
+export default function TicketsShow({ ticket: initialTicket, messages: initialMessages }: any) {
+    const [ticket, setTicket] = useState(initialTicket);
+    const [messages, setMessages] = useState<any[]>(() => toDisplayOrder(initialMessages?.data ?? []));
+    const [messagesPage, setMessagesPage] = useState(initialMessages?.current_page ?? 1);
+    const [messagesLastPage, setMessagesLastPage] = useState(initialMessages?.last_page ?? 1);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [showDescription, setShowDescription] = useState(false);
+
+    const messagesScrollRef = useRef<HTMLDivElement>(null);
+    const restoreScrollRef = useRef<{ prevHeight: number; prevTop: number } | null>(null);
+    const justPreparedRef = useRef(false);
+    const scrollToBottomNextRef = useRef(false);
+    const didInitialScrollRef = useRef(false);
+
+    const hasMoreMessages = messagesPage < messagesLastPage;
+
     useEffect(() => {
         setTicket(initialTicket);
-        setMessages(initialTicket.messages || []);
-    }, [initialTicket.id, initialTicket.updated_at]);
+        setMessages(toDisplayOrder(initialMessages?.data ?? []));
+        setMessagesPage(initialMessages?.current_page ?? 1);
+        setMessagesLastPage(initialMessages?.last_page ?? 1);
+    }, [initialTicket.id, initialTicket.updated_at, initialMessages?.current_page]);
 
-    const { data, setData, post, processing, errors, reset } = useForm({
-        message: '',
-    });
+    const [replyMessage, setReplyMessage] = useState('');
+    const [replyErrors, setReplyErrors] = useState<Record<string, string>>({});
+    const [replyProcessing, setReplyProcessing] = useState(false);
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
-        post(`/tickets/${ticket.id}/reply`, {
-            onSuccess: () => {
-                reset();
-                // Message will be added via WebSocket, no need to reload
+        setReplyErrors({});
+        setReplyProcessing(true);
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+        fetch(`/tickets/${ticket.id}/reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
             },
-        });
+            body: JSON.stringify({ message: replyMessage }),
+        })
+            .then(async (res) => {
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && res.status === 201 && data.message) {
+                    setReplyMessage('');
+                    scrollToBottomNextRef.current = true;
+                    setMessages((prev: any) => {
+                        if (prev.find((m: any) => m.id === data.message.id)) return prev;
+                        return [...prev, data.message];
+                    });
+                } else if (res.status === 422 && data.errors) {
+                    setReplyErrors(data.errors);
+                }
+            })
+            .finally(() => setReplyProcessing(false));
     };
 
-    // Real-time updates via WebSockets (Pusher)
+    const loadMoreMessages = () => {
+        if (loadingMore || !hasMoreMessages) return;
+        const el = messagesScrollRef.current;
+        const prevHeight = el?.scrollHeight ?? 0;
+        const prevTop = el?.scrollTop ?? 0;
+        setLoadingMore(true);
+        fetch(`/tickets/${ticket.id}/messages?page=${messagesPage + 1}`, {
+            headers: { Accept: 'application/json' },
+        })
+            .then((res) => res.json())
+            .then((data: any) => {
+                if (data.data?.length) {
+                    const olderReversed = toDisplayOrder(data.data);
+                    justPreparedRef.current = true;
+                    restoreScrollRef.current = { prevHeight, prevTop };
+                    setMessages((prev) => [...olderReversed, ...prev]);
+                    setMessagesPage(data.current_page);
+                    setMessagesLastPage(data.last_page);
+                }
+            })
+            .finally(() => setLoadingMore(false));
+    };
+
+    const privateChannelRef = useRef<{ stopListening?: (event: string) => void } | null>(null);
+    const subscribedTicketIdRef = useRef<number | null>(null);
+
     useEffect(() => {
         if (ticket.status === 'closed') {
-            return;
+            return () => {
+                // When ticket is closed we never subscribed in this run; no cleanup needed.
+            };
         }
 
-        const initWebSocket = () => {
+        const ticketId = ticket.id;
+        let cancelled = false;
+
+        const leaveChannels = () => {
+            if (typeof window === 'undefined' || !window.Echo) return;
             try {
-                if (!window.Echo) {
-                    return;
+                stopListeningAll(privateChannelRef.current);
+                const id = subscribedTicketIdRef.current;
+                if (id != null) {
+                    window.Echo.leaveChannel(`private-ticket.${id}`);
+                    subscribedTicketIdRef.current = null;
                 }
-                const echo = window.Echo;
+                privateChannelRef.current = null;
+            } catch (e) {
+                console.error('WebSocket: Error cleaning up channels', e);
+            }
+            disconnectEcho();
+        };
+
+        (async () => {
+            try {
+                const echo = (await import('@/echo')).default();
+                if (cancelled || typeof window === 'undefined') return;
 
                 const handleMessageCreated = (data: any) => {
                     if (data.message) {
+                        scrollToBottomNextRef.current = true;
                         setMessages((prev: any) => {
-                            // Check if message already exists to avoid duplicates
-                            if (prev.find((m: any) => m.id === data.message.id)) {
-                                return prev;
-                            }
+                            if (prev.find((m: any) => m.id === data.message.id)) return prev;
                             return [...prev, data.message];
                         });
                     }
                 };
-
                 const handleTicketUpdated = (data: any) => {
-                    setTicket((prev: any) => ({
-                        ...prev,
-                        status: data.status || prev.status,
-                    }));
+                    setTicket((prev: any) => ({ ...prev, status: data.status || prev.status }));
                 };
 
-                // Listen to public tickets channel for this specific ticket
-                echo.channel('tickets')
-                    .listen('.ticket.updated', (data: any) => {
-                        if (data.ticket_id === ticket.id) {
-                            handleTicketUpdated(data);
-                        }
-                    })
-                    .listen('.ticket.message.created', (data: any) => {
-                        if (data.ticket_id === ticket.id) {
-                            handleMessageCreated(data);
-                        }
-                    });
-
-                // Also listen to private ticket channel
-                echo.private(`ticket.${ticket.id}`)
+                const privateCh = echo
+                    .private(`ticket.${ticketId}`)
                     .listen('.ticket.updated', handleTicketUpdated)
                     .listen('.ticket.message.created', handleMessageCreated);
+                if (!cancelled) {
+                    privateChannelRef.current = privateCh;
+                    subscribedTicketIdRef.current = ticketId;
+                } else {
+                    echo.leaveChannel(`private-ticket.${ticketId}`);
+                }
             } catch (e) {
                 console.error('Failed to initialize WebSocket:', e);
             }
-        };
-
-        initWebSocket();
+        })();
 
         return () => {
-            if (window.Echo) {
-                try {
-                    window.Echo.leave('tickets');
-                    window.Echo.leaveChannel(`private-ticket.${ticket.id}`);
-                } catch (e) {
-                    console.error('WebSocket: Error cleaning up channels', e);
-                }
-            }
+            cancelled = true;
+            leaveChannels();
         };
     }, [ticket.id, ticket.status]);
+
+    // Scroll: restore position after prepending older messages, or scroll to bottom after new message / initial load
+    useEffect(() => {
+        const el = messagesScrollRef.current;
+        if (!el) return;
+        if (justPreparedRef.current && restoreScrollRef.current) {
+            justPreparedRef.current = false;
+            const { prevHeight, prevTop } = restoreScrollRef.current;
+            restoreScrollRef.current = null;
+            requestAnimationFrame(() => {
+                el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+            });
+            return;
+        }
+        if (scrollToBottomNextRef.current) {
+            scrollToBottomNextRef.current = false;
+            requestAnimationFrame(() => {
+                el.scrollTop = el.scrollHeight;
+            });
+            return;
+        }
+        if (messages.length > 0 && !didInitialScrollRef.current) {
+            didInitialScrollRef.current = true;
+            requestAnimationFrame(() => {
+                el.scrollTop = el.scrollHeight;
+            });
+        }
+    }, [messages]);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Ticket: ${ticket.subject}`} />
-            <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                    <Link href="/tickets">
-                        <Button variant="outline" size="sm">
-                            <ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to Tickets
-                        </Button>
-                    </Link>
-                </div>
+            <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-2 overflow-hidden rounded-lg md:gap-3">
+                <div className="flex h-[calc(100vh-8rem)] min-h-[400px] flex-col overflow-hidden rounded-lg md:h-[calc(100vh-9rem)] md:min-h-[480px] md:border md:border-border md:bg-card md:shadow-sm">
+                    {/* Header: compact on mobile, more space on desktop */}
+                    <div className="flex shrink-0 items-center gap-2 border-b bg-muted/30 px-3 py-2 dark:border-border md:gap-3 md:px-4 md:py-3">
+                        <Link href="/tickets" className="shrink-0 text-muted-foreground hover:text-foreground">
+                            <ArrowLeft className="h-4 w-4 md:h-5 md:w-5" />
+                        </Link>
+                        <div className="min-w-0 flex-1">
+                            <h1 className="truncate text-sm font-semibold md:text-base">{ticket.subject}</h1>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground md:gap-3 md:text-sm">
+                                <Badge className={`shrink-0 text-[10px] md:text-xs ${statusColors[ticket.status]}`}>
+                                    {ticket.status.replace('_', ' ')}
+                                </Badge>
+                                <Badge className={`shrink-0 text-[10px] md:text-xs ${priorityColors[ticket.priority]}`}>
+                                    {ticket.priority}
+                                </Badge>
+                                <span className="shrink-0">
+                                    {new Date(ticket.created_at).toLocaleDateString()} · {ticket.user?.name}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
 
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                                <CardTitle className="mb-2">{ticket.subject}</CardTitle>
-                                <div className="flex gap-2 flex-wrap">
-                                    <Badge className={statusColors[ticket.status]}>
-                                        {ticket.status.replace('_', ' ')}
-                                    </Badge>
-                                    <Badge className={priorityColors[ticket.priority]}>
-                                        {ticket.priority}
-                                    </Badge>
+                    {/* Collapsible description */}
+                    <div className="shrink-0 border-b border-border/50 px-3 py-1 md:px-4 md:py-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowDescription((v) => !v)}
+                            className="flex w-full items-center justify-between gap-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground md:text-sm"
+                        >
+                            <span className="truncate">
+                                {showDescription ? 'Hide description' : ticket.description?.slice(0, 60)}
+                                {!showDescription && (ticket.description?.length ?? 0) > 60 ? '…' : ''}
+                            </span>
+                            {showDescription ? <ChevronUp className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+                        </button>
+                        {showDescription && (
+                            <p className="whitespace-pre-wrap py-2 text-xs text-muted-foreground md:text-sm md:leading-relaxed">
+                                {ticket.description}
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Messages - scrollable; oldest at top, newest at bottom (WhatsApp). Load older above. */}
+                    <div
+                        ref={messagesScrollRef}
+                        className="min-h-0 flex-1 overflow-y-auto px-2 py-2 md:px-4 md:py-4"
+                    >
+                        <div className="flex flex-col gap-1.5 md:gap-3">
+                            {hasMoreMessages && (
+                                <div className="flex justify-center pb-2 md:pb-3">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 text-xs md:h-8 md:text-sm"
+                                        onClick={loadMoreMessages}
+                                        disabled={loadingMore}
+                                    >
+                                        {loadingMore ? 'Loading…' : 'Load older messages'}
+                                    </Button>
                                 </div>
-                            </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4">
-                            <div>
-                                <p className="text-sm font-medium mb-1">Description</p>
-                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                                    {ticket.description}
-                                </p>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                                Created by {ticket.user?.name} on{' '}
-                                {new Date(ticket.created_at).toLocaleString()}
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Messages</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4">
+                            )}
                             {messages && messages.length > 0 ? (
                                 messages.map((message: any) => (
                                     <div
                                         key={message.id}
-                                        className={`p-4 rounded-lg ${
+                                        className={`rounded-lg px-2.5 py-1.5 md:rounded-xl md:px-4 md:py-3 ${
                                             message.is_admin
-                                                ? 'bg-blue-50 dark:bg-blue-900/20'
-                                                : 'bg-gray-50 dark:bg-gray-900/20'
+                                                ? 'bg-primary/10 dark:bg-primary/20'
+                                                : 'bg-muted/60 dark:bg-muted/40'
                                         }`}
                                     >
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-sm font-medium">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="text-xs font-medium md:text-sm">
                                                 {message.user?.name}
                                                 {message.is_admin && (
-                                                    <Badge className="ml-2" variant="outline">
+                                                    <Badge variant="outline" className="ml-1.5 text-[10px] md:ml-2 md:text-xs">
                                                         Admin
                                                     </Badge>
                                                 )}
                                             </span>
-                                            <span className="text-xs text-muted-foreground">
-                                                {new Date(message.created_at).toLocaleString()}
-                                            </span>
+<span
+                                            className="text-[10px] text-muted-foreground md:text-xs"
+                                            title={new Date(message.created_at).toLocaleString()}
+                                        >
+                                            {formatRelativeTime(message.created_at)}
+                                        </span>
                                         </div>
-                                        <p className="text-sm whitespace-pre-wrap">
+                                        <p className="mt-0.5 whitespace-pre-wrap text-xs leading-snug md:mt-1 md:text-sm md:leading-relaxed">
                                             {message.message}
                                         </p>
                                     </div>
                                 ))
                             ) : (
-                                <p className="text-sm text-muted-foreground text-center py-4">
+                                <p className="py-6 text-center text-xs text-muted-foreground md:py-8 md:text-sm">
                                     No messages yet.
                                 </p>
                             )}
                         </div>
-                    </CardContent>
-                </Card>
+                    </div>
 
-                {ticket.status !== 'closed' && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Add Reply</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <form onSubmit={submit} className="space-y-4">
-                                <div>
-                                    <Label htmlFor="message">Message</Label>
-                                    <Textarea
-                                        id="message"
-                                        value={data.message}
-                                        onChange={(e) => setData('message', e.target.value)}
-                                        required
-                                        rows={4}
-                                        placeholder="Type your reply..."
-                                    />
-                                    <InputError message={errors.message} />
-                                </div>
-                                <Button type="submit" disabled={processing}>
-                                    {processing ? 'Sending...' : 'Send Reply'}
+                    {/* Reply - compact on mobile, more room on desktop */}
+                    {ticket.status !== 'closed' && (
+                        <form onSubmit={submit} className="shrink-0 border-t border-border bg-background px-2 py-2 md:px-4 md:py-3">
+                            <div className="flex gap-2 md:gap-3">
+                                <Textarea
+                                    id="message"
+                                    value={replyMessage}
+                                    onChange={(e) => setReplyMessage(e.target.value)}
+                                    required
+                                    rows={2}
+                                    placeholder="Type your reply…"
+                                    className="min-h-[52px] resize-none text-sm md:min-h-[72px] md:rows-3 md:text-base"
+                                />
+                                <Button
+                                    type="submit"
+                                    disabled={replyProcessing}
+                                    className="shrink-0 self-end"
+                                >
+                                    {replyProcessing ? 'Sending…' : 'Send'}
                                 </Button>
-                            </form>
-                        </CardContent>
-                    </Card>
-                )}
+                            </div>
+                            <InputError
+                                message={
+                                    Array.isArray(replyErrors.message) ? replyErrors.message[0] : replyErrors.message
+                                }
+                            />
+                        </form>
+                    )}
+                </div>
             </div>
         </AppLayout>
     );

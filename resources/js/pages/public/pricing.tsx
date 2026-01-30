@@ -1,48 +1,68 @@
-import { Head, Link } from '@inertiajs/react';
-import { ArrowLeft, Check, Lock, Shield, TrendingUp, Zap } from 'lucide-react';
+import { PublicCard } from '@/components/public-card';
+import { PublicCtaBand } from '@/components/public-cta-band';
+import { PublicInnerHero } from '@/components/public-inner-hero';
+import { PublicSectionInner } from '@/components/public-section';
+import { AnimatedSection } from '@/components/public-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Head, Link } from '@inertiajs/react';
+import { Check, Lock, Shield, TrendingUp, Zap } from 'lucide-react';
 import { login, register } from '@/routes';
+import { PublicFooter } from '@/components/public-footer';
 import { PublicNav } from '@/components/public-nav';
 
 export default function Pricing() {
     return (
         <>
-            <Head title="Pricing - Swift Pay" />
+            <Head title="Pricing - SwiftPay" />
             <div className="flex min-h-screen flex-col">
                 <PublicNav />
 
-                {/* Hero Section */}
-                <section className="bg-gradient-to-b from-primary/5 to-background py-12">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                        <Link
-                            href="/"
-                            className="mb-8 inline-flex items-center text-sm text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to home
-                        </Link>
-                        <div className="text-center">
-                            <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-5xl">
-                                Simple, Transparent Pricing
-                            </h1>
-                            <p className="mx-auto mt-4 max-w-2xl text-lg text-gray-600 dark:text-gray-300">
-                                Deposit-based escrow model—we never hold your money. Transparent fees, no hidden
-                                charges, complete control.
+                <PublicInnerHero
+                    title="Simple, Transparent Pricing"
+                    description="SwiftPay uses a simple, deposit-based escrow model—no per-transaction fees, no hidden costs. We never hold your money; transparent fees, complete control."
+                />
+
+                {/* What is SwiftPay? */}
+                <AnimatedSection className="py-8">
+                    <PublicSectionInner>
+                        <div className="mx-auto max-w-3xl text-center">
+                            <h2 className="text-2xl font-bold tracking-tight text-foreground">
+                                What is SwiftPay?
+                            </h2>
+                            <p className="mt-4 text-lg text-muted-foreground">
+                                SwiftPay is a payment and payroll automation platform for South African businesses.
+                                Your funds stay secure in bank-controlled escrow while we handle full tax compliance
+                                (PAYE, UIF, SDL), time tracking, and employee self-service—so you can focus on
+                                running your business.
                             </p>
+                            <ul className="mt-6 space-y-2 text-left text-muted-foreground sm:mx-auto sm:max-w-md sm:text-center">
+                                <li className="flex items-start gap-2 sm:justify-center">
+                                    <Check className="mt-1 h-5 w-5 flex-shrink-0 text-primary" />
+                                    <span>Built for South African businesses, from startups to enterprises</span>
+                                </li>
+                                <li className="flex items-start gap-2 sm:justify-center">
+                                    <Check className="mt-1 h-5 w-5 flex-shrink-0 text-primary" />
+                                    <span>One platform for payment scheduling, payroll, and SARS-ready compliance</span>
+                                </li>
+                                <li className="flex items-start gap-2 sm:justify-center">
+                                    <Check className="mt-1 h-5 w-5 flex-shrink-0 text-primary" />
+                                    <span>Bank-controlled escrow—we never hold your money</span>
+                                </li>
+                            </ul>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* How It Works Section */}
-                <section className="py-12">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                        <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-8 dark:bg-primary/10">
+                <AnimatedSection className="py-12">
+                    <PublicSectionInner>
+                        <PublicCard variant="glass" className="border-2 border-primary/20 bg-primary/5 p-8 dark:bg-primary/10">
                             <div className="mb-6 flex items-center gap-3">
                                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                                     <Shield className="h-6 w-6 text-primary" />
                                 </div>
-                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                <h2 className="font-display text-2xl font-bold text-foreground">
                                     How Our Escrow Model Works
                                 </h2>
                             </div>
@@ -51,10 +71,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Bank-Controlled Security
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 Deposit funds into a bank-controlled escrow account. We never store,
                                                 touch, or hold money in the app.
                                             </p>
@@ -63,10 +83,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Transparent Fee Structure
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 1.5% fee per deposit (not per transaction). Your deposit authorizes
                                                 usage up to the deposited amount minus 1.5%.
                                             </p>
@@ -75,10 +95,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Risk-Free Execution
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 If we deliver execution → bank releases our fee. If we fail → bank
                                                 returns money to you.
                                             </p>
@@ -89,10 +109,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Complete Transparency
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 View all transactions, fees, and balances in real-time. No hidden
                                                 charges, no surprises.
                                             </p>
@@ -101,10 +121,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Low Balance Alerts
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 Automatic notifications when your escrow balance is running low, so you
                                                 never miss a payment.
                                             </p>
@@ -113,10 +133,10 @@ export default function Pricing() {
                                     <div className="flex items-start gap-3">
                                         <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                                         <div>
-                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                            <span className="font-semibold text-foreground">
                                                 Full Control
                                             </span>
-                                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                            <p className="mt-1 text-sm text-muted-foreground">
                                                 Deposit when you need to, track everything in real-time, and maintain
                                                 complete visibility over your funds.
                                             </p>
@@ -124,22 +144,22 @@ export default function Pricing() {
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </section>
+                        </PublicCard>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* Pricing Cards */}
-                <section className="py-12">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <AnimatedSection className="py-12">
+                    <PublicSectionInner>
                         <div className="grid gap-8 lg:grid-cols-2">
-                            <Card>
+                            <Card className="transition-[box-shadow,transform] duration-200 hover:-translate-y-1 hover:shadow-md">
                                 <CardHeader>
                                     <CardTitle>Small Business</CardTitle>
                                     <div className="mt-4">
                                         <span className="text-4xl font-bold">R1,000</span>
-                                        <span className="text-gray-600 dark:text-gray-300">/month</span>
+                                        <span className="text-muted-foreground">/month</span>
                                     </div>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-sm text-muted-foreground">
                                         Perfect for startups and small teams
                                     </p>
                                 </CardHeader>
@@ -184,7 +204,7 @@ export default function Pricing() {
                                 </CardContent>
                             </Card>
 
-                            <Card className="border-primary shadow-lg">
+                            <Card className="border-primary shadow-lg transition-[box-shadow,transform] duration-200 hover:-translate-y-1 hover:shadow-md">
                                 <CardHeader>
                                     <div className="flex items-center justify-between">
                                         <CardTitle>Enterprise</CardTitle>
@@ -194,9 +214,9 @@ export default function Pricing() {
                                     </div>
                                     <div className="mt-4">
                                         <span className="text-4xl font-bold">R2,500</span>
-                                        <span className="text-gray-600 dark:text-gray-300">/month</span>
+                                        <span className="text-muted-foreground">/month</span>
                                     </div>
-                                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                                    <p className="mt-2 text-sm text-muted-foreground">
                                         For growing businesses and larger teams
                                     </p>
                                 </CardHeader>
@@ -241,17 +261,17 @@ export default function Pricing() {
                                 </CardContent>
                             </Card>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* Value Propositions */}
-                <section className="bg-gray-50 py-16 dark:bg-gray-900/50">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <AnimatedSection className="bg-muted/50 py-16">
+                    <PublicSectionInner>
                         <div className="text-center">
-                            <h2 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-                                Why Choose Swift Pay?
+                            <h2 className="font-display text-3xl font-bold tracking-tight text-foreground">
+                                Why Choose SwiftPay?
                             </h2>
-                            <p className="mt-4 text-lg text-gray-600 dark:text-gray-300">
+                            <p className="mt-4 text-lg text-muted-foreground">
                                 More than just pricing—we deliver value that transforms your business
                             </p>
                         </div>
@@ -261,7 +281,7 @@ export default function Pricing() {
                                     <Zap className="h-8 w-8 text-primary" />
                                 </div>
                                 <h3 className="mt-6 text-xl font-semibold">Save Time & Money</h3>
-                                <p className="mt-4 text-gray-600 dark:text-gray-300">
+                                <p className="mt-4 text-muted-foreground">
                                     Eliminate manual calculations, reduce errors, and free up your team to focus on
                                     what matters most.
                                 </p>
@@ -271,7 +291,7 @@ export default function Pricing() {
                                     <Lock className="h-8 w-8 text-primary" />
                                 </div>
                                 <h3 className="mt-6 text-xl font-semibold">Bank-Level Security</h3>
-                                <p className="mt-4 text-gray-600 dark:text-gray-300">
+                                <p className="mt-4 text-muted-foreground">
                                     Your funds are protected in bank-controlled escrow. We never hold your money—you're
                                     always in control.
                                 </p>
@@ -281,97 +301,91 @@ export default function Pricing() {
                                     <TrendingUp className="h-8 w-8 text-primary" />
                                 </div>
                                 <h3 className="mt-6 text-xl font-semibold">Grow with Confidence</h3>
-                                <p className="mt-4 text-gray-600 dark:text-gray-300">
+                                <p className="mt-4 text-muted-foreground">
                                     Scale your business without worrying about payment processing. We handle the
                                     complexity so you don't have to.
                                 </p>
                             </div>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* FAQ Section */}
-                <section className="py-16">
-                    <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-                        <h2 className="text-center text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+                <AnimatedSection className="py-16">
+                    <PublicSectionInner narrow>
+                        <h2 className="text-center font-display text-3xl font-bold tracking-tight text-foreground">
                             Frequently Asked Questions
                         </h2>
                         <div className="mt-12 space-y-8">
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     How does the escrow model work?
                                 </h3>
-                                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                <p className="mt-2 text-muted-foreground">
                                     You deposit funds into a bank-controlled escrow account. We charge a 1.5% fee per
                                     deposit. Your deposit authorizes usage up to the deposited amount minus the fee. We
                                     never hold your money in the app—everything flows through regulated escrow accounts.
                                 </p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     What happens if a payment fails?
                                 </h3>
-                                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                <p className="mt-2 text-muted-foreground">
                                     If we fail to execute a payment, the bank automatically returns the funds to you. You
                                     only pay our fee when we successfully deliver execution. This ensures you're never
                                     charged for failed transactions.
                                 </p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     Are there any hidden fees?
                                 </h3>
-                                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                <p className="mt-2 text-muted-foreground">
                                     No. Our pricing is completely transparent. You pay a fixed monthly subscription plus
                                     a 1.5% fee per deposit. There are no per-transaction fees, no setup fees, and no
                                     hidden charges.
                                 </p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     Can I cancel anytime?
                                 </h3>
-                                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                <p className="mt-2 text-muted-foreground">
                                     Yes, you can cancel your subscription at any time. Your escrow balance remains yours,
                                     and you can withdraw it at any time. No long-term contracts or cancellation fees.
                                 </p>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     Do you offer a free trial?
                                 </h3>
-                                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                                <p className="mt-2 text-muted-foreground">
                                     Yes! Start with a 14-day free trial. No credit card required. Explore all features
-                                    and see how Swift Pay can transform your business operations.
+                                    and see how SwiftPay can transform your business operations.
                                 </p>
                             </div>
                         </div>
-                    </div>
-                </section>
+                    </PublicSectionInner>
+                </AnimatedSection>
 
                 {/* CTA Section */}
-                <section className="bg-primary py-16">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                        <div className="text-center">
-                            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                                Ready to Get Started?
-                            </h2>
-                            <p className="mx-auto mt-4 max-w-2xl text-lg text-primary-foreground/90">
-                                Join South African businesses that trust Swift Pay. Start your free trial today.
-                            </p>
-                            <div className="mt-8">
-                                <Link href={register()}>
-                                    <Button size="lg" variant="secondary">
-                                        Start Free Trial
-                                    </Button>
-                                </Link>
-                            </div>
-                            <p className="mt-4 text-sm text-primary-foreground/80">
-                                No credit card required • 14-day free trial • Cancel anytime
-                            </p>
-                        </div>
-                    </div>
-                </section>
+                <AnimatedSection>
+                    <PublicCtaBand
+                        title="Ready to Get Started?"
+                        description="Join South African businesses that trust SwiftPay. Start your free trial today."
+                    >
+                        <Link href={register()}>
+                            <Button variant="gradient" size="lg">
+                                Start Free Trial
+                            </Button>
+                        </Link>
+                        <p className="text-sm text-neutral-400">
+                            No credit card required • 14-day free trial • Cancel anytime
+                        </p>
+                    </PublicCtaBand>
+                </AnimatedSection>
+                <PublicFooter />
             </div>
         </>
     );

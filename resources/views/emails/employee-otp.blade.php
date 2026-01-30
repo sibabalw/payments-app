@@ -29,6 +29,6 @@
     
     <p style="margin-top: 32px;">
         Regards,<br>
-        <strong>{{ $business->name ?? 'Swift Pay Team' }}</strong>
+        <strong>{{ $business->name ?? 'SwiftPay Team' }}</strong>
     </p>
 @endsection

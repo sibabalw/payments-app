@@ -1,11 +1,11 @@
 @extends('emails.layout')
 
 @section('content')
-    <h1>Welcome to Swift Pay, {{ $user->name }}!</h1>
+    <h1>Welcome to SwiftPay, {{ $user->name }}!</h1>
     
     <p>Thank you for creating your account. We're excited to have you on board!</p>
     
-    <p>Swift Pay makes it easy to manage your payments, payroll, and business finances all in one place.</p>
+    <p>SwiftPay makes it easy to manage your payments, payroll, and business finances all in one place.</p>
     
     <h2>Get Started</h2>
     <p>Here's what you can do next:</p>

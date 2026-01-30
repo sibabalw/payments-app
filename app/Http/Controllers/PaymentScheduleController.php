@@ -234,11 +234,9 @@ class PaymentScheduleController extends Controller
 
             // Calculate next run time
             try {
-                $cron = CronExpression::factory($frequency);
-                // Use current time in app timezone for consistent calculation
-                $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                 // Skip weekends and holidays
-                $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                $nextRun = $this->adjustToBusinessDay($nextRun);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
             } catch (\Exception $e) {
@@ -450,10 +448,9 @@ class PaymentScheduleController extends Controller
             // Recalculate next run time if frequency changed
             if ($paymentSchedule->wasChanged('frequency')) {
                 try {
-                    $cron = CronExpression::factory($frequency);
-                    $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                     // Skip weekends and holidays
-                    $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                    $nextRun = $this->adjustToBusinessDay($nextRun);
                     $paymentSchedule->next_run_at = $nextRun;
                     $paymentSchedule->save();
                 } catch (\Exception $e) {
@@ -591,10 +588,9 @@ class PaymentScheduleController extends Controller
     {
         // Recalculate next run time when resuming
         try {
-            $cron = CronExpression::factory($paymentSchedule->frequency);
-            $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            $nextRun = $this->cronService->getNextRunDate($paymentSchedule->frequency, now(config('app.timezone')));
             // Skip weekends and holidays
-            $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+            $nextRun = $this->adjustToBusinessDay($nextRun);
             $paymentSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
@@ -629,7 +625,7 @@ class PaymentScheduleController extends Controller
     /**
      * Adjust a date to the next business day if it falls on a weekend or holiday.
      */
-    private function adjustToBusinessDay(Carbon $date, CronExpression $cron): Carbon
+    private function adjustToBusinessDay(Carbon $date): Carbon
     {
         if ($this->holidayService->isBusinessDay($date)) {
             return $date;

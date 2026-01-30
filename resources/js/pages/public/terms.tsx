@@ -2,12 +2,13 @@ import { Head, Link } from '@inertiajs/react';
 import { ArrowLeft, FileText, Shield, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { login, register } from '@/routes';
+import { PublicFooter } from '@/components/public-footer';
 import { PublicNav } from '@/components/public-nav';
 
 export default function Terms() {
     return (
         <>
-            <Head title="Terms of Service - Swift Pay" />
+            <Head title="Terms of Service - SwiftPay" />
             <div className="flex min-h-screen flex-col">
                 <PublicNav />
 
@@ -26,7 +27,7 @@ export default function Terms() {
                                 Terms of Service
                             </h1>
                             <p className="mx-auto mt-4 max-w-2xl text-lg text-gray-600 dark:text-gray-300">
-                                Please read these terms carefully before using Swift Pay. By using our services, you
+                                Please read these terms carefully before using SwiftPay. By using our services, you
                                 agree to be bound by these terms.
                             </p>
                             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
@@ -47,8 +48,8 @@ export default function Terms() {
                             {/* Introduction */}
                             <div>
                                 <p className="text-lg text-gray-700 dark:text-gray-300">
-                                    These Terms of Service ("Terms") govern your access to and use of Swift Pay's
-                                    payment and payroll automation platform ("Service"). By accessing or using Swift Pay,
+                                    These Terms of Service ("Terms") govern your access to and use of SwiftPay's
+                                    payment and payroll automation platform ("Service"). By accessing or using SwiftPay,
                                     you agree to be bound by these Terms. If you disagree with any part of these Terms,
                                     you may not access the Service.
                                 </p>
@@ -66,14 +67,14 @@ export default function Terms() {
                                 </div>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
-                                        By creating an account, accessing, or using Swift Pay, you acknowledge that you
+                                        By creating an account, accessing, or using SwiftPay, you acknowledge that you
                                         have read, understood, and agree to be bound by these Terms and our Privacy
-                                        Policy. If you are using Swift Pay on behalf of a business, you represent that
+                                        Policy. If you are using SwiftPay on behalf of a business, you represent that
                                         you have the authority to bind that business to these Terms.
                                     </p>
                                     <p>
                                         You must be at least 18 years old and have the legal capacity to enter into
-                                        binding contracts to use our Service. By using Swift Pay, you represent and
+                                        binding contracts to use our Service. By using SwiftPay, you represent and
                                         warrant that you meet these requirements.
                                     </p>
                                 </div>
@@ -91,7 +92,7 @@ export default function Terms() {
                                 </div>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
-                                        Swift Pay provides a cloud-based platform for automating payment scheduling,
+                                        SwiftPay provides a cloud-based platform for automating payment scheduling,
                                         payroll processing, tax compliance, and related financial services for South
                                         African businesses. Our services include:
                                     </p>
@@ -116,7 +117,7 @@ export default function Terms() {
                                     Account Registration and Security
                                 </h2>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
-                                    <p>To use Swift Pay, you must:</p>
+                                    <p>To use SwiftPay, you must:</p>
                                     <ul className="ml-6 list-disc space-y-2">
                                         <li>Create an account with accurate, current, and complete information</li>
                                         <li>Maintain and promptly update your account information</li>
@@ -126,7 +127,7 @@ export default function Terms() {
                                     </ul>
                                     <p>
                                         You are responsible for maintaining the confidentiality of your account password
-                                        and for all activities that occur under your account. Swift Pay is not liable for
+                                        and for all activities that occur under your account. SwiftPay is not liable for
                                         any loss or damage arising from your failure to maintain account security.
                                     </p>
                                 </div>
@@ -142,7 +143,7 @@ export default function Terms() {
                                 </div>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
-                                        Subject to your compliance with these Terms, Swift Pay grants you a limited,
+                                        Subject to your compliance with these Terms, SwiftPay grants you a limited,
                                         non-exclusive, non-transferable, revocable license to access and use the Service
                                         for your business purposes.
                                     </p>
@@ -164,7 +165,7 @@ export default function Terms() {
                                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Payment Terms</h2>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
-                                        <strong>Subscription Fees:</strong> Swift Pay operates on a subscription model
+                                        <strong>Subscription Fees:</strong> SwiftPay operates on a subscription model
                                         with monthly fees as outlined on our Pricing page. Fees are billed in advance
                                         and are non-refundable except as required by law.
                                     </p>
@@ -224,12 +225,12 @@ export default function Terms() {
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
                                         The Service, including all content, features, functionality, and software, is
-                                        owned by Swift Pay and protected by South African and international copyright,
+                                        owned by SwiftPay and protected by South African and international copyright,
                                         trademark, and other intellectual property laws.
                                     </p>
                                     <p>
                                         You retain ownership of all data and content you upload to the Service. By using
-                                        Swift Pay, you grant us a license to use, store, and process your data solely for
+                                        SwiftPay, you grant us a license to use, store, and process your data solely for
                                         the purpose of providing the Service.
                                     </p>
                                 </div>
@@ -242,7 +243,7 @@ export default function Terms() {
                                 </h2>
                                 <div className="mt-4 space-y-3 text-gray-700 dark:text-gray-300">
                                     <p>
-                                        To the maximum extent permitted by law, Swift Pay shall not be liable for any
+                                        To the maximum extent permitted by law, SwiftPay shall not be liable for any
                                         indirect, incidental, special, consequential, or punitive damages, including loss
                                         of profits, data, or business opportunities, arising from your use of the
                                         Service.
@@ -263,7 +264,7 @@ export default function Terms() {
                             <div>
                                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Indemnification</h2>
                                 <p className="mt-4 text-gray-700 dark:text-gray-300">
-                                    You agree to indemnify, defend, and hold harmless Swift Pay, its officers,
+                                    You agree to indemnify, defend, and hold harmless SwiftPay, its officers,
                                     directors, employees, and agents from any claims, damages, losses, liabilities, and
                                     expenses (including legal fees) arising from your use of the Service, violation of
                                     these Terms, or infringement of any rights of another party.
@@ -348,6 +349,7 @@ export default function Terms() {
                         </div>
                     </div>
                 </section>
+                <PublicFooter />
             </div>
         </>
     );

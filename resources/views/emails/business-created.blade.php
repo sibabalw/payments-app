@@ -17,7 +17,7 @@
         <p style="margin: 0; color: #4a4a4a;"><strong>Status:</strong> {{ ucfirst($businessData->status) }}</p>
     </div>
     
-    <p>You can now start using Swift Pay with this business:</p>
+    <p>You can now start using SwiftPay with this business:</p>
     <ul style="margin: 16px 0; padding-left: 24px; color: #4a4a4a;">
         <li style="margin-bottom: 8px;">Add receivers</li>
         <li style="margin-bottom: 8px;">Create payment schedules</li>

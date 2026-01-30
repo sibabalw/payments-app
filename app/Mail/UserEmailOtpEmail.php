@@ -28,7 +28,7 @@ class UserEmailOtpEmail extends Mailable
      */
     public function envelope(): Envelope
     {
-        // App-related email - use Swift Pay branding
+        // App-related email - use SwiftPay branding
         return new Envelope(
             from: new Address(config('mail.from.address'), config('mail.from.name')),
             subject: 'Verify Your New Email Address',

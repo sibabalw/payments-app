@@ -36,7 +36,7 @@ class PayslipEmail extends Mailable
         $this->payrollJob->loadMissing('payrollSchedule.business');
         $business = $this->payrollJob->payrollSchedule->business ?? $this->employee->business;
 
-        // Get business email and name, fallback to Swift Pay defaults
+        // Get business email and name, fallback to SwiftPay defaults
         $fromEmail = $business->email ?? config('mail.from.address');
         $fromName = $business->name ?? config('mail.from.name');
 

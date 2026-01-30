@@ -67,12 +67,12 @@
                                 >
                             @else
                                 <h1 style="color: #ffffff; font-size: 32px; font-weight: 600; margin: 0; letter-spacing: -0.5px;">
-                                    {{ $business->name ?? 'Swift Pay' }}
+                                    {{ $business->name ?? 'SwiftPay' }}
                                 </h1>
                             @endif
                         @else
                             <h1 style="color: #ffffff; font-size: 32px; font-weight: 600; margin: 0; letter-spacing: -0.5px;">
-                                {{ $business->name ?? 'Swift Pay' }}
+                                {{ $business->name ?? 'SwiftPay' }}
                             </h1>
                         @endif
                     </div>

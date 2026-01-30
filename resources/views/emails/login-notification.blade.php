@@ -3,7 +3,7 @@
 @section('content')
     <h1>New Login Detected</h1>
     
-    <p>We noticed a new login to your Swift Pay account.</p>
+    <p>We noticed a new login to your SwiftPay account.</p>
     
     <div style="background-color: #f9fafb; border-left: 4px solid #1a1a1a; padding: 16px; margin: 24px 0; border-radius: 4px;">
         <p style="margin: 0 0 8px 0; font-weight: 600;">Login Details:</p>

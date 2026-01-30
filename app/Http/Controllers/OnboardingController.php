@@ -108,7 +108,7 @@ class OnboardingController extends Controller
             $emailService->send($user, new BusinessCreatedEmail($user, $business), 'business_created');
 
             return redirect()->route('dashboard')
-                ->with('success', 'Business created successfully. Welcome to Swift Pay!');
+                ->with('success', 'Business created successfully. Welcome to SwiftPay!');
 
         } catch (\Exception $e) {
             // If transaction failed, clean up uploaded file
@@ -130,6 +130,6 @@ class OnboardingController extends Controller
         Auth::user()->update(['onboarding_completed_at' => now()]);
 
         return redirect()->route('dashboard')
-            ->with('success', 'Welcome to Swift Pay! You can add a business later from the dashboard.');
+            ->with('success', 'Welcome to SwiftPay! You can add a business later from the dashboard.');
     }
 }

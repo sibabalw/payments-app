@@ -4,7 +4,7 @@
             <tr>
                 <td align="center" style="padding-bottom: 20px;">
                     <p style="margin: 0 0 12px 0; color: #6b7280; font-size: 14px;">
-                        © {{ date('Y') }} {{ $business->name ?? 'Swift Pay' }}. All rights reserved.
+                        © {{ date('Y') }} {{ $business->name ?? 'SwiftPay' }}. All rights reserved.
                     </p>
                     <p style="margin: 0 0 12px 0; color: #6b7280; font-size: 14px;">
                         This email was sent to {{ $user->email ?? 'you' }}.

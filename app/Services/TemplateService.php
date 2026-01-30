@@ -603,7 +603,7 @@ class TemplateService
                     'type' => 'header',
                     'properties' => [
                         'logoUrl' => '{{app_logo}}',
-                        'businessName' => 'Swift Pay',
+                        'businessName' => 'SwiftPay',
                         'backgroundColor' => $styles['headerBg'],
                         'textColor' => $styles['headerTextColor'],
                     ],
@@ -612,7 +612,7 @@ class TemplateService
                     'id' => 'text-1',
                     'type' => 'text',
                     'properties' => [
-                        'content' => '<h1>Welcome to Swift Pay!</h1>',
+                        'content' => '<h1>Welcome to SwiftPay!</h1>',
                         'fontSize' => '28px',
                         'color' => $styles['textColor'],
                         'alignment' => 'left',
@@ -642,7 +642,7 @@ class TemplateService
                     'id' => 'footer-1',
                     'type' => 'footer',
                     'properties' => [
-                        'text' => '© {{year}} Swift Pay. All rights reserved.',
+                        'text' => '© {{year}} SwiftPay. All rights reserved.',
                         'color' => $styles['mutedColor'],
                     ],
                 ],

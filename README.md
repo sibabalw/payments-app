@@ -1,6 +1,6 @@
-# Swift Pay - Payments & Payroll Management System
+# SwiftPay - Payments & Payroll Management System
 
-A comprehensive Laravel-based payment scheduling and payroll management application built for South African businesses. Swift Pay enables businesses to manage payments, process payroll with full tax compliance, track employee time, and handle escrow-based fund management.
+A comprehensive Laravel-based payment scheduling and payroll management application built for South African businesses. SwiftPay enables businesses to manage payments, process payroll with full tax compliance, track employee time, and handle escrow-based fund management.
 
 ## Table of Contents
 
@@ -185,7 +185,7 @@ This starts:
 
 ```env
 # Application
-APP_NAME="Swift Pay"
+APP_NAME="SwiftPay"
 APP_URL=http://localhost
 
 # Mail

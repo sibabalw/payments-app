@@ -161,7 +161,7 @@ class WhatsAppWebhookController extends Controller
     {
         $this->whatsAppService->sendMessage(
             $phoneNumber,
-            "Welcome to Swift Pay AI Assistant!\n\nPlease enter your email address to receive a verification code.\n\nExample: john@example.com"
+            "Welcome to SwiftPay AI Assistant!\n\nPlease enter your email address to receive a verification code.\n\nExample: john@example.com"
         );
 
         // Store phone in pending state (we'll match email in next message)
@@ -179,7 +179,7 @@ class WhatsAppWebhookController extends Controller
         if (! $user) {
             $this->whatsAppService->sendMessage(
                 $phoneNumber,
-                "We couldn't find an account with that email address. Please make sure you're using the email associated with your Swift Pay account."
+                "We couldn't find an account with that email address. Please make sure you're using the email associated with your SwiftPay account."
             );
 
             return;

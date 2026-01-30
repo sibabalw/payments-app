@@ -69,7 +69,7 @@ export function WelcomeTourModal({ isOpen, onClose, userName }: WelcomeTourModal
                         transition={{ delay: 0.3 }}
                     >
                         <p className="text-lg text-foreground">
-                            Swift Pay makes managing your business payments effortless.
+                            SwiftPay makes managing your business payments effortless.
                         </p>
                         <p className="text-muted-foreground">
                             Let's take a quick tour to help you get started.
@@ -239,7 +239,7 @@ export function WelcomeTourModal({ isOpen, onClose, userName }: WelcomeTourModal
                         transition={{ delay: 0.3 }}
                     >
                         <p className="text-lg text-foreground">
-                            You're ready to start using Swift Pay!
+                            You're ready to start using SwiftPay!
                         </p>
                         <div className="flex flex-wrap justify-center gap-2">
                             {['Create Business', 'Add Employees', 'Schedule Payments', 'Track Progress'].map(

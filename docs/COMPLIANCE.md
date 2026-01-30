@@ -1,10 +1,10 @@
 # South African Tax Compliance Documentation
 
-This document details the South African tax compliance features implemented in Swift Pay.
+This document details the South African tax compliance features implemented in SwiftPay.
 
 ## Overview
 
-Swift Pay handles the following South African tax compliance requirements:
+SwiftPay handles the following South African tax compliance requirements:
 
 1. **PAYE** (Pay As You Earn) - Income tax
 2. **UIF** (Unemployment Insurance Fund) - Employee and employer contributions

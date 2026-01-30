@@ -6,10 +6,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeTheme } from './hooks/use-appearance';
 
-// Initialize Echo early to ensure it's ready when components need it
-import './echo';
-
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const rawName = import.meta.env.VITE_APP_NAME || 'SwiftPay';
+const appName = ['Swift Pay', 'swift pay', 'Swift pay'].includes(rawName) ? 'SwiftPay' : rawName;
 
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
@@ -28,7 +26,7 @@ createInertiaApp({
         );
     },
     progress: {
-        color: '#4B5563',
+        color: '#2563eb',
         showSpinner: false,
     },
 });

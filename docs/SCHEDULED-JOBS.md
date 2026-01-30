@@ -1,10 +1,10 @@
 # Scheduled Jobs & Background Processing
 
-This document details all scheduled jobs, queue workers, and background processing in Swift Pay.
+This document details all scheduled jobs, queue workers, and background processing in SwiftPay.
 
 ## Overview
 
-Swift Pay uses Laravel's task scheduling and queue system for:
+SwiftPay uses Laravel's task scheduling and queue system for:
 
 - Processing scheduled payments
 - Processing scheduled payroll
