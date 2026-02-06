@@ -22,6 +22,7 @@ Route::get('/about', function () {
 Route::get('/contact', function () {
     return Inertia::render('public/contact');
 })->name('contact');
+Route::post('/contact', [\App\Http\Controllers\ContactController::class, 'store'])->name('contact.store');
 
 Route::get('/how-it-works', function () {
     return Inertia::render('public/how-it-works');
@@ -300,6 +301,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('payroll/{payrollSchedule}/pause', [\App\Http\Controllers\PayrollController::class, 'pause'])->name('payroll.pause');
         Route::post('payroll/{payrollSchedule}/resume', [\App\Http\Controllers\PayrollController::class, 'resume'])->name('payroll.resume');
         Route::post('payroll/{payrollSchedule}/cancel', [\App\Http\Controllers\PayrollController::class, 'cancel'])->name('payroll.cancel');
+        Route::post('payroll/{payrollSchedule}/cancel-overlapping-jobs', [\App\Http\Controllers\PayrollController::class, 'cancelOverlappingJobs'])->name('payroll.cancel-overlapping-jobs');
         Route::get('payroll/jobs', [\App\Http\Controllers\PayrollController::class, 'jobs'])->name('payroll.jobs');
         Route::get('payroll/jobs/{payrollJob}', [\App\Http\Controllers\PayrollJobController::class, 'show'])->name('payroll.jobs.show');
 

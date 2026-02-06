@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Events\TicketMessageCreated;
+use App\Events\TicketsListUpdated;
 use App\Events\TicketUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ReplyTicketRequest;
@@ -114,6 +115,7 @@ class AdminTicketController extends Controller
         // CRITICAL: Broadcast event after commit
         DB::afterCommit(function () use ($ticket, $message) {
             broadcast(new TicketMessageCreated($message, $ticket))->toOthers();
+            broadcast(new TicketsListUpdated($ticket))->toOthers();
         });
 
         $message->load('user:id,name,email');
@@ -150,6 +152,7 @@ class AdminTicketController extends Controller
         // CRITICAL: Broadcast event after commit
         DB::afterCommit(function () use ($ticket) {
             broadcast(new TicketUpdated($ticket))->toOthers();
+            broadcast(new TicketsListUpdated($ticket))->toOthers();
         });
 
         return back()->with('success', 'Ticket status updated successfully.');

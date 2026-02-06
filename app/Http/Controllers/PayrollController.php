@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\PayrollScheduleCancelledEmail;
 use App\Models\Business;
 use App\Models\Employee;
+use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
@@ -12,6 +13,7 @@ use App\Services\CronExpressionParser;
 use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
+use App\Services\PayrollValidationService;
 use App\Services\SouthAfricaHolidayService;
 use App\Services\SouthAfricanTaxService;
 use Carbon\Carbon;
@@ -30,6 +32,7 @@ class PayrollController extends Controller
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
         protected CronExpressionParser $cronParser,
+        protected PayrollValidationService $payrollValidationService,
         protected SouthAfricanTaxService $taxService,
         protected SouthAfricaHolidayService $holidayService
     ) {}
@@ -259,15 +262,24 @@ class PayrollController extends Controller
                 'status' => 'active',
             ]);
 
-            // Calculate next run time
+            // Calculate next run time (required for correctness — no fallback)
             try {
                 $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                 // Skip weekends and holidays
                 $nextRun = $this->adjustToBusinessDay($nextRun);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
-            } catch (\Exception $e) {
-                // If calculation fails, set to null (will be handled by scheduler)
+            } catch (\Throwable $e) {
+                Log::error('Unable to compute next run date for payroll schedule', [
+                    'schedule_id' => $schedule->id,
+                    'frequency' => $frequency,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException(
+                    'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                    0,
+                    $e
+                );
             }
 
             // CRITICAL: Re-validate escrow balance before attaching employees
@@ -325,24 +337,46 @@ class PayrollController extends Controller
             },
         ]);
 
-        // Use next_run_at to populate date/time fields, fallback to parsing cron if not available
+        // Use next_run_at to populate date/time fields; do not guess from cron when null
         if ($schedule->next_run_at) {
             $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
             $schedule->scheduled_date = $nextRun->format('Y-m-d');
             $schedule->scheduled_time = $nextRun->format('H:i');
+            $schedule->next_run_at_missing = false;
         } else {
-            // Fallback: Parse cron expression if next_run_at is not set
-            $parsed = $this->cronParser->parse($payrollSchedule->frequency);
-            if ($parsed) {
-                $schedule->scheduled_date = $parsed['date'];
-                $schedule->scheduled_time = $parsed['time'];
-            }
+            $schedule->scheduled_date = null;
+            $schedule->scheduled_time = null;
+            $schedule->next_run_at_missing = true;
         }
 
         // Parse frequency for display
         $parsed = $this->cronParser->parse($payrollSchedule->frequency);
         if ($parsed) {
             $schedule->parsed_frequency = $parsed['frequency'];
+        }
+
+        // Employees who will be skipped on next run (already paid or pending for this period)
+        $employeesAlreadyPaidThisPeriod = [];
+        try {
+            $period = $payrollSchedule->calculatePayPeriod();
+            $periodStart = $period['start'];
+            $periodEnd = $period['end'];
+            foreach ($schedule->employees as $employee) {
+                $overlapCheck = $this->payrollValidationService->checkPeriodOverlap(
+                    $employee,
+                    $periodStart,
+                    $periodEnd
+                );
+                if ($overlapCheck['has_overlap']) {
+                    $employeesAlreadyPaidThisPeriod[] = [
+                        'id' => $employee->id,
+                        'name' => $employee->name,
+                        'overlapping_jobs' => $overlapCheck['overlapping_jobs'],
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            // No next_run_at or invalid period — cannot compute; pass empty list
         }
 
         // Tax breakdowns are now loaded on-demand via getTaxBreakdowns endpoint
@@ -352,6 +386,7 @@ class PayrollController extends Controller
             'schedule' => $schedule,
             'businesses' => $businesses,
             'employees' => $employees,
+            'employees_already_paid_this_period' => $employeesAlreadyPaidThisPeriod,
         ]);
     }
 
@@ -505,8 +540,17 @@ class PayrollController extends Controller
                     $nextRun = $this->adjustToBusinessDay($nextRun);
                     $payrollSchedule->next_run_at = $nextRun;
                     $payrollSchedule->save();
-                } catch (\Exception $e) {
-                    // If calculation fails, set to null
+                } catch (\Throwable $e) {
+                    Log::error('Unable to compute next run date for payroll schedule update', [
+                        'schedule_id' => $payrollSchedule->id,
+                        'frequency' => $frequency,
+                        'error' => $e->getMessage(),
+                    ]);
+                    throw new \RuntimeException(
+                        'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                        0,
+                        $e
+                    );
                 }
             }
 
@@ -680,7 +724,7 @@ class PayrollController extends Controller
      */
     public function resume(PayrollSchedule $payrollSchedule)
     {
-        // Recalculate next run time when resuming
+        // Recalculate next run time when resuming (required — do not mark active without valid next_run_at)
         try {
             $nextRun = $this->cronService->getNextRunDate($payrollSchedule->frequency, now(config('app.timezone')));
             // Skip weekends and holidays
@@ -689,8 +733,17 @@ class PayrollController extends Controller
                 'status' => 'active',
                 'next_run_at' => $nextRun,
             ]);
-        } catch (\Exception $e) {
-            $payrollSchedule->update(['status' => 'active']);
+        } catch (\Throwable $e) {
+            Log::error('Unable to compute next run date when resuming payroll schedule', [
+                'schedule_id' => $payrollSchedule->id,
+                'frequency' => $payrollSchedule->frequency,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException(
+                'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                0,
+                $e
+            );
         }
 
         $this->auditService->log('payroll_schedule.resumed', $payrollSchedule, [
@@ -714,6 +767,74 @@ class PayrollController extends Controller
 
         return redirect()->back()
             ->with('success', 'Payroll schedule cancelled.');
+    }
+
+    /**
+     * Cancel overlapping pending/processing payroll jobs for selected employees so they can be included in the next run.
+     */
+    public function cancelOverlappingJobs(Request $request, PayrollSchedule $payrollSchedule)
+    {
+        $validated = $request->validate([
+            'employee_ids' => 'required|array',
+            'employee_ids.*' => 'exists:employees,id',
+        ]);
+
+        $employeeIds = $validated['employee_ids'];
+        $employeeIds = array_values(array_unique($employeeIds));
+
+        // Ensure employees belong to the schedule's business
+        $validEmployeeIds = Employee::where('business_id', $payrollSchedule->business_id)
+            ->whereIn('id', $employeeIds)
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validEmployeeIds)) {
+            return redirect()->back()
+                ->withErrors(['employee_ids' => 'No valid employees selected.']);
+        }
+
+        try {
+            $period = $payrollSchedule->calculatePayPeriod();
+        } catch (\Throwable $e) {
+            return redirect()->back()
+                ->withErrors(['employee_ids' => 'Cannot calculate pay period for this schedule. Set next run date and save first.']);
+        }
+
+        $periodStart = $period['start'];
+        $periodEnd = $period['end'];
+
+        $cancelled = 0;
+        foreach ($validEmployeeIds as $employeeId) {
+            $employee = Employee::find($employeeId);
+            if (! $employee) {
+                continue;
+            }
+            $overlapCheck = $this->payrollValidationService->checkPeriodOverlap($employee, $periodStart, $periodEnd);
+            if (! $overlapCheck['has_overlap']) {
+                continue;
+            }
+            foreach ($overlapCheck['overlapping_jobs'] as $jobInfo) {
+                $job = PayrollJob::find($jobInfo['id']);
+                if ($job && in_array($job->status, ['pending', 'processing'], true)) {
+                    try {
+                        $job->updateStatus('cancelled');
+                        $cancelled++;
+                    } catch (\Throwable $e) {
+                        Log::warning('Failed to cancel payroll job for include-in-next-run', [
+                            'payroll_job_id' => $job->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        $message = $cancelled === 0
+            ? 'No pending or processing jobs were found to cancel.'
+            : "Cancelled {$cancelled} overlapping job(s). Those employees will be included in the next payroll run.";
+
+        return redirect()->route('payroll.edit', $payrollSchedule)
+            ->with('success', $message);
     }
 
     /**

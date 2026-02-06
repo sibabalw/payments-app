@@ -3,9 +3,7 @@
 namespace App\Events;
 
 use App\Models\Ticket;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -30,7 +28,8 @@ class TicketCreated implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('tickets'), // Public channel for all ticket updates
+            new PrivateChannel('user.'.$this->ticket->user_id.'.tickets'),
+            new PrivateChannel('admin.tickets'),
         ];
     }
 
@@ -39,20 +38,18 @@ class TicketCreated implements ShouldBroadcastNow
      */
     public function broadcastAs(): string
     {
-        return 'ticket.created';
+        return 'tickets.list.updated';
     }
 
     /**
-     * Get the data to broadcast.
+     * Get the data to broadcast (minimal; no message content or PII).
+     *
+     * @return array<string, mixed>
      */
     public function broadcastWith(): array
     {
         return [
-            'type' => 'ticket_created',
-            'ticket_id' => $this->ticket->id,
-            'user_id' => $this->ticket->user_id,
-            'subject' => $this->ticket->subject,
-            'status' => $this->ticket->status,
+            'type' => 'tickets_list_updated',
             'timestamp' => now()->toIso8601String(),
         ];
     }

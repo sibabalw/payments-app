@@ -137,6 +137,7 @@ class TicketController extends Controller
         // CRITICAL: Broadcast event after commit
         DB::afterCommit(function () use ($ticket, $message) {
             broadcast(new \App\Events\TicketMessageCreated($message, $ticket))->toOthers();
+            broadcast(new \App\Events\TicketsListUpdated($ticket))->toOthers();
         });
 
         $message->load('user:id,name,email');

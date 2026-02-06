@@ -53,6 +53,14 @@ describe('PayrollSchedule::calculatePayPeriod', function () {
         expect($period['start']->format('Y-m-d'))->toBe('2026-01-01');
         expect($period['end']->format('Y-m-d'))->toBe('2026-01-31');
     });
+
+    it('throws when both execution date and next_run_at are null', function () {
+        $schedule = PayrollSchedule::factory()->for($this->business)->create([
+            'next_run_at' => null,
+        ]);
+
+        $schedule->calculatePayPeriod();
+    })->throws(\RuntimeException::class, 'Pay period cannot be calculated');
 });
 
 describe('Employee-specific once-off adjustment matching', function () {

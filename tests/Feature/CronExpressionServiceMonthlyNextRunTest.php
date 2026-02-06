@@ -78,6 +78,16 @@ it('returns March 28 as next run when monthly day 28 from February 28 in non-lea
     expect($nextRun->format('Y-m-d'))->toBe('2025-03-28');
 });
 
+it('returns March 30 as next run when monthly day 30 from February 28 in non-leap year', function () {
+    $from = Carbon::parse('2025-02-28 08:00:00');
+    $cron = '0 8 30 * *';
+
+    $nextRun = $this->cronService->getNextRunDate($cron, $from);
+
+    expect($nextRun->format('Y-m-d'))->toBe('2025-03-30')
+        ->and($nextRun->format('H:i'))->toBe('08:00');
+});
+
 it('returns March 29 as next run when monthly day 29 from February 29 in leap year', function () {
     $from = Carbon::parse('2024-02-29 08:00:00');
     $cron = '0 8 29 * *';

@@ -4,9 +4,7 @@ namespace App\Events;
 
 use App\Models\Ticket;
 use App\Models\TicketMessage;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -32,8 +30,7 @@ class TicketMessageCreated implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('tickets'), // Public channel for all ticket updates
-            new PrivateChannel('ticket.'.$this->ticket->id), // Private channel for specific ticket
+            new PrivateChannel('ticket.'.$this->ticket->id),
         ];
     }
 

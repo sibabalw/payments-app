@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Events\TicketCreated;
+use App\Events\TicketsListUpdated;
 use App\Events\TicketUpdated;
 use App\Mail\TicketCreatedEmail;
 use App\Models\Ticket;
@@ -58,8 +59,8 @@ class TicketObserver
     {
         // CRITICAL: Explicitly wait for commit before broadcasting
         DB::afterCommit(function () use ($ticket) {
-            // Broadcast ticket updated event via WebSocket
             broadcast(new TicketUpdated($ticket))->toOthers();
+            broadcast(new TicketsListUpdated($ticket))->toOthers();
         });
     }
 }

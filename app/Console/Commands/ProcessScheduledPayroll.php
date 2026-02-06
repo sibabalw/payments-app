@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\BatchProcessPayrollJob;
 use App\Jobs\ProcessPayrollJob;
+use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
 use App\Services\AdjustmentService;
 use App\Services\BatchProcessingService;
@@ -59,6 +60,26 @@ class ProcessScheduledPayroll extends Command
      * Execute the console command.
      */
     public function handle(): int
+    {
+        try {
+            return $this->runHandle();
+        } catch (\Throwable $e) {
+            Log::error('payroll:process-scheduled command failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Run the main command logic (wrapped so we can log any exception before rethrowing).
+     */
+    protected function runHandle(): int
     {
         // Generate operation ID for schedule execution tracking
         $operationId = \App\Helpers\LogContext::generateOperationId();
@@ -246,8 +267,6 @@ class ProcessScheduledPayroll extends Command
         $retryDelay = (int) config('payroll.transaction_retry_delay', 1);
 
         return $this->retryTransaction(function () use ($schedule, $payPeriodStart, $payPeriodEnd, $employees) {
-            // Use single atomic operation: lock first, then check and update
-            // This eliminates the race condition window between check and lock
             $lockedSchedule = PayrollSchedule::where('id', $schedule->id)
                 ->lockForUpdate()
                 ->first();
@@ -260,47 +279,103 @@ class ProcessScheduledPayroll extends Command
                 return 0;
             }
 
-            // Compute next_run_at before atomic claim (for recurring schedules)
-            // This ensures we set both last_run_at and next_run_at atomically
+            // Validate we can process BEFORE claiming: do not update last_run_at/next_run_at unless we will create jobs.
+            // Otherwise the schedule appears "run" but no payroll jobs were created or dispatched.
+            if ($employees->isEmpty()) {
+                Log::warning('Payroll schedule has no employees assigned - skipping (schedule stays due)', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'schedule_name' => $lockedSchedule->name,
+                    'business_id' => $lockedSchedule->business_id,
+                ]);
+
+                $this->warn("Schedule #{$lockedSchedule->id} has no employees assigned. Skipping (schedule stays due).");
+
+                return 0;
+            }
+
+            $business = \App\Models\Business::where('id', $lockedSchedule->business_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $business) {
+                Log::warning('Business not found for payroll schedule', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $lockedSchedule->business_id,
+                ]);
+
+                return 0;
+            }
+
+            if ($business->escrow_balance === null) {
+                Log::warning('Payroll schedule skipped - escrow balance is NULL (schedule stays due)', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is NULL. Schedule stays due.");
+
+                return 0;
+            }
+
+            $escrowBalance = $this->escrowService->getAvailableBalance($business, false, false);
+
+            if ($escrowBalance === 0) {
+                Log::warning('Payroll schedule skipped - escrow balance is zero (schedule stays due)', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is zero. Schedule stays due.");
+
+                return 0;
+            }
+
+            if ($escrowBalance < 0) {
+                Log::warning('Payroll schedule skipped - escrow balance is negative (schedule stays due)', [
+                    'schedule_id' => $lockedSchedule->id,
+                    'business_id' => $business->id,
+                    'escrow_balance' => $escrowBalance,
+                ]);
+
+                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is negative. Schedule stays due.");
+
+                return 0;
+            }
+
+            // All pre-checks passed: now claim the schedule (update last_run_at and next_run_at) so we only mark as run when we will create jobs.
             $updateData = [
                 'last_run_at' => now(),
                 'updated_at' => now(),
             ];
 
             if ($lockedSchedule->isOneTime()) {
-                // One-time: cancel and clear next_run_at
                 $updateData['next_run_at'] = null;
                 $updateData['status'] = 'cancelled';
             } else {
-                // Recurring: compute next run time (same logic as updateScheduleAfterProcessing)
                 try {
                     $nextRun = $this->cronService->getNextRunDate($lockedSchedule->frequency, now(config('app.timezone')));
 
-                    // Skip weekends and holidays - move to next business day if needed
                     if (! $this->holidayService->isBusinessDay($nextRun)) {
                         $originalTime = $nextRun->format('H:i');
                         $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
-                        // Preserve the time from the original cron calculation
                         $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
                     }
 
                     $updateData['next_run_at'] = $nextRun;
-                } catch (\Exception $e) {
-                    Log::error('Failed to calculate next run time during claim', [
+                } catch (\Throwable $e) {
+                    Log::error('Failed to calculate next run time during payroll schedule claim', [
                         'schedule_id' => $lockedSchedule->id,
                         'frequency' => $lockedSchedule->frequency,
                         'error' => $e->getMessage(),
                     ]);
-
-                    // If calculation fails, don't claim the schedule
-                    return 0;
+                    throw new \RuntimeException(
+                        'Unable to compute next run date for payroll schedule #'.$lockedSchedule->id.': '.$e->getMessage(),
+                        0,
+                        $e
+                    );
                 }
             }
 
-            // Atomically claim the schedule using UPDATE with WHERE condition
-            // This eliminates the check-then-act race condition
-            // For one-time: only claim if last_run_at is null
-            // For recurring: claim if last_run_at is null or last_run_at < next_run_at
             $whereCondition = $lockedSchedule->isOneTime()
                 ? function ($query) {
                     $query->whereNull('last_run_at');
@@ -324,80 +399,7 @@ class ProcessScheduledPayroll extends Command
                 return 0;
             }
 
-            // Reload the schedule to get updated timestamp
             $lockedSchedule->refresh();
-
-            // Check if schedule has employees - if not, log and return 0 (schedule already marked as processed)
-            if ($employees->isEmpty()) {
-                Log::warning('Payroll schedule has no employees assigned - schedule marked as processed', [
-                    'schedule_id' => $lockedSchedule->id,
-                    'schedule_name' => $lockedSchedule->name,
-                    'business_id' => $lockedSchedule->business_id,
-                ]);
-
-                $this->warn("Schedule #{$lockedSchedule->id} has no employees assigned. Schedule marked as processed.");
-
-                return 0;
-            }
-
-            // Check escrow balance before processing
-            // Lock business row to prevent concurrent balance checks
-            $business = \App\Models\Business::where('id', $lockedSchedule->business_id)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $business) {
-                Log::warning('Business not found for payroll schedule', [
-                    'schedule_id' => $lockedSchedule->id,
-                    'business_id' => $lockedSchedule->business_id,
-                ]);
-
-                return 0;
-            }
-
-            // CRITICAL CHECK #1: escrow_balance must be NOT NULL
-            // This prevents creating jobs when balance is NULL (should be prevented by database constraint, but check here too)
-            if ($business->escrow_balance === null) {
-                Log::warning('Payroll schedule skipped - escrow balance is NULL', [
-                    'schedule_id' => $lockedSchedule->id,
-                    'business_id' => $business->id,
-                    'escrow_balance' => null,
-                ]);
-
-                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is NULL. This is a critical error - active businesses must have a non-NULL escrow balance.");
-
-                return 0;
-            }
-
-            // Get available balance with locked row (no refresh needed since we just locked it)
-            $escrowBalance = $this->escrowService->getAvailableBalance($business, false, false);
-
-            // CRITICAL CHECK #2: escrow balance must be greater than zero (explicit zero check)
-            // This prevents creating jobs when balance is exactly zero
-            if ($escrowBalance === 0) {
-                Log::warning('Payroll schedule skipped - escrow balance is exactly zero', [
-                    'schedule_id' => $lockedSchedule->id,
-                    'business_id' => $business->id,
-                    'escrow_balance' => $escrowBalance,
-                ]);
-
-                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is zero");
-
-                return 0;
-            }
-
-            // CRITICAL CHECK #3: escrow balance must not be negative
-            if ($escrowBalance < 0) {
-                Log::warning('Payroll schedule skipped - escrow balance is negative', [
-                    'schedule_id' => $lockedSchedule->id,
-                    'business_id' => $business->id,
-                    'escrow_balance' => $escrowBalance,
-                ]);
-
-                $this->warn("Skipping schedule #{$lockedSchedule->id} - escrow balance is negative (balance: {$escrowBalance})");
-
-                return 0;
-            }
 
             // Generate schedule run ID for audit trail (all jobs from this run share the same ID)
             $scheduleRunId = \Illuminate\Support\Str::uuid()->toString();
@@ -713,37 +715,48 @@ class ProcessScheduledPayroll extends Command
                         }
                     }
 
-                    // Dispatch batch jobs instead of individual jobs (bank-grade performance)
-                    $createdJobs->chunk($batchSize)->each(function ($jobBatch) use (&$totalJobs) {
-                        $jobIds = $jobBatch->pluck('id')->toArray();
+                    // Collect batches to dispatch after the transaction commits so jobs are pushed to the queue
+                    // only after PayrollJob rows exist. Use database connection explicitly so the worker picks them up.
+                    $chunkSize = max(1, $batchSize);
+                    $batchesToDispatch = $createdJobs->chunk($chunkSize)->map(fn ($jobBatch) => $jobBatch->pluck('id')->toArray())->values()->all();
+                    $totalJobs = $createdJobs->count();
 
+                    DB::afterCommit(function () use ($batchesToDispatch) {
                         try {
-                            // Dispatch batch job on high priority queue (payroll is higher priority)
-                            BatchProcessPayrollJob::dispatch($jobIds)->onQueue('high');
-                            $totalJobs += count($jobIds);
-
-                            Log::info('Batch payroll job dispatched to queue', [
-                                'job_count' => count($jobIds),
-                                'job_ids' => $jobIds,
-                            ]);
-                        } catch (\Exception $e) {
-                            Log::error('Failed to dispatch batch payroll job to queue', [
-                                'job_count' => count($jobIds),
-                                'error' => $e->getMessage(),
-                            ]);
-
-                            // Fallback: dispatch individual jobs
-                            foreach ($jobBatch as $payrollJob) {
+                            foreach ($batchesToDispatch as $jobIds) {
                                 try {
-                                    ProcessPayrollJob::dispatch($payrollJob)->onQueue('high');
-                                    $totalJobs++;
-                                } catch (\Exception $e2) {
-                                    Log::error('Failed to dispatch payroll job to queue', [
-                                        'payroll_job_id' => $payrollJob->id,
-                                        'error' => $e2->getMessage(),
+                                    BatchProcessPayrollJob::dispatch($jobIds)->onConnection('database')->onQueue('high');
+                                    Log::info('Batch payroll job dispatched to queue', [
+                                        'job_count' => count($jobIds),
+                                        'job_ids' => $jobIds,
                                     ]);
+                                } catch (\Exception $e) {
+                                    Log::error('Failed to dispatch batch payroll job to queue', [
+                                        'job_count' => count($jobIds),
+                                        'error' => $e->getMessage(),
+                                        'trace' => $e->getTraceAsString(),
+                                    ]);
+
+                                    $payrollJobs = PayrollJob::whereIn('id', $jobIds)->get();
+                                    foreach ($payrollJobs as $payrollJob) {
+                                        try {
+                                            ProcessPayrollJob::dispatch($payrollJob)->onConnection('database')->onQueue('high');
+                                            Log::info('Payroll job dispatched to queue (fallback)', ['payroll_job_id' => $payrollJob->id]);
+                                        } catch (\Exception $e2) {
+                                            Log::error('Failed to dispatch payroll job to queue', [
+                                                'payroll_job_id' => $payrollJob->id,
+                                                'error' => $e2->getMessage(),
+                                            ]);
+                                        }
+                                    }
                                 }
                             }
+                        } catch (\Throwable $e) {
+                            // Do not rethrow: log and allow command to exit 0 so scheduler does not mark as failed.
+                            Log::error('Payroll afterCommit dispatch failed', [
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
                         }
                     });
                 } catch (\Exception $e) {

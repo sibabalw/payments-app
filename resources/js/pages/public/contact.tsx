@@ -7,23 +7,31 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Head, Link, useForm } from '@inertiajs/react';
-import { Mail, MessageSquare, Phone, Clock, ArrowRight } from 'lucide-react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { useEffect } from 'react';
+import { Mail, MessageSquare, Clock, ArrowRight } from 'lucide-react';
+import InputError from '@/components/input-error';
 import { login, register } from '@/routes';
 import { PublicFooter } from '@/components/public-footer';
 import { PublicNav } from '@/components/public-nav';
 
 export default function Contact() {
-    const { data, setData, post, processing } = useForm({
+    const { flash } = usePage().props as { flash?: { success?: string } };
+    const { data, setData, post, processing, errors, reset, wasSuccessful } = useForm({
         name: '',
         email: '',
         message: '',
     });
 
+    useEffect(() => {
+        if (wasSuccessful) {
+            reset();
+        }
+    }, [wasSuccessful, reset]);
+
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
-        // In a real app, this would send to a contact form handler
-        alert('Thank you for your message! We will get back to you soon.');
+        post('/contact');
     };
 
     return (
@@ -138,6 +146,11 @@ export default function Contact() {
                                     <h2 className="mb-6 text-xl font-semibold text-foreground">
                                         Send Us a Message
                                     </h2>
+                                    {flash?.success && (
+                                        <div className="mb-4 rounded-md bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-300">
+                                            {flash.success}
+                                        </div>
+                                    )}
                                     <form onSubmit={submit} className="space-y-4">
                                         <div>
                                             <Label htmlFor="name">Name</Label>
@@ -148,6 +161,7 @@ export default function Contact() {
                                                 required
                                                 placeholder="Your full name"
                                             />
+                                            <InputError message={errors.name} className="mt-1" />
                                         </div>
                                         <div>
                                             <Label htmlFor="email">Email</Label>
@@ -159,6 +173,7 @@ export default function Contact() {
                                                 required
                                                 placeholder="your.email@example.com"
                                             />
+                                            <InputError message={errors.email} className="mt-1" />
                                         </div>
                                         <div>
                                             <Label htmlFor="message">Message</Label>
@@ -170,6 +185,7 @@ export default function Contact() {
                                                 required
                                                 placeholder="Tell us how we can help..."
                                             />
+                                            <InputError message={errors.message} className="mt-1" />
                                         </div>
                                         <Button type="submit" disabled={processing} className="w-full">
                                             {processing ? 'Sending...' : 'Send Message'}

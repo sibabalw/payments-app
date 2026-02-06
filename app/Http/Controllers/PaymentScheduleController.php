@@ -232,15 +232,24 @@ class PaymentScheduleController extends Controller
                 'status' => 'active',
             ]);
 
-            // Calculate next run time
+            // Calculate next run time (required for correctness — no fallback)
             try {
                 $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                 // Skip weekends and holidays
                 $nextRun = $this->adjustToBusinessDay($nextRun);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
-            } catch (\Exception $e) {
-                // If calculation fails, set to null (will be handled by scheduler)
+            } catch (\Throwable $e) {
+                Log::error('Unable to compute next run date for payment schedule', [
+                    'schedule_id' => $schedule->id,
+                    'frequency' => $frequency,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException(
+                    'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                    0,
+                    $e
+                );
             }
 
             return $schedule;
@@ -305,18 +314,16 @@ class PaymentScheduleController extends Controller
 
         $schedule = $paymentSchedule->load(['business', 'recipients']);
 
-        // Use next_run_at to populate date/time fields, fallback to parsing cron if not available
+        // Use next_run_at to populate date/time fields; do not guess from cron when null
         if ($schedule->next_run_at) {
             $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
             $schedule->scheduled_date = $nextRun->format('Y-m-d');
             $schedule->scheduled_time = $nextRun->format('H:i');
+            $schedule->next_run_at_missing = false;
         } else {
-            // Fallback: Parse cron expression if next_run_at is not set
-            $parsed = $this->cronParser->parse($paymentSchedule->frequency);
-            if ($parsed) {
-                $schedule->scheduled_date = $parsed['date'];
-                $schedule->scheduled_time = $parsed['time'];
-            }
+            $schedule->scheduled_date = null;
+            $schedule->scheduled_time = null;
+            $schedule->next_run_at_missing = true;
         }
 
         // Parse frequency for display
@@ -445,7 +452,7 @@ class PaymentScheduleController extends Controller
                 'schedule_type' => $validated['schedule_type'],
             ]);
 
-            // Recalculate next run time if frequency changed
+            // Recalculate next run time if frequency changed (required for correctness — no fallback)
             if ($paymentSchedule->wasChanged('frequency')) {
                 try {
                     $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
@@ -453,8 +460,17 @@ class PaymentScheduleController extends Controller
                     $nextRun = $this->adjustToBusinessDay($nextRun);
                     $paymentSchedule->next_run_at = $nextRun;
                     $paymentSchedule->save();
-                } catch (\Exception $e) {
-                    // If calculation fails, set to null
+                } catch (\Throwable $e) {
+                    Log::error('Unable to compute next run date for payment schedule update', [
+                        'schedule_id' => $paymentSchedule->id,
+                        'frequency' => $frequency,
+                        'error' => $e->getMessage(),
+                    ]);
+                    throw new \RuntimeException(
+                        'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                        0,
+                        $e
+                    );
                 }
             }
 
@@ -586,7 +602,7 @@ class PaymentScheduleController extends Controller
      */
     public function resume(PaymentSchedule $paymentSchedule)
     {
-        // Recalculate next run time when resuming
+        // Recalculate next run time when resuming (required — do not mark active without valid next_run_at)
         try {
             $nextRun = $this->cronService->getNextRunDate($paymentSchedule->frequency, now(config('app.timezone')));
             // Skip weekends and holidays
@@ -595,8 +611,17 @@ class PaymentScheduleController extends Controller
                 'status' => 'active',
                 'next_run_at' => $nextRun,
             ]);
-        } catch (\Exception $e) {
-            $paymentSchedule->update(['status' => 'active']);
+        } catch (\Throwable $e) {
+            Log::error('Unable to compute next run date when resuming payment schedule', [
+                'schedule_id' => $paymentSchedule->id,
+                'frequency' => $paymentSchedule->frequency,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException(
+                'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                0,
+                $e
+            );
         }
 
         $this->auditService->log('payment_schedule.resumed', $paymentSchedule, [

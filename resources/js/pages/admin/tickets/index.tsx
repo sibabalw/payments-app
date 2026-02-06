@@ -7,10 +7,9 @@ import { Head, Link, router } from '@inertiajs/react';
 import { MessageSquare } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useEffect, useRef } from 'react';
-import { disconnectEcho } from '@/echo';
 
-const TICKETS_CHANNEL = 'tickets';
-const TICKET_EVENTS = ['.ticket.created', '.ticket.updated'] as const;
+const TICKETS_LIST_EVENT = '.tickets.list.updated' as const;
+const ADMIN_TICKETS_CHANNEL = 'admin.tickets';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Admin', href: '/admin' },
@@ -30,7 +29,7 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function AdminTicketsIndex({ tickets, filters }: any) {
-    // Real-time updates via WebSockets (Pusher). Leave channel when user navigates away.
+    // Real-time updates via private admin channel (Pusher). Leave channel when user navigates away.
     const channelRef = useRef<{ stopListening: (event: string) => void } | null>(null);
 
     useEffect(() => {
@@ -42,14 +41,13 @@ export default function AdminTicketsIndex({ tickets, filters }: any) {
             try {
                 const ch = channelRef.current;
                 if (ch && typeof ch.stopListening === 'function') {
-                    TICKET_EVENTS.forEach((ev) => ch.stopListening(ev));
+                    ch.stopListening(TICKETS_LIST_EVENT);
                 }
-                window.Echo.leave(TICKETS_CHANNEL);
+                window.Echo.leaveChannel(ADMIN_TICKETS_CHANNEL);
                 channelRef.current = null;
             } catch (e) {
                 console.error('WebSocket: Error leaving tickets channel', e);
             }
-            disconnectEcho();
         };
 
         const initWebSocket = async () => {
@@ -60,18 +58,13 @@ export default function AdminTicketsIndex({ tickets, filters }: any) {
                     if (reloadTimeout) clearTimeout(reloadTimeout);
                     reloadTimeout = setTimeout(() => {
                         reloadTimeout = null;
-                        router.reload({
-                            only: ['tickets'],
-                            preserveScroll: true,
-                            preserveState: false,
-                        });
+                        router.reload({ only: ['tickets'] });
                     }, reloadDebounceMs);
                 };
 
                 const channel = echo
-                    .channel(TICKETS_CHANNEL)
-                    .listen('.ticket.created', handleUpdate)
-                    .listen('.ticket.updated', handleUpdate);
+                    .private(ADMIN_TICKETS_CHANNEL)
+                    .listen(TICKETS_LIST_EVENT, handleUpdate);
                 channelRef.current = channel;
             } catch (e) {
                 console.error('Failed to initialize WebSocket:', e);

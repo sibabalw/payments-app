@@ -93,12 +93,20 @@ class PayrollSchedule extends Model
      * - One-time schedules: pay for the scheduled month
      * - Other schedules: use current month
      *
-     * @param  Carbon|null  $executionDate  If null, uses next_run_at or now()
+     * @param  Carbon|null  $executionDate  If null, uses next_run_at. Throws if both are null.
      * @return array{start: Carbon, end: Carbon}
+     *
+     * @throws \RuntimeException When both $executionDate and next_run_at are null (no fallback for correctness).
      */
     public function calculatePayPeriod(?Carbon $executionDate = null): array
     {
-        $executionDate = $executionDate ?? $this->next_run_at ?? now();
+        $executionDate = $executionDate ?? $this->next_run_at;
+
+        if ($executionDate === null) {
+            throw new \RuntimeException(
+                'Pay period cannot be calculated: no execution date and schedule has no next_run_at.'
+            );
+        }
 
         // Ensure we're working with a Carbon instance
         if (! $executionDate instanceof Carbon) {

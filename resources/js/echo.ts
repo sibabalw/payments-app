@@ -15,12 +15,13 @@ function getEcho(): InstanceType<typeof Echo> {
     if (typeof window !== 'undefined' && window.Echo) {
         return window.Echo;
     }
+    const key = import.meta.env.VITE_PUSHER_APP_KEY ?? (import.meta.env.DEV ? 'da70bd0415e161cfbb00' : '');
+    const cluster = import.meta.env.VITE_PUSHER_APP_CLUSTER ?? (import.meta.env.DEV ? 'ap2' : '');
     const echo = new Echo({
         broadcaster: 'pusher',
-        key: import.meta.env.VITE_PUSHER_APP_KEY || 'da70bd0415e161cfbb00',
-        cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER || 'ap2',
+        key,
+        cluster,
         forceTLS: true,
-        encrypted: true,
         authEndpoint: '/broadcasting/auth',
         auth: {
             headers: {
@@ -50,8 +51,9 @@ function getEcho(): InstanceType<typeof Echo> {
 }
 
 /**
- * Disconnect Pusher and clear the Echo singleton. Call when leaving ticket pages
- * so the WebSocket is closed and the next visit creates a fresh connection.
+ * Disconnect Pusher and clear the Echo singleton. For explicit teardown only
+ * (e.g. logout or app shutdown). Per Pusher docs, connections close on page close;
+ * for in-app navigation, pages should only leave their channel(s), not call this.
  */
 export function disconnectEcho(): void {
     if (typeof window === 'undefined' || !window.Echo) return;

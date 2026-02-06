@@ -75,14 +75,12 @@ make app based notifications it must be simple and sometimes can notify via emai
 
 for pricing and billing add one month free trial
 
-payroll and payments dont handle leap years and February, feb ends 28 or 29 next run will be march 30 if i created job in jan 30, in next run there should be no fallbacks
+payroll and payments dont handle leap years and February, feb ends 28 or 29 next run will be march 30 if i 
+created job in jan 30, in next run there should be no fallbacks, ai fixed, ai tested, to be confirmed by human
 
 make sure no payment and payroll created when escrow balance is 0 and when they shcedule more than they have, 
 make it air tight even in database level postgres, even in do checks in executions, make this impossible because 
 this is very critical, database we use is postgre, dont overdo it or rplace what exist with no reason, i repeat i only use postgres db
-
-payroll and payments dont handle leap years and February, if feb ends 28 or 29 and im adding monthly schedule 
-in 30 Jan next run will be march 30 not February 28 0r 29 depending if it's a leap year this is critical!!
 
 now payroll jobs are never executing but in execution time next run is calculated and update but they never execute,
 i think i see now i edited payroll in the this same month that executed this month which is this month to execute again 
@@ -117,21 +115,12 @@ Tables let you show actionable data directly (approve, retry, send, etc.)
 Exporting, bulk actions, inline edits—all naturally fit in a table
 The modern touch is not flashy cards—it’s features that make tables interactive, responsive, and clear (sticky headers, badges, filters, pagination).
 
-when i send a message inside a ticket inertia reload i see global loader, remove the reloading that's bad, 
-i suspect it comes from controler not front end
-
 include what swiftpay is about in public pages, feautures what to expect etc, you may add some pages you are not limited
-
-improve ui of SwiftPay to be very modern now it resembles legacy businesses, this is react very powerful in ui come on
 
 make contact us page work with existing email system
 
 add blog page in public pages and to admin because they will use it to post
 
-messages in tickets must flow from top to bottom like in whatsapp, bottom messages are newest and the ones from above are oldest, paginate accordingly
-
-be efficient about pusher connections very efficient that's critical, currently the are 3 concurrent connections but i opened 2 web browser and have admin talk to user account
-
-messages are not sent live now 
+implement database backup and management ui system in admin side
 
 testing

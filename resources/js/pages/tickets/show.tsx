@@ -8,7 +8,6 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/react';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { disconnectEcho } from '@/echo';
 
 const TICKET_EVENTS = ['.ticket.updated', '.ticket.message.created'] as const;
 
@@ -140,14 +139,13 @@ export default function TicketsShow({ ticket: initialTicket, messages: initialMe
                 stopListeningAll(privateChannelRef.current);
                 const id = subscribedTicketIdRef.current;
                 if (id != null) {
-                    window.Echo.leaveChannel(`private-ticket.${id}`);
+                    window.Echo.leaveChannel(`ticket.${id}`);
                     subscribedTicketIdRef.current = null;
                 }
                 privateChannelRef.current = null;
             } catch (e) {
                 console.error('WebSocket: Error cleaning up channels', e);
             }
-            disconnectEcho();
         };
 
         (async () => {
@@ -176,7 +174,7 @@ export default function TicketsShow({ ticket: initialTicket, messages: initialMe
                     privateChannelRef.current = privateCh;
                     subscribedTicketIdRef.current = ticketId;
                 } else {
-                    echo.leaveChannel(`private-ticket.${ticketId}`);
+                    echo.leaveChannel(`ticket.${ticketId}`);
                 }
             } catch (e) {
                 console.error('Failed to initialize WebSocket:', e);
@@ -263,26 +261,27 @@ export default function TicketsShow({ ticket: initialTicket, messages: initialMe
                         )}
                     </div>
 
-                    {/* Messages - scrollable; oldest at top, newest at bottom (WhatsApp). Load older above. */}
-                    <div
-                        ref={messagesScrollRef}
-                        className="min-h-0 flex-1 overflow-y-auto px-2 py-2 md:px-4 md:py-4"
-                    >
-                        <div className="flex flex-col gap-1.5 md:gap-3">
-                            {hasMoreMessages && (
-                                <div className="flex justify-center pb-2 md:pb-3">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 text-xs md:h-8 md:text-sm"
-                                        onClick={loadMoreMessages}
-                                        disabled={loadingMore}
-                                    >
-                                        {loadingMore ? 'Loading…' : 'Load older messages'}
-                                    </Button>
-                                </div>
-                            )}
-                            {messages && messages.length > 0 ? (
+                    {/* Messages: Load more above; oldest at top, newest at bottom; load more fetches older from above. */}
+                    <div className="flex min-h-0 flex-1 flex-col">
+                        {hasMoreMessages && (
+                            <div className="shrink-0 flex justify-center border-b border-border/50 py-2 md:py-3">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs md:h-8 md:text-sm"
+                                    onClick={loadMoreMessages}
+                                    disabled={loadingMore}
+                                >
+                                    {loadingMore ? 'Loading…' : 'Load messages from above'}
+                                </Button>
+                            </div>
+                        )}
+                        <div
+                            ref={messagesScrollRef}
+                            className="min-h-0 flex-1 overflow-y-auto px-2 py-2 md:px-4 md:py-4"
+                        >
+                            <div className="flex flex-col gap-1.5 md:gap-3">
+                                {messages && messages.length > 0 ? (
                                 messages.map((message: any) => (
                                     <div
                                         key={message.id}
@@ -301,8 +300,8 @@ export default function TicketsShow({ ticket: initialTicket, messages: initialMe
                                                     </Badge>
                                                 )}
                                             </span>
-<span
-                                            className="text-[10px] text-muted-foreground md:text-xs"
+                                            <span
+                                                className="text-[10px] text-muted-foreground md:text-xs"
                                             title={new Date(message.created_at).toLocaleString()}
                                         >
                                             {formatRelativeTime(message.created_at)}
@@ -313,11 +312,12 @@ export default function TicketsShow({ ticket: initialTicket, messages: initialMe
                                         </p>
                                     </div>
                                 ))
-                            ) : (
-                                <p className="py-6 text-center text-xs text-muted-foreground md:py-8 md:text-sm">
-                                    No messages yet.
-                                </p>
-                            )}
+                                ) : (
+                                    <p className="py-6 text-center text-xs text-muted-foreground md:py-8 md:text-sm">
+                                        No messages yet.
+                                    </p>
+                                )}
+                            </div>
                         </div>
                     </div>
 

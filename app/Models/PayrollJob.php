@@ -160,10 +160,11 @@ class PayrollJob extends Model
      * Valid status transitions for payroll jobs
      */
     protected array $validTransitions = [
-        'pending' => ['processing', 'failed'],
-        'processing' => ['succeeded', 'failed'],
+        'pending' => ['processing', 'failed', 'cancelled'],
+        'processing' => ['succeeded', 'failed', 'cancelled'],
         'succeeded' => [], // Terminal state - cannot transition from succeeded
         'failed' => ['pending'], // Can retry failed jobs by resetting to pending
+        'cancelled' => [], // Terminal state - voided so employee can be included in next run
     ];
 
     /**
@@ -204,7 +205,7 @@ class PayrollJob extends Model
             $attributes['error_message'] = $errorMessage;
         }
 
-        if ($status === 'succeeded' || $status === 'failed') {
+        if (in_array($status, ['succeeded', 'failed', 'cancelled'], true)) {
             $attributes['processed_at'] = now();
         }
 

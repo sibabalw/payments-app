@@ -699,40 +699,30 @@ class ProcessScheduledPayments extends Command
 
             $this->info("Schedule #{$schedule->id} (one-time) processed and auto-cancelled.");
         } else {
-            // Calculate next run time for recurring schedules
-            try {
-                $nextRun = $this->cronService->getNextRunDate($schedule->frequency, now(config('app.timezone')));
+            // Calculate next run time for recurring schedules (fail fast — no silent fallback)
+            $nextRun = $this->cronService->getNextRunDate($schedule->frequency, now(config('app.timezone')));
 
-                // Skip weekends and holidays - move to next business day if needed
-                if (! $this->holidayService->isBusinessDay($nextRun)) {
-                    $originalDate = $nextRun->format('Y-m-d');
-                    $originalTime = $nextRun->format('H:i');
-                    $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
-                    // Preserve the time from the original cron calculation
-                    $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
+            // Skip weekends and holidays - move to next business day if needed
+            if (! $this->holidayService->isBusinessDay($nextRun)) {
+                $originalDate = $nextRun->format('Y-m-d');
+                $originalTime = $nextRun->format('H:i');
+                $nextRun = $this->holidayService->getNextBusinessDay($nextRun);
+                // Preserve the time from the original cron calculation
+                $nextRun->setTime((int) explode(':', $originalTime)[0], (int) explode(':', $originalTime)[1]);
 
-                    Log::info('Payment schedule next run adjusted to skip weekend/holiday', [
-                        'schedule_id' => $schedule->id,
-                        'original_date' => $originalDate,
-                        'adjusted_date' => $nextRun->format('Y-m-d'),
-                    ]);
-                }
-
-                $schedule->update([
-                    'next_run_at' => $nextRun,
-                    'last_run_at' => now(),
-                ]);
-
-                $this->info("Schedule #{$schedule->id} processed. Next run: {$nextRun->format('Y-m-d H:i:s')}");
-            } catch (\Exception $e) {
-                Log::error('Failed to calculate next run time for schedule', [
+                Log::info('Payment schedule next run adjusted to skip weekend/holiday', [
                     'schedule_id' => $schedule->id,
-                    'frequency' => $schedule->frequency,
-                    'error' => $e->getMessage(),
+                    'original_date' => $originalDate,
+                    'adjusted_date' => $nextRun->format('Y-m-d'),
                 ]);
-
-                $this->error("Failed to calculate next run time for schedule #{$schedule->id}: {$e->getMessage()}");
             }
+
+            $schedule->update([
+                'next_run_at' => $nextRun,
+                'last_run_at' => now(),
+            ]);
+
+            $this->info("Schedule #{$schedule->id} processed. Next run: {$nextRun->format('Y-m-d H:i:s')}");
         }
     }
 }
