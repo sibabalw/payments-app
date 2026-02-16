@@ -1,1 +1,0 @@
-import{a as e}from"./createLucideIcon-CDiNb0OM.js";const t=[["rect",{x:"14",y:"4",width:"4",height:"16",rx:"1",key:"zuxfzm"}],["rect",{x:"6",y:"4",width:"4",height:"16",rx:"1",key:"1okwgv"}]],c=e("Pause",t);export{c as P};
