@@ -116,16 +116,20 @@ class PayrollSchedule extends Model
         // Parse cron frequency to determine schedule type
         $cronParts = explode(' ', $this->frequency);
 
-        // For monthly recurring schedules: pay for previous month
-        // Cron format: "0 0 25 * *" (runs on 25th) means pay for previous month
+        // For monthly recurring schedules: pay period depends on pay day
+        // Cron format: "0 9 1 * *" (1st) vs "0 9 20 * *" (20th)
+        // - Pay on 1st: pay for current month (month we're in), so changing from 20th to 1st doesn't re-pay last month
+        // - Pay on 2nd–31st: pay for previous month
         if ($this->isRecurring() && count($cronParts) === 5) {
-            // Check if it's a monthly schedule (day of month is specified, not *)
             if ($cronParts[2] !== '*' && $cronParts[3] === '*') {
-                $previousMonth = $executionDate->copy()->subMonth();
+                $dayOfMonth = (int) $cronParts[2];
+                $targetMonth = ($dayOfMonth === 1)
+                    ? $executionDate->copy()
+                    : $executionDate->copy()->subMonth();
 
                 return [
-                    'start' => $previousMonth->copy()->startOfMonth(),
-                    'end' => $previousMonth->copy()->endOfMonth(),
+                    'start' => $targetMonth->copy()->startOfMonth(),
+                    'end' => $targetMonth->copy()->endOfMonth(),
                 ];
             }
         }

@@ -65,6 +65,10 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
+        "dev:test-db": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd\" \"APP_ENV=testing DB_DATABASE=payment_app_test php artisan queue:listen database --queue=high,default --tries=1\" \"APP_ENV=testing DB_DATABASE=payment_app_test php artisan schedule:work\" --names=queue,scheduler --kill-others"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

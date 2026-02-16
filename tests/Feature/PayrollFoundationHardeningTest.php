@@ -29,9 +29,10 @@ beforeEach(function () {
     $this->schedule = PayrollSchedule::factory()->for($this->business)->create();
     $this->schedule->employees()->attach($this->employee->id);
 
-    EscrowDeposit::factory()->for($this->business)->create([
+    $this->escrowDeposit = EscrowDeposit::factory()->for($this->business)->create([
         'status' => 'confirmed',
-        'authorized_amount' => 100000,
+        'amount' => 100000000,
+        'authorized_amount' => 100000000,
     ]);
 
     $this->paymentService = app(PaymentService::class);
@@ -63,11 +64,21 @@ describe('Lock Ordering Prevents Deadlocks', function () {
 
 describe('Escrow Balance Reconciliation', function () {
     it('detects and fixes balance drift', function () {
-        // Create succeeded payroll job
+        // Single deposit so recalc is 100k - 25k = 75k
+        EscrowDeposit::where('business_id', $this->business->id)->delete();
+        $deposit = EscrowDeposit::factory()->for($this->business)->create([
+            'status' => 'confirmed',
+            'amount' => 100000,
+            'authorized_amount' => 100000,
+        ]);
         $job = PayrollJob::factory()->for($this->schedule)->for($this->employee)->create([
             'status' => 'succeeded',
-            'net_salary' => 25000,
-            'escrow_deposit_id' => 1,
+            'gross_salary' => 30000,
+            'paye_amount' => 4822.88,
+            'uif_amount' => 177.12,
+            'sdl_amount' => 300,
+            'net_salary' => 25000, // 30000 - 4822.88 - 177.12
+            'escrow_deposit_id' => $deposit->id,
             'processed_at' => now(),
         ]);
 
@@ -80,7 +91,7 @@ describe('Escrow Balance Reconciliation', function () {
         // Balance should be corrected
         expect($reconciledBalance)->toBe(75000.0);
         $this->business->refresh();
-        expect($this->business->escrow_balance)->toBe(75000.0);
+        expect((float) $this->business->escrow_balance)->toBe(75000.0);
     });
 });
 
@@ -224,10 +235,22 @@ describe('Atomic Schedule Processing', function () {
 
 describe('Error Recovery', function () {
     it('cleans up orphaned escrow reservations', function () {
+        EscrowDeposit::where('business_id', $this->business->id)->delete();
+        $deposit = EscrowDeposit::factory()->for($this->business)->create([
+            'status' => 'confirmed',
+            'amount' => 100000,
+            'authorized_amount' => 100000,
+        ]);
+        // Simulate balance after 25k was reserved for the job (100k - 25k = 75k)
+        $this->business->update(['escrow_balance' => 75000]);
         $job = PayrollJob::factory()->for($this->schedule)->for($this->employee)->create([
             'status' => 'failed',
-            'net_salary' => 25000,
-            'escrow_deposit_id' => 1,
+            'gross_salary' => 30000,
+            'paye_amount' => 4822.88,
+            'uif_amount' => 177.12,
+            'sdl_amount' => 300,
+            'net_salary' => 25000, // 30000 - 4822.88 - 177.12
+            'escrow_deposit_id' => $deposit->id,
             'processed_at' => now()->subHours(2), // Failed 2 hours ago
         ]);
 
@@ -237,9 +260,9 @@ describe('Error Recovery', function () {
         $job->refresh();
         expect($job->escrow_deposit_id)->toBeNull();
 
-        // Balance should be restored
+        // Cleanup adds reserved 25k back to balance: 75k + 25k = 100k
         $this->business->refresh();
-        expect($this->business->escrow_balance)->toBe(100000.0); // Original 100k
+        expect((float) $this->business->escrow_balance)->toBe(100000.0);
     });
 });
 
@@ -257,22 +280,14 @@ describe('Performance Optimizations', function () {
     });
 
     it('uses optimized eager loading with selected fields', function () {
-        $schedule = PayrollSchedule::factory()->for($this->business)->create();
+        $schedule = PayrollSchedule::factory()->for($this->business)->create([
+            'status' => 'active',
+            'next_run_at' => now()->subMinute(),
+        ]);
         $schedule->employees()->attach($this->employee->id);
 
-        // Should not load unnecessary relationships
-        $command = new \App\Console\Commands\ProcessScheduledPayroll(
-            app(\App\Services\SouthAfricanTaxService::class),
-            app(\App\Services\SalaryCalculationService::class),
-            app(\App\Services\AdjustmentService::class),
-            app(\App\Services\SouthAfricaHolidayService::class),
-            app(\App\Services\PayrollCalculationService::class),
-            app(\App\Services\PayrollValidationService::class),
-            app(\App\Services\LockService::class)
-        );
-
-        // This should complete without loading unnecessary data
-        $result = $command->processSchedule($schedule);
-        expect($result)->toBeGreaterThanOrEqual(0);
+        // Run the command (exercises eager loading and completes without error)
+        $this->artisan('payroll:process-scheduled')
+            ->assertSuccessful();
     });
 });

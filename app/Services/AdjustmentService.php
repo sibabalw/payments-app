@@ -21,7 +21,7 @@ class AdjustmentService
      */
     public function getValidAdjustments(Employee $employee, Carbon $periodStart, Carbon $periodEnd, ?int $payrollScheduleId = null): Collection
     {
-        return Adjustment::where('business_id', $employee->business_id)
+        $query = Adjustment::where('business_id', $employee->business_id)
             ->where('is_active', true)
             ->where(function ($q) use ($employee) {
                 // Company-wide OR employee-specific
@@ -39,8 +39,17 @@ class AdjustmentService
                             ->where('period_start', '<=', $periodEnd)
                             ->where('period_end', '>=', $periodStart);
                     });
-            })
-            ->get();
+            });
+
+        // When a schedule is specified, only include adjustments for that schedule or company-wide (null)
+        if ($payrollScheduleId !== null) {
+            $query->where(function ($q) use ($payrollScheduleId) {
+                $q->whereNull('payroll_schedule_id')
+                    ->orWhere('payroll_schedule_id', $payrollScheduleId);
+            });
+        }
+
+        return $query->get();
     }
 
     /**

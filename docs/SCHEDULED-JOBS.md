@@ -19,6 +19,24 @@ SwiftPay uses Laravel's task scheduling and queue system for:
 
 If only the queue worker is running, jobs that are already in the queue will run, but **no new payroll or payment runs will be created** until the scheduler runs. In development, run the scheduler with `php artisan schedule:work` in a separate terminal, or use `composer run dev` which starts both the queue worker and the scheduler.
 
+### Using the test database (payment_app_test)
+
+By default, `composer run dev` uses your main database. To run the queue worker and scheduler against the **test** database (e.g. for E2E or manual testing with test data):
+
+```bash
+# Terminal 1 – queue worker (test DB)
+./run-queue-scheduler-test-db.sh queue
+
+# Terminal 2 – scheduler (test DB)
+./run-queue-scheduler-test-db.sh scheduler
+```
+
+Ensure the test DB exists and migrations are run first, e.g.:
+
+```bash
+DB_DATABASE=payment_app_test php artisan migrate --force
+```
+
 ## Scheduler Setup
 
 ### Cron Entry

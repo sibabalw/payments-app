@@ -96,14 +96,13 @@ return new class extends Migration
                     -- Calculate total pending jobs amount for this business (including this new job)
                     -- This prevents bulk inserts from exceeding balance when each row passes individually
                     -- The sum includes NEW.amount to account for jobs being inserted in the same transaction
-                    -- Use FOR UPDATE to ensure we see all pending jobs including those in concurrent transactions
+                    -- Note: FOR UPDATE cannot be used with aggregate (SUM); business row lock above serializes checks
                     SELECT COALESCE(SUM(pj.amount), 0) + NEW.amount
                     INTO total_pending_amount
                     FROM payment_jobs pj
                     JOIN payment_schedules ps2 ON ps2.id = pj.payment_schedule_id
                     WHERE ps2.business_id = business_record.business_id
-                    AND pj.status = 'pending'
-                    FOR UPDATE OF pj;
+                    AND pj.status = 'pending';
                     
                     -- CRITICAL CHECK #6: available balance must be sufficient for total pending jobs (including this one)
                     -- This prevents creating multiple jobs that together exceed available balance
@@ -210,14 +209,13 @@ return new class extends Migration
                     -- This prevents bulk inserts from exceeding balance when each row passes individually
                     -- Use net_salary as that's what's actually paid out to employees
                     -- The sum includes NEW.net_salary to account for jobs being inserted in the same transaction
-                    -- Use FOR UPDATE to ensure we see all pending jobs including those in concurrent transactions
+                    -- Note: FOR UPDATE cannot be used with aggregate (SUM); business row lock above serializes checks
                     SELECT COALESCE(SUM(pj.net_salary), 0) + NEW.net_salary
                     INTO total_pending_amount
                     FROM payroll_jobs pj
                     JOIN payroll_schedules ps2 ON ps2.id = pj.payroll_schedule_id
                     WHERE ps2.business_id = business_record.business_id
-                    AND pj.status = 'pending'
-                    FOR UPDATE OF pj;
+                    AND pj.status = 'pending';
                     
                     -- CRITICAL CHECK #6: available balance must be sufficient for total pending jobs (including this one)
                     -- This prevents creating multiple jobs that together exceed available balance

@@ -353,7 +353,13 @@ class ProcessScheduledPayroll extends Command
                 $updateData['status'] = 'cancelled';
             } else {
                 try {
-                    $nextRun = $this->cronService->getNextRunDate($lockedSchedule->frequency, now(config('app.timezone')));
+                    // Use the schedule's due time (next_run_at) as base so next run is the exact
+                    // payroll date next period (e.g. 6th at 09:00 → next month 6th at 09:00), not
+                    // "next occurrence from now" which can drift when runs are late or employees skipped.
+                    $fromDate = $lockedSchedule->next_run_at
+                        ? \Carbon\Carbon::parse($lockedSchedule->next_run_at)->setTimezone(config('app.timezone'))
+                        : now(config('app.timezone'));
+                    $nextRun = $this->cronService->getNextRunDate($lockedSchedule->frequency, $fromDate);
 
                     if (! $this->holidayService->isBusinessDay($nextRun)) {
                         $originalTime = $nextRun->format('H:i');

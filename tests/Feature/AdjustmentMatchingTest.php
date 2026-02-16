@@ -27,7 +27,7 @@ beforeEach(function () {
 });
 
 describe('PayrollSchedule::calculatePayPeriod', function () {
-    it('calculates previous month for monthly recurring schedules', function () {
+    it('calculates previous month for monthly recurring schedules when pay day is not 1st', function () {
         // Monthly schedule with cron "0 8 25 * *" (runs on 25th at 8am)
         $schedule = PayrollSchedule::factory()->for($this->business)->create([
             'frequency' => '0 8 25 * *',
@@ -40,6 +40,20 @@ describe('PayrollSchedule::calculatePayPeriod', function () {
         // Should return January (previous month)
         expect($period['start']->format('Y-m-d'))->toBe('2026-01-01');
         expect($period['end']->format('Y-m-d'))->toBe('2026-01-31');
+    });
+
+    it('calculates current month for monthly recurring when pay day is 1st', function () {
+        // Pay on 1st: run Feb 1 → pay for February (current month), not January
+        $schedule = PayrollSchedule::factory()->for($this->business)->create([
+            'frequency' => '0 9 1 * *',
+            'schedule_type' => 'recurring',
+            'next_run_at' => Carbon::parse('2026-02-01 09:00:00'),
+        ]);
+
+        $period = $schedule->calculatePayPeriod();
+
+        expect($period['start']->format('Y-m-d'))->toBe('2026-02-01');
+        expect($period['end']->format('Y-m-d'))->toBe('2026-02-28');
     });
 
     it('calculates current month for one-time schedules', function () {
@@ -82,7 +96,7 @@ describe('Employee-specific once-off adjustment matching', function () {
         ]);
         $scheduleB->employees()->attach($this->employee->id);
 
-        // Create employee-specific once-off adjustment for Schedule A
+        // Create employee-specific once-off adjustment for Schedule A (period Dec; Schedule B has period Jan)
         $periodA = $scheduleA->calculatePayPeriod();
         $adjustmentForA = Adjustment::create([
             'business_id' => $this->business->id,
@@ -92,9 +106,8 @@ describe('Employee-specific once-off adjustment matching', function () {
             'type' => 'fixed',
             'amount' => 5000,
             'adjustment_type' => 'addition',
-            'is_recurring' => false,
-            'payroll_period_start' => $periodA['start'],
-            'payroll_period_end' => $periodA['end'],
+            'period_start' => $periodA['start'],
+            'period_end' => $periodA['end'],
             'is_active' => true,
         ]);
 
@@ -148,7 +161,7 @@ describe('Employee-specific once-off adjustment matching', function () {
         expect($periodA['start']->format('Y-m-d'))->toBe($periodB['start']->format('Y-m-d'));
         expect($periodA['start']->format('Y-m-d'))->toBe($periodC['start']->format('Y-m-d'));
 
-        // Create adjustment only for Schedule B
+        // Create adjustment only for Schedule B (schedule-scoped so A and C get 0)
         $adjustment = Adjustment::create([
             'business_id' => $this->business->id,
             'employee_id' => $this->employee->id,
@@ -157,9 +170,8 @@ describe('Employee-specific once-off adjustment matching', function () {
             'type' => 'fixed',
             'amount' => 2000,
             'adjustment_type' => 'addition',
-            'is_recurring' => false,
-            'payroll_period_start' => $periodB['start'],
-            'payroll_period_end' => $periodB['end'],
+            'period_start' => $periodB['start'],
+            'period_end' => $periodB['end'],
             'is_active' => true,
         ]);
 
@@ -218,7 +230,7 @@ describe('Employee-specific once-off adjustment matching', function () {
         ]);
         $schedule->employees()->attach($this->employee->id);
 
-        // Create adjustment with slightly different period
+        // Create adjustment for February (no overlap with schedule's January period)
         $adjustment = Adjustment::create([
             'business_id' => $this->business->id,
             'employee_id' => $this->employee->id,
@@ -227,9 +239,8 @@ describe('Employee-specific once-off adjustment matching', function () {
             'type' => 'fixed',
             'amount' => 1000,
             'adjustment_type' => 'addition',
-            'is_recurring' => false,
-            'payroll_period_start' => '2026-01-02', // Different from Jan 1
-            'payroll_period_end' => '2026-01-31',
+            'period_start' => Carbon::parse('2026-02-01'),
+            'period_end' => Carbon::parse('2026-02-28'),
             'is_active' => true,
         ]);
 
@@ -242,7 +253,7 @@ describe('Employee-specific once-off adjustment matching', function () {
             $schedule->id
         );
 
-        // Should NOT match because period start is different
+        // Should NOT match because adjustment period (Feb) does not overlap query period (Jan)
         expect($adjustments)->toHaveCount(0);
     });
 });

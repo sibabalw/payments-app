@@ -260,6 +260,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('payroll/bonuses', \App\Http\Controllers\PaymentsController::class)->except(['show']);
         Route::get('employees/{employee}/bonuses', [\App\Http\Controllers\PaymentsController::class, 'employeeIndex'])->name('employees.bonuses.index');
 
+        // Adjustment API (calculate period, store)
+        Route::get('adjustments/calculate-period', [\App\Http\Controllers\AdjustmentController::class, 'calculatePeriod'])->name('adjustments.calculate-period');
+        Route::post('adjustments', [\App\Http\Controllers\AdjustmentController::class, 'store'])->name('adjustments.store');
+
         // Employee benefits routes
         Route::get('employees/{employee}/benefits', [\App\Http\Controllers\EmployeeController::class, 'benefits'])->name('employees.benefits');
         Route::post('employees/{employee}/benefits/override', [\App\Http\Controllers\EmployeeController::class, 'overrideBenefit'])->name('employees.benefits.override');

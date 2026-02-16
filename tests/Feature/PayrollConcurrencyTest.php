@@ -29,6 +29,7 @@ beforeEach(function () {
 
     EscrowDeposit::factory()->for($this->business)->create([
         'status' => 'confirmed',
+        'amount' => 100000,
         'authorized_amount' => 100000,
     ]);
 
@@ -60,10 +61,24 @@ describe('Concurrent Payroll Processing', function () {
     });
 
     it('handles concurrent escrow balance checks correctly', function () {
-        $jobs = PayrollJob::factory()->count(3)->for($this->schedule)->for($this->employee)->create([
-            'status' => 'pending',
-            'net_salary' => 30000, // Each job needs 30k, total balance is 100k
-        ]);
+        $periods = [
+            ['start' => \Carbon\Carbon::parse('2026-01-01'), 'end' => \Carbon\Carbon::parse('2026-01-31')],
+            ['start' => \Carbon\Carbon::parse('2026-02-01'), 'end' => \Carbon\Carbon::parse('2026-02-28')],
+            ['start' => \Carbon\Carbon::parse('2026-03-01'), 'end' => \Carbon\Carbon::parse('2026-03-31')],
+        ];
+        $jobs = collect();
+        foreach ($periods as $p) {
+            $jobs->push(PayrollJob::factory()->for($this->schedule)->for($this->employee)->create([
+                'status' => 'pending',
+                'gross_salary' => 35000,
+                'paye_amount' => 4822.88,
+                'uif_amount' => 177.12,
+                'sdl_amount' => 350,
+                'net_salary' => 30000, // 35000 - 4822.88 - 177.12
+                'pay_period_start' => $p['start'],
+                'pay_period_end' => $p['end'],
+            ]));
+        }
 
         // Process all jobs concurrently
         $results = [];
@@ -77,15 +92,32 @@ describe('Concurrent Payroll Processing', function () {
 
         // Verify escrow balance was decremented correctly
         $this->business->refresh();
-        expect($this->business->escrow_balance)->toBe(10000.0); // 100k - 90k
+        expect((float) $this->business->escrow_balance)->toBe(10000.0); // 100k - 90k
     });
 
     it('prevents processing when escrow balance is insufficient', function () {
-        // Create jobs that exceed balance
-        $jobs = PayrollJob::factory()->count(4)->for($this->schedule)->for($this->employee)->create([
-            'status' => 'pending',
-            'net_salary' => 30000, // Each needs 30k, but only 100k available
-        ]);
+        // Start with enough balance to create 4 jobs (observer allows 120k pending), then set balance to 100k so only 3 can succeed when processed
+        $this->business->update(['escrow_balance' => 120000]);
+        $periods = [
+            ['start' => \Carbon\Carbon::parse('2026-01-01'), 'end' => \Carbon\Carbon::parse('2026-01-31')],
+            ['start' => \Carbon\Carbon::parse('2026-02-01'), 'end' => \Carbon\Carbon::parse('2026-02-28')],
+            ['start' => \Carbon\Carbon::parse('2026-03-01'), 'end' => \Carbon\Carbon::parse('2026-03-31')],
+            ['start' => \Carbon\Carbon::parse('2026-04-01'), 'end' => \Carbon\Carbon::parse('2026-04-30')],
+        ];
+        $jobs = collect();
+        foreach ($periods as $p) {
+            $jobs->push(PayrollJob::factory()->for($this->schedule)->for($this->employee)->create([
+                'status' => 'pending',
+                'gross_salary' => 35000,
+                'paye_amount' => 4822.88,
+                'uif_amount' => 177.12,
+                'sdl_amount' => 350,
+                'net_salary' => 30000, // 35000 - 4822.88 - 177.12
+                'pay_period_start' => $p['start'],
+                'pay_period_end' => $p['end'],
+            ]));
+        }
+        $this->business->update(['escrow_balance' => 100000]); // Only 100k available when processing
 
         $results = [];
         foreach ($jobs as $job) {
@@ -107,6 +139,7 @@ describe('Transaction Isolation', function () {
     it('maintains data consistency under concurrent updates', function () {
         $job = PayrollJob::factory()->for($this->schedule)->for($this->employee)->create([
             'status' => 'pending',
+            'gross_salary' => 30000,
             'net_salary' => 25000,
         ]);
 

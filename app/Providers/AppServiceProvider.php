@@ -26,6 +26,7 @@ use App\Observers\UserObserver;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 use Illuminate\Queue\Events\WorkerStarting;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
@@ -61,6 +62,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->ensureWayfinderDirectoriesExist();
+
         // Register observers for cascade delete handling (pivot tables have no foreign keys)
         PaymentSchedule::observe(PaymentScheduleObserver::class);
         PayrollSchedule::observe(PayrollScheduleObserver::class);
@@ -74,6 +77,27 @@ class AppServiceProvider extends ServiceProvider
 
         // Validate Redis connection only if enabled
         $this->validateRedisConnection();
+    }
+
+    /**
+     * Ensure Wayfinder-generated directories exist and are directories (not files).
+     * Prevents "mkdir(): File exists" when running wayfinder:generate.
+     */
+    protected function ensureWayfinderDirectoriesExist(): void
+    {
+        $base = resource_path('js');
+
+        foreach (['wayfinder', 'actions', 'routes'] as $dir) {
+            $path = $base.DIRECTORY_SEPARATOR.$dir;
+
+            if (file_exists($path) && ! is_dir($path)) {
+                File::delete($path);
+            }
+
+            if (! file_exists($path)) {
+                File::makeDirectory($path, 0755, true);
+            }
+        }
     }
 
     /**

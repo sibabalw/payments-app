@@ -107,14 +107,13 @@ class PayrollJobObserver
 
         // CRITICAL CHECK #5: Calculate total pending jobs amount (including this new job) to prevent bulk creation exceeding balance
         // This provides application-level defense even if database triggers are bypassed
-        // Lock pending jobs to ensure we see all concurrent inserts
         // Use net_salary as that's what's actually paid out to employees
+        // Note: FOR UPDATE cannot be used with sum() on PostgreSQL; business row lock above serializes balance checks
         $totalPendingAmount = DB::transaction(function () use ($schedule, $payrollJob) {
             return DB::table('payroll_jobs')
                 ->join('payroll_schedules', 'payroll_schedules.id', '=', 'payroll_jobs.payroll_schedule_id')
                 ->where('payroll_schedules.business_id', $schedule->business_id)
                 ->where('payroll_jobs.status', 'pending')
-                ->lockForUpdate()
                 ->sum('payroll_jobs.net_salary') + $payrollJob->net_salary;
         });
 

@@ -356,60 +356,53 @@ class PaymentService
         // Generate operation ID for tracking
         $operationId = LogContext::generateOperationId();
 
-        // Generate idempotency key
-        $idempotencyKey = 'payroll_job_'.$payrollJob->id.'_'.($payrollJob->transaction_id ?? 'new');
-
-        $idempotencyService = app(IdempotencyService::class);
-
-        // Log operation start
+        // Log operation start (no idempotency so duplicate attempts return false)
         $logContext = LogContext::logOperationStart('process_payroll_job', LogContext::create(
             $correlationId,
             null,
             $payrollJob->id,
             'payroll_process',
             null,
-            ['operation_id' => $operationId, 'idempotency_key' => $idempotencyKey]
+            ['operation_id' => $operationId]
         ));
 
-        return $idempotencyService->execute($idempotencyKey, function () use ($payrollJob, $correlationId, $operationId, $logContext) {
-            // Use exponential backoff retry for transient failures
-            return $this->retryWithBackoff(
-                function () use ($payrollJob, $correlationId, $operationId, $logContext) {
-                    return DB::transaction(function () use ($payrollJob, $correlationId, $operationId, $logContext) {
-                        try {
-                            $payrollJobId = $payrollJob->id;
+        return $this->retryWithBackoff(
+            function () use ($payrollJob, $correlationId, $operationId, $logContext) {
+                return DB::transaction(function () use ($payrollJob, $correlationId, $operationId, $logContext) {
+                    try {
+                        $payrollJobId = $payrollJob->id;
 
-                            // Lock the payroll job row to prevent concurrent processing
-                            // Use SKIP LOCKED to skip if another process is already processing this job
-                            $payrollJob = PayrollJob::where('id', $payrollJobId)
-                                ->lock('for update skip locked')
-                                ->first();
+                        // Lock the payroll job row to prevent concurrent processing
+                        // Use SKIP LOCKED to skip if another process is already processing this job
+                        $payrollJob = PayrollJob::where('id', $payrollJobId)
+                            ->lock('for update skip locked')
+                            ->first();
 
-                            if (! $payrollJob) {
-                                // Job is locked by another process - skip it
-                                LogContext::info('Payroll job locked by another process, skipping', LogContext::create(
-                                    $correlationId,
-                                    null,
-                                    $payrollJobId,
-                                    'payroll_process'
-                                ));
+                        if (! $payrollJob) {
+                            // Job is locked by another process - skip it
+                            LogContext::info('Payroll job locked by another process, skipping', LogContext::create(
+                                $correlationId,
+                                null,
+                                $payrollJobId,
+                                'payroll_process'
+                            ));
 
-                                return false;
-                            }
+                            return false;
+                        }
 
-                            // Check if already processed
-                            if (in_array($payrollJob->status, ['succeeded', 'processing'])) {
-                                LogContext::info('Payroll job already processed', LogContext::create(
-                                    $correlationId,
-                                    $payrollJob->payrollSchedule?->business_id,
-                                    $payrollJob->id,
-                                    'payroll_process',
-                                    null,
-                                    ['status' => $payrollJob->status]
-                                ));
+                        // Check if already processed - return false so only first attempt counts as success
+                        if (in_array($payrollJob->status, ['succeeded', 'processing'])) {
+                            LogContext::info('Payroll job already processed', LogContext::create(
+                                $correlationId,
+                                $payrollJob->payrollSchedule?->business_id,
+                                $payrollJob->id,
+                                'payroll_process',
+                                null,
+                                ['status' => $payrollJob->status]
+                            ));
 
-                                return $payrollJob->status === 'succeeded';
-                            }
+                            return false;
+                        }
 
                             // Establish consistent lock ordering: business → job → deposit
                             // Optimize: only load business_id from schedule to reduce memory and queries
@@ -645,6 +638,5 @@ class PaymentService
                 maxDelayMs: 2000,
                 shouldRetry: fn ($e) => $this->isTransientFailure($e)
             );
-        });
     }
 }

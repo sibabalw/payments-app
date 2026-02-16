@@ -325,7 +325,10 @@ export default function PayrollEdit({
                                             date={scheduledDate}
                                             onDateChange={(date) => {
                                                 if (date) {
-                                                    setData('scheduled_date', date.toISOString().split('T')[0]);
+                                                    const year = date.getFullYear();
+                                                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                                                    const day = String(date.getDate()).padStart(2, '0');
+                                                    setData('scheduled_date', `${year}-${month}-${day}`);
                                                 } else {
                                                     setData('scheduled_date', '');
                                                 }
