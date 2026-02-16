@@ -3,7 +3,6 @@
 /bootstrap/cache/*
 !/bootstrap/cache/.gitignore
 /node_modules
-/public/build
 /public/hot
 /public/storage
 /public/vendor
