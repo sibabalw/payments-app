@@ -12,7 +12,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
-import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield, Wallet } from 'lucide-react';
+import { Bot, LayoutGrid, CreditCard, Users, FileText, Building2, DollarSign, UserCheck, Receipt, Clock, ReceiptText, Palette, Shield, Wallet, MessageSquare } from 'lucide-react';
 import { BusinessSwitcher } from './business-switcher';
 import AppearanceToggleDropdown from './appearance-dropdown';
 
@@ -37,6 +37,7 @@ export function AppSidebar() {
             icon: CreditCard,
             items: [
                 { title: 'Schedules', href: '/payments' },
+                { title: 'Create Payment', href: '/payments/create' },
                 { title: 'Payment Jobs', href: '/payments/jobs' },
             ],
         },
@@ -45,6 +46,7 @@ export function AppSidebar() {
             icon: DollarSign,
             items: [
                 { title: 'Schedules', href: '/payroll' },
+                { title: 'Create Payroll', href: '/payroll/create' },
                 { title: 'Payroll Jobs', href: '/payroll/jobs' },
                 { title: 'Benefits & Deductions', href: '/benefits' },
                 { title: 'Bonuses', href: '/payroll/bonuses' },
@@ -64,6 +66,11 @@ export function AppSidebar() {
             title: 'Escrow Deposits',
             href: '/escrow/deposit',
             icon: Wallet,
+        },
+        {
+            title: 'Support Tickets',
+            href: '/tickets',
+            icon: MessageSquare,
         },
         {
             title: 'Reports',

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Helpers\LogContext;
+use App\Mail\EscrowDepositConfirmedEmail;
 use App\Models\Business;
 use App\Models\EscrowDeposit;
 use App\Models\PaymentJob;
@@ -131,7 +132,9 @@ class EscrowService
                     'entry_method' => 'manual',
                     'bank_reference' => $bankReference,
                 ],
-                $enteredBy
+                $enteredBy,
+                'ZAR',
+                'ESCROW_DEPOSIT'
             );
 
             Log::info('Escrow deposit manually recorded', [
@@ -146,6 +149,17 @@ class EscrowService
 
             return $deposit;
         });
+
+        // Queue email notification after transaction commits
+        // Business and deposit are already committed, so queue directly
+        $business->load('owner');
+        $user = $business->owner;
+        if ($user) {
+            $emailService = app(EmailService::class);
+            $emailService->send($user, new EscrowDepositConfirmedEmail($user, $business, $deposit), 'escrow_deposit_confirmed');
+        }
+
+        return $deposit;
     }
 
     /**
@@ -179,7 +193,9 @@ class EscrowService
                     'authorized_amount' => $deposit->authorized_amount,
                     'bank_reference' => $deposit->bank_reference,
                 ],
-                $confirmedBy
+                $confirmedBy,
+                'ZAR',
+                'ESCROW_DEPOSIT'
             );
 
             Log::info('Escrow deposit confirmed', [
@@ -189,6 +205,15 @@ class EscrowService
                 'correlation_id' => $correlationId,
             ]);
         });
+
+        // Queue email notification after transaction commits
+        // Business and deposit are already committed, so queue directly
+        $deposit->load('business.owner');
+        $user = $deposit->business->owner;
+        if ($user) {
+            $emailService = app(EmailService::class);
+            $emailService->send($user, new EscrowDepositConfirmedEmail($user, $deposit->business, $deposit), 'escrow_deposit_confirmed');
+        }
     }
 
     /**
@@ -369,6 +394,18 @@ class EscrowService
                 $balancePrecalculationService = app(BalancePrecalculationService::class);
                 $balancePrecalculationService->invalidateCache($businessId);
 
+                // Send notification if enabled
+                try {
+                    $notificationService = app(PostgresNotificationService::class);
+                    $notificationService->notifyBalanceUpdate($businessId, $newBalance, 'ESCROW');
+                } catch (\Exception $e) {
+                    // Don't fail if notification fails
+                    Log::debug('Failed to send balance update notification', [
+                        'business_id' => $businessId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
                 // Move logging outside transaction to reduce lock duration
                 Log::debug('Escrow balance incremented', [
                     'business_id' => $businessId,
@@ -398,6 +435,18 @@ class EscrowService
                 // Invalidate cache
                 $balancePrecalculationService = app(BalancePrecalculationService::class);
                 $balancePrecalculationService->invalidateCache($businessId);
+
+                // Send notification if enabled
+                try {
+                    $notificationService = app(PostgresNotificationService::class);
+                    $notificationService->notifyBalanceUpdate($businessId, $newBalance, 'ESCROW');
+                } catch (\Exception $e) {
+                    // Don't fail if notification fails
+                    Log::debug('Failed to send balance update notification', [
+                        'business_id' => $businessId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
 
                 // Move logging outside transaction to reduce lock duration
                 Log::debug('Escrow balance decremented', [
@@ -534,11 +583,34 @@ class EscrowService
             // Get available balance with lock
             $availableBalance = $this->getAvailableBalance($business);
 
+            // Explicit check: escrow balance must be greater than zero (explicit zero check)
+            if ($availableBalance === 0) {
+                Log::warning('Cannot reserve funds: escrow balance is exactly zero', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+
+                return false;
+            }
+
+            if ($availableBalance < 0) {
+                Log::warning('Cannot reserve funds: escrow balance is negative', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+
+                return false;
+            }
+
+            // Explicit check: available balance must be sufficient
             if ($availableBalance < $amount) {
                 Log::warning('Insufficient balance for reservation', [
                     'business_id' => $business->id,
                     'available_balance' => $availableBalance,
                     'required_amount' => $amount,
+                    'shortfall' => $amount - $availableBalance,
                 ]);
 
                 return false;
@@ -628,11 +700,34 @@ class EscrowService
             // Get available balance with lock
             $availableBalance = $this->getAvailableBalance($business);
 
+            // Explicit check: escrow balance must be greater than zero (explicit zero check)
+            if ($availableBalance === 0) {
+                Log::warning('Cannot reserve funds for payroll: escrow balance is exactly zero', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+
+                return false;
+            }
+
+            if ($availableBalance < 0) {
+                Log::warning('Cannot reserve funds for payroll: escrow balance is negative', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $amount,
+                ]);
+
+                return false;
+            }
+
+            // Explicit check: available balance must be sufficient
             if ($availableBalance < $amount) {
                 Log::warning('Insufficient balance for payroll reservation', [
                     'business_id' => $business->id,
                     'available_balance' => $availableBalance,
                     'required_amount' => $amount,
+                    'shortfall' => $amount - $availableBalance,
                 ]);
 
                 return false;
@@ -736,11 +831,34 @@ class EscrowService
         // Get available balance with lock
         $availableBalance = $this->getAvailableBalance($business, false, false);
 
+        // Explicit check: escrow balance must be greater than zero (explicit zero check)
+        if ($availableBalance === 0) {
+            Log::warning('Cannot reserve and decrement funds for payroll: escrow balance is exactly zero', [
+                'business_id' => $business->id,
+                'available_balance' => $availableBalance,
+                'required_amount' => $amount,
+            ]);
+
+            return false;
+        }
+
+        if ($availableBalance < 0) {
+            Log::warning('Cannot reserve and decrement funds for payroll: escrow balance is negative', [
+                'business_id' => $business->id,
+                'available_balance' => $availableBalance,
+                'required_amount' => $amount,
+            ]);
+
+            return false;
+        }
+
+        // Explicit check: available balance must be sufficient
         if ($availableBalance < $amount) {
             Log::warning('Insufficient balance for payroll reservation', [
                 'business_id' => $business->id,
                 'available_balance' => $availableBalance,
                 'required_amount' => $amount,
+                'shortfall' => $amount - $availableBalance,
             ]);
 
             return false;
@@ -791,7 +909,10 @@ class EscrowService
                 'deposit_id' => $deposit->id,
                 'old_balance' => $oldBalance,
                 'new_balance' => $newBalance,
-            ]
+            ],
+            null,
+            'ZAR',
+            'PAYROLL_PROCESS'
         );
 
         LogContext::info('Funds reserved and balance decremented for payroll', LogContext::create(
@@ -867,7 +988,9 @@ class EscrowService
                     'deposit_id' => $paymentJob->escrowDeposit->id,
                     'return_reason' => 'manual_return',
                 ],
-                $recordedBy
+                $recordedBy,
+                'ZAR',
+                'FUND_RETURN'
             );
 
             Log::info('Fund return manually recorded', [
@@ -915,7 +1038,9 @@ class EscrowService
                     'deposit_id' => $payrollJob->escrowDeposit->id,
                     'return_reason' => 'manual_return',
                 ],
-                $recordedBy
+                $recordedBy,
+                'ZAR',
+                'FUND_RETURN'
             );
 
             Log::info('Payroll fund return manually recorded', [
@@ -948,8 +1073,7 @@ class EscrowService
             // Lock business to prevent concurrent balance checks
             // Use skipLocked() to avoid blocking if another process is already processing this business
             $business = Business::where('id', $business->id)
-                ->lockForUpdate()
-                ->skipLocked()
+                ->lock('for update skip locked')
                 ->first();
 
             if (! $business) {
@@ -968,12 +1092,50 @@ class EscrowService
             $availableBalance = $this->getAvailableBalance($business, false, false);
             $totalAmount = array_sum(array_column($reservations, 'amount'));
 
-            // Check if sufficient balance
+            // Explicit check: escrow balance must be greater than zero (explicit zero check)
+            if ($availableBalance === 0) {
+                Log::warning('Cannot reserve funds in bulk: escrow balance is exactly zero', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $totalAmount,
+                ]);
+
+                return array_map(function ($reservation) {
+                    return [
+                        'success' => false,
+                        'job_id' => $reservation['job_id'],
+                        'error' => 'Escrow balance is zero',
+                        'business_id' => null,
+                        'amount' => $reservation['amount'],
+                    ];
+                }, $reservations);
+            }
+
+            if ($availableBalance < 0) {
+                Log::warning('Cannot reserve funds in bulk: escrow balance is negative', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $totalAmount,
+                ]);
+
+                return array_map(function ($reservation) {
+                    return [
+                        'success' => false,
+                        'job_id' => $reservation['job_id'],
+                        'error' => 'Escrow balance is negative',
+                        'business_id' => null,
+                        'amount' => $reservation['amount'],
+                    ];
+                }, $reservations);
+            }
+
+            // Explicit check: available balance must be sufficient for total amount
             if ($availableBalance < $totalAmount) {
                 Log::warning('Insufficient balance for bulk reservation', [
                     'business_id' => $business->id,
                     'available_balance' => $availableBalance,
                     'required_amount' => $totalAmount,
+                    'shortfall' => $totalAmount - $availableBalance,
                 ]);
 
                 return array_map(function ($reservation) {
@@ -1095,8 +1257,7 @@ class EscrowService
             // Lock business to prevent concurrent balance checks
             // Use skipLocked() to avoid blocking if another process is already processing this business
             $business = Business::where('id', $business->id)
-                ->lockForUpdate()
-                ->skipLocked()
+                ->lock('for update skip locked')
                 ->first();
 
             if (! $business) {
@@ -1115,12 +1276,50 @@ class EscrowService
             $availableBalance = $this->getAvailableBalance($business, false, false);
             $totalAmount = array_sum(array_column($reservations, 'amount'));
 
-            // Check if sufficient balance
+            // Explicit check: escrow balance must be greater than zero (explicit zero check)
+            if ($availableBalance === 0) {
+                Log::warning('Cannot reserve and decrement funds in bulk for payroll: escrow balance is exactly zero', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $totalAmount,
+                ]);
+
+                return array_map(function ($reservation) {
+                    return [
+                        'success' => false,
+                        'job_id' => $reservation['job_id'],
+                        'error' => 'Escrow balance is zero',
+                        'business_id' => null,
+                        'amount' => $reservation['amount'],
+                    ];
+                }, $reservations);
+            }
+
+            if ($availableBalance < 0) {
+                Log::warning('Cannot reserve and decrement funds in bulk for payroll: escrow balance is negative', [
+                    'business_id' => $business->id,
+                    'available_balance' => $availableBalance,
+                    'required_amount' => $totalAmount,
+                ]);
+
+                return array_map(function ($reservation) {
+                    return [
+                        'success' => false,
+                        'job_id' => $reservation['job_id'],
+                        'error' => 'Escrow balance is negative',
+                        'business_id' => null,
+                        'amount' => $reservation['amount'],
+                    ];
+                }, $reservations);
+            }
+
+            // Explicit check: available balance must be sufficient for total amount
             if ($availableBalance < $totalAmount) {
                 Log::warning('Insufficient balance for bulk payroll reservation', [
                     'business_id' => $business->id,
                     'available_balance' => $availableBalance,
                     'required_amount' => $totalAmount,
+                    'shortfall' => $totalAmount - $availableBalance,
                 ]);
 
                 return array_map(function ($reservation) {

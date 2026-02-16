@@ -37,12 +37,18 @@ class IdempotencyService
      *
      * @param  string  $idempotencyKey  Unique key for this operation
      * @param  callable  $callback  Function to execute if not cached
-     * @param  int  $ttlSeconds  Time to live in seconds (default: 24 hours)
+     * @param  int  $ttlSeconds  Time to live in seconds (default: 7 days for financial operations)
      * @param  array|null  $requestData  Optional request data for content-based deduplication
      * @return mixed Result from callback or cached response
      */
-    public function execute(string $idempotencyKey, callable $callback, int $ttlSeconds = 86400, ?array $requestData = null)
+    public function execute(string $idempotencyKey, callable $callback, ?int $ttlSeconds = null, ?array $requestData = null)
     {
+        // Default to 7 days for financial operations (longer retention)
+        $ttlSeconds = $ttlSeconds ?? config('idempotency.ttl', 604800); // 7 days default
+
+        // Validate idempotency key format
+        $this->validateIdempotencyKey($idempotencyKey);
+
         $requestHash = null;
         if ($requestData && $this->driver instanceof DatabaseIdempotencyService) {
             $requestHash = $this->driver->generateRequestHash($requestData);
@@ -64,17 +70,48 @@ class IdempotencyService
     /**
      * Record an idempotency key with a response.
      *
+     * @param  string  $idempotencyKey  Unique key for this operation
      * @param  mixed  $response
+     * @param  int  $ttlSeconds  Time to live in seconds (default: 7 days)
      * @param  array|null  $requestData  Optional request data for content-based deduplication
      */
-    public function record(string $idempotencyKey, $response, int $ttlSeconds = 86400, ?array $requestData = null): void
+    public function record(string $idempotencyKey, $response, ?int $ttlSeconds = null, ?array $requestData = null): void
     {
+        // Default to 7 days for financial operations (longer retention)
+        $ttlSeconds = $ttlSeconds ?? config('idempotency.ttl', 604800); // 7 days default
+
+        // Validate idempotency key format
+        $this->validateIdempotencyKey($idempotencyKey);
+
         $requestHash = null;
         if ($requestData && $this->driver instanceof DatabaseIdempotencyService) {
             $requestHash = $this->driver->generateRequestHash($requestData);
         }
 
         $this->driver->record($idempotencyKey, $response, $ttlSeconds, $requestHash);
+    }
+
+    /**
+     * Validate idempotency key format
+     *
+     * @param  string  $key  Idempotency key to validate
+     *
+     * @throws \InvalidArgumentException If key is invalid
+     */
+    protected function validateIdempotencyKey(string $key): void
+    {
+        if (empty($key)) {
+            throw new \InvalidArgumentException('Idempotency key cannot be empty');
+        }
+
+        if (strlen($key) > 255) {
+            throw new \InvalidArgumentException('Idempotency key cannot exceed 255 characters');
+        }
+
+        // Check for basic format (should contain operation type and identifier)
+        if (! preg_match('/^[a-zA-Z0-9_\-:]+$/', $key)) {
+            throw new \InvalidArgumentException('Idempotency key contains invalid characters');
+        }
     }
 
     /**

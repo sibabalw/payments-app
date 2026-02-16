@@ -13,7 +13,7 @@ import { useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Employees', href: '/employees' },
-    { title: 'Benefits', href: '#' },
+    { title: 'Benefits or Deductions', href: '#' },
 ];
 
 export default function EmployeeBenefits({ employee, companyBenefits, benefitsWithOverrides, employeeOnlyBenefits }: any) {
@@ -53,11 +53,11 @@ export default function EmployeeBenefits({ employee, companyBenefits, benefitsWi
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title={`${employee.name}'s Benefits`} />
+            <Head title={`${employee.name}'s Benefits or Deductions`} />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold">{employee.name}'s Benefits</h1>
+                        <h1 className="text-2xl font-bold">{employee.name}'s Benefits or Deductions</h1>
                         <p className="text-sm text-muted-foreground mt-1">
                             Company benefits and employee-specific overrides
                         </p>
@@ -67,16 +67,16 @@ export default function EmployeeBenefits({ employee, companyBenefits, benefitsWi
                             <DialogTrigger asChild>
                                 <Button variant="outline">
                                     <Plus className="mr-2 h-4 w-4" />
-                                    Override Benefit
+                                    Override Benefit or Deduction
                                 </Button>
                             </DialogTrigger>
                             <DialogContent>
                                 <DialogHeader>
-                                    <DialogTitle>Override Benefit</DialogTitle>
+                                    <DialogTitle>Override Benefit or Deduction</DialogTitle>
                                 </DialogHeader>
                                 <form onSubmit={handleSubmitOverride} className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="benefit_id">Benefit to Override</Label>
+                                        <Label htmlFor="benefit_id">Benefit or Deduction to Override</Label>
                                         <Select
                                             value={String(data.benefit_id)}
                                             onValueChange={(value) => {
@@ -95,7 +95,7 @@ export default function EmployeeBenefits({ employee, companyBenefits, benefitsWi
                                             }}
                                         >
                                             <SelectTrigger>
-                                                <SelectValue placeholder="Select a benefit" />
+                                                <SelectValue placeholder="Select a benefit or deduction" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {companyBenefits.map((benefit: any) => (

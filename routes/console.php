@@ -3,7 +3,6 @@
 use App\Jobs\CheckEscrowBalanceJob;
 use App\Jobs\CleanupFailedPayrollReservations;
 use App\Jobs\DetectStuckPayrollJobs;
-use App\Jobs\ReconcileEscrowBalances;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -41,16 +40,24 @@ Schedule::command('payroll:reconcile')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Reconcile escrow balances daily at 3 AM
+// Reconcile escrow balances hourly (automated)
 // Detects and fixes balance drift by recalculating from source data
-Schedule::job(new ReconcileEscrowBalances)
-    ->dailyAt('03:00')
+// Auto-fixes minor discrepancies (< 0.01) and alerts on larger ones
+Schedule::command('reconcile:balances --auto-fix')
+    ->hourly()
     ->withoutOverlapping()
     ->onOneServer();
 
 // Detect and recover stuck payroll jobs every 30 minutes
 // Marks jobs stuck in "processing" status as failed after timeout
 Schedule::job(new DetectStuckPayrollJobs)
+    ->everyThirtyMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Recover stuck and failed payment jobs every 30 minutes
+// Resets stuck jobs to pending for retry and retries failed jobs
+Schedule::command('jobs:recover-stuck --type=payment')
     ->everyThirtyMinutes()
     ->withoutOverlapping()
     ->onOneServer();

@@ -51,7 +51,7 @@ class BusinessStatusChangedEmail extends Mailable
             with: [
                 'user' => $this->user,
                 'businessData' => $this->business, // For content display only
-                'business' => null, // Explicitly null for email branding (app-related email from Swift Pay)
+                'business' => null, // Explicitly null for email branding (app-related email from SwiftPay)
                 'oldStatus' => $this->oldStatus,
                 'newStatus' => $this->newStatus,
                 'reason' => $this->reason,

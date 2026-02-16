@@ -8,23 +8,23 @@ import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { ArrowRight, Building2, Calendar, DollarSign, Sparkles, TrendingDown, TrendingUp, Users, Wallet, ChevronRight, Plus, Activity, BarChart3 as BarChartIcon, PieChart as PieChartIcon, Target, LayoutDashboard, BarChart as BarChartIcon2, Loader2, AlertTriangle, XCircle, Info, ShieldAlert, CheckCircle, X, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { 
-    LineChart, 
-    Line, 
-    AreaChart, 
-    Area, 
-    BarChart as RechartsBarChart, 
-    Bar, 
-    PieChart as RechartsPieChart, 
-    Pie, 
-    Cell, 
-    XAxis, 
-    YAxis, 
-    CartesianGrid, 
-    Tooltip, 
-    Legend, 
-    ResponsiveContainer 
+import {
+    LineChart,
+    Line,
+    AreaChart,
+    Area,
+    BarChart as RechartsBarChart,
+    PieChart as RechartsPieChart,
+    Pie,
+    Cell,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer,
 } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {

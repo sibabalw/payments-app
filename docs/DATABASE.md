@@ -1,6 +1,6 @@
 # Database Schema Documentation
 
-This document describes the database schema for Swift Pay.
+This document describes the database schema for SwiftPay.
 
 ## Entity Relationship Diagram
 

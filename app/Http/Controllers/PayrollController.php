@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\PayrollScheduleCancelledEmail;
 use App\Models\Business;
 use App\Models\Employee;
+use App\Models\PayrollJob;
 use App\Models\PayrollSchedule;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
@@ -12,6 +13,7 @@ use App\Services\CronExpressionParser;
 use App\Services\CronExpressionService;
 use App\Services\EmailService;
 use App\Services\EscrowService;
+use App\Services\PayrollValidationService;
 use App\Services\SouthAfricaHolidayService;
 use App\Services\SouthAfricanTaxService;
 use Carbon\Carbon;
@@ -30,6 +32,7 @@ class PayrollController extends Controller
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
         protected CronExpressionParser $cronParser,
+        protected PayrollValidationService $payrollValidationService,
         protected SouthAfricanTaxService $taxService,
         protected SouthAfricaHolidayService $holidayService
     ) {}
@@ -117,7 +120,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array',
+            'employee_ids' => 'present|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -142,12 +145,65 @@ class PayrollController extends Controller
                 ->withInput();
         }
 
+        // Check escrow balance before creating schedule
+        // Note: This is a user-facing validation check. The actual job creation is protected
+        // by database triggers and the ProcessScheduledPayroll command which locks the business row.
+        // For payroll schedules, we estimate based on gross salaries (conservative check).
+        // The ProcessScheduledPayroll command will validate that total net_salary doesn't exceed available balance before creating jobs.
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot create payroll schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        // We need this for the estimate check below
+        $employeeIdsForCheck = empty($validated['employee_ids'])
+            ? Employee::where('business_id', $validated['business_id'])->pluck('id')->toArray()
+            : $validated['employee_ids'];
+
+        // Conservative estimate: use gross salaries as upper bound (net will be less after deductions)
+        // This prevents creating schedules that would clearly exceed balance
+        if (! empty($employeeIdsForCheck)) {
+            $estimatedTotal = Employee::whereIn('id', $employeeIdsForCheck)
+                ->sum('gross_salary');
+
+            // Calculate total from existing active payroll schedules
+            $existingSchedulesTotal = PayrollSchedule::where('business_id', $validated['business_id'])
+                ->where('status', 'active')
+                ->with('employees')
+                ->get()
+                ->sum(function ($schedule) {
+                    return $schedule->employees->sum('gross_salary');
+                });
+
+            $totalScheduledEstimate = $existingSchedulesTotal + $estimatedTotal;
+
+            // Explicit check: estimated total should not exceed available balance
+            // This is conservative since net salary will be less than gross
+            if ($escrowBalance < $estimatedTotal) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Insufficient escrow balance for estimated payroll. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).'])
+                    ->withInput();
+            }
+
+            // Explicit check: total scheduled estimate (existing + new) should not exceed available balance
+            if ($escrowBalance < $totalScheduledEstimate) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Creating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total estimated scheduled (including existing): '.number_format($totalScheduledEstimate, 2).' ZAR.'])
+                    ->withInput();
+            }
+        }
+
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
 
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
 
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
@@ -168,6 +224,13 @@ class PayrollController extends Controller
             $validated['employee_ids'] = Employee::where('business_id', $validated['business_id'])
                 ->pluck('id')
                 ->toArray();
+        }
+
+        // Validate that at least one employee is selected
+        if (empty($validated['employee_ids'])) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot create payroll schedule. The business has no employees. Please add employees first.'])
+                ->withInput();
         }
 
         // Enforce rule: One employee = One recurring payroll schedule
@@ -199,17 +262,45 @@ class PayrollController extends Controller
                 'status' => 'active',
             ]);
 
-            // Calculate next run time
+            // Calculate next run time (required for correctness — no fallback)
             try {
-                $cron = CronExpression::factory($frequency);
-                // Use current time in app timezone for consistent calculation
-                $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                 // Skip weekends and holidays
-                $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                $nextRun = $this->adjustToBusinessDay($nextRun);
                 $schedule->next_run_at = $nextRun;
                 $schedule->save();
-            } catch (\Exception $e) {
-                // If calculation fails, set to null (will be handled by scheduler)
+            } catch (\Throwable $e) {
+                Log::error('Unable to compute next run date for payroll schedule', [
+                    'schedule_id' => $schedule->id,
+                    'frequency' => $frequency,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException(
+                    'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                    0,
+                    $e
+                );
+            }
+
+            // CRITICAL: Re-validate escrow balance before attaching employees
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot attach employees. Escrow balance is zero or negative. Please deposit funds first.');
+            }
+
+            // Calculate estimated total based on gross salaries (conservative estimate)
+            if (! empty($validated['employee_ids'])) {
+                $estimatedTotal = Employee::whereIn('id', $validated['employee_ids'])
+                    ->sum('gross_salary');
+
+                // Explicit check: available balance must be sufficient for estimated total
+                if ($escrowBalance < $estimatedTotal) {
+                    throw new \RuntimeException('Insufficient escrow balance to attach employees. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).');
+                }
             }
 
             // Attach employees inside transaction to ensure atomicity
@@ -246,24 +337,46 @@ class PayrollController extends Controller
             },
         ]);
 
-        // Use next_run_at to populate date/time fields, fallback to parsing cron if not available
+        // Use next_run_at to populate date/time fields; do not guess from cron when null
         if ($schedule->next_run_at) {
             $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
             $schedule->scheduled_date = $nextRun->format('Y-m-d');
             $schedule->scheduled_time = $nextRun->format('H:i');
+            $schedule->next_run_at_missing = false;
         } else {
-            // Fallback: Parse cron expression if next_run_at is not set
-            $parsed = $this->cronParser->parse($payrollSchedule->frequency);
-            if ($parsed) {
-                $schedule->scheduled_date = $parsed['date'];
-                $schedule->scheduled_time = $parsed['time'];
-            }
+            $schedule->scheduled_date = null;
+            $schedule->scheduled_time = null;
+            $schedule->next_run_at_missing = true;
         }
 
         // Parse frequency for display
         $parsed = $this->cronParser->parse($payrollSchedule->frequency);
         if ($parsed) {
             $schedule->parsed_frequency = $parsed['frequency'];
+        }
+
+        // Employees who will be skipped on next run (already paid or pending for this period)
+        $employeesAlreadyPaidThisPeriod = [];
+        try {
+            $period = $payrollSchedule->calculatePayPeriod();
+            $periodStart = $period['start'];
+            $periodEnd = $period['end'];
+            foreach ($schedule->employees as $employee) {
+                $overlapCheck = $this->payrollValidationService->checkPeriodOverlap(
+                    $employee,
+                    $periodStart,
+                    $periodEnd
+                );
+                if ($overlapCheck['has_overlap']) {
+                    $employeesAlreadyPaidThisPeriod[] = [
+                        'id' => $employee->id,
+                        'name' => $employee->name,
+                        'overlapping_jobs' => $overlapCheck['overlapping_jobs'],
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            // No next_run_at or invalid period — cannot compute; pass empty list
         }
 
         // Tax breakdowns are now loaded on-demand via getTaxBreakdowns endpoint
@@ -273,6 +386,7 @@ class PayrollController extends Controller
             'schedule' => $schedule,
             'businesses' => $businesses,
             'employees' => $employees,
+            'employees_already_paid_this_period' => $employeesAlreadyPaidThisPeriod,
         ]);
     }
 
@@ -286,7 +400,7 @@ class PayrollController extends Controller
             'business_id' => 'required|exists:businesses,id',
             'name' => 'required|string|max:255',
             'schedule_type' => 'required|in:one_time,recurring',
-            'employee_ids' => 'required|array',
+            'employee_ids' => 'present|array',
             'employee_ids.*' => 'exists:employees,id',
         ];
 
@@ -311,12 +425,59 @@ class PayrollController extends Controller
                 ->withInput();
         }
 
+        // Check escrow balance before updating schedule
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['employee_ids' => 'Cannot update payroll schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // If employee_ids is empty, it means "all employees" - get all employees for the business
+        $employeeIdsForCheck = empty($validated['employee_ids'])
+            ? Employee::where('business_id', $validated['business_id'])->pluck('id')->toArray()
+            : $validated['employee_ids'];
+
+        // Conservative estimate: use gross salaries as upper bound (net will be less after deductions)
+        if (! empty($employeeIdsForCheck)) {
+            $estimatedTotal = Employee::whereIn('id', $employeeIdsForCheck)
+                ->sum('gross_salary');
+
+            // Calculate total from existing active payroll schedules (excluding this one)
+            $existingSchedulesTotal = PayrollSchedule::where('business_id', $validated['business_id'])
+                ->where('status', 'active')
+                ->where('id', '!=', $payrollSchedule->id)
+                ->with('employees')
+                ->get()
+                ->sum(function ($schedule) {
+                    return $schedule->employees->sum('gross_salary');
+                });
+
+            $totalScheduledEstimate = $existingSchedulesTotal + $estimatedTotal;
+
+            // Explicit check: estimated total should not exceed available balance
+            if ($escrowBalance < $estimatedTotal) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Insufficient escrow balance for estimated payroll. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).'])
+                    ->withInput();
+            }
+
+            // Explicit check: total scheduled estimate (existing + updated) should not exceed available balance
+            if ($escrowBalance < $totalScheduledEstimate) {
+                return back()
+                    ->withErrors(['employee_ids' => 'Updating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total estimated scheduled (including existing): '.number_format($totalScheduledEstimate, 2).' ZAR.'])
+                    ->withInput();
+            }
+        }
+
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
 
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time']);
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
 
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
@@ -368,17 +529,49 @@ class PayrollController extends Controller
                 'schedule_type' => $validated['schedule_type'],
             ]);
 
-            // Recalculate next run time if frequency changed
-            if ($payrollSchedule->wasChanged('frequency')) {
+            // Recalculate next run time when frequency changed or user provided new date/time
+            // so that "next run" reflects the chosen schedule (e.g. today at 9:55)
+            $shouldRecalcNextRun = $payrollSchedule->wasChanged('frequency')
+                || isset($validated['scheduled_date'], $validated['scheduled_time']);
+            if ($shouldRecalcNextRun) {
                 try {
-                    $cron = CronExpression::factory($frequency);
-                    $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+                    $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
                     // Skip weekends and holidays
-                    $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+                    $nextRun = $this->adjustToBusinessDay($nextRun);
                     $payrollSchedule->next_run_at = $nextRun;
                     $payrollSchedule->save();
-                } catch (\Exception $e) {
-                    // If calculation fails, set to null
+                } catch (\Throwable $e) {
+                    Log::error('Unable to compute next run date for payroll schedule update', [
+                        'schedule_id' => $payrollSchedule->id,
+                        'frequency' => $frequency,
+                        'error' => $e->getMessage(),
+                    ]);
+                    throw new \RuntimeException(
+                        'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                        0,
+                        $e
+                    );
+                }
+            }
+
+            // CRITICAL: Re-validate escrow balance before syncing employees
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot sync employees. Escrow balance is zero or negative. Please deposit funds first.');
+            }
+
+            // Calculate estimated total based on gross salaries (conservative estimate)
+            if (! empty($validated['employee_ids'])) {
+                $estimatedTotal = Employee::whereIn('id', $validated['employee_ids'])
+                    ->sum('gross_salary');
+
+                // Explicit check: available balance must be sufficient for estimated total
+                if ($escrowBalance < $estimatedTotal) {
+                    throw new \RuntimeException('Insufficient escrow balance to sync employees. Available: '.number_format($escrowBalance, 2).' ZAR, Estimated required: '.number_format($estimatedTotal, 2).' ZAR (based on gross salaries).');
                 }
             }
 
@@ -398,22 +591,69 @@ class PayrollController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * Permanently deletes the schedule but keeps full audit trail.
      */
     public function destroy(PayrollSchedule $payrollSchedule)
     {
+        // Load all related data before deletion for audit logging
+        $payrollSchedule->load([
+            'business:id,name,user_id',
+            'business.owner:id,name,email',
+            'employees:id,name,email',
+            'payrollJobs:id,payroll_schedule_id,status,created_at',
+        ]);
+
         $business = $payrollSchedule->business;
         $user = $business->owner;
 
-        $this->auditService->log('payroll_schedule.deleted', $payrollSchedule, $payrollSchedule->getAttributes());
+        // Capture comprehensive data for audit log before deletion
+        $auditData = [
+            'schedule' => [
+                'id' => $payrollSchedule->id,
+                'name' => $payrollSchedule->name,
+                'business_id' => $payrollSchedule->business_id,
+                'business_name' => $business->name,
+                'frequency' => $payrollSchedule->frequency,
+                'schedule_type' => $payrollSchedule->schedule_type,
+                'status' => $payrollSchedule->status,
+                'next_run_at' => $payrollSchedule->next_run_at?->toIso8601String(),
+                'last_run_at' => $payrollSchedule->last_run_at?->toIso8601String(),
+                'created_at' => $payrollSchedule->created_at?->toIso8601String(),
+                'updated_at' => $payrollSchedule->updated_at?->toIso8601String(),
+            ],
+            'employees' => $payrollSchedule->employees->map(function ($employee) {
+                return [
+                    'id' => $employee->id,
+                    'name' => $employee->name,
+                    'email' => $employee->email,
+                ];
+            })->toArray(),
+            'payroll_jobs_count' => $payrollSchedule->payrollJobs->count(),
+            'deleted_by' => [
+                'user_id' => Auth::id(),
+                'user_email' => Auth::user()?->email,
+            ],
+            'deleted_at' => now()->toIso8601String(),
+        ];
+
+        // Log comprehensive audit trail before deletion
+        $this->auditService->log(
+            'payroll_schedule.deleted',
+            $payrollSchedule,
+            $auditData,
+            Auth::user(),
+            $business
+        );
 
         // Send payroll schedule cancelled email before deleting
         $emailService = app(EmailService::class);
         $emailService->send($user, new PayrollScheduleCancelledEmail($user, $payrollSchedule), 'payroll_schedule_cancelled');
 
+        // Permanently delete the schedule (no soft delete)
         $payrollSchedule->delete();
 
         return redirect()->route('payroll.index')
-            ->with('success', 'Payroll schedule deleted successfully.');
+            ->with('success', 'Payroll schedule permanently deleted. All data has been logged in audit trail.');
     }
 
     /**
@@ -484,18 +724,26 @@ class PayrollController extends Controller
      */
     public function resume(PayrollSchedule $payrollSchedule)
     {
-        // Recalculate next run time when resuming
+        // Recalculate next run time when resuming (required — do not mark active without valid next_run_at)
         try {
-            $cron = CronExpression::factory($payrollSchedule->frequency);
-            $nextRun = Carbon::instance($cron->getNextRunDate(now(config('app.timezone'))));
+            $nextRun = $this->cronService->getNextRunDate($payrollSchedule->frequency, now(config('app.timezone')));
             // Skip weekends and holidays
-            $nextRun = $this->adjustToBusinessDay($nextRun, $cron);
+            $nextRun = $this->adjustToBusinessDay($nextRun);
             $payrollSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
             ]);
-        } catch (\Exception $e) {
-            $payrollSchedule->update(['status' => 'active']);
+        } catch (\Throwable $e) {
+            Log::error('Unable to compute next run date when resuming payroll schedule', [
+                'schedule_id' => $payrollSchedule->id,
+                'frequency' => $payrollSchedule->frequency,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException(
+                'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                0,
+                $e
+            );
         }
 
         $this->auditService->log('payroll_schedule.resumed', $payrollSchedule, [
@@ -519,6 +767,74 @@ class PayrollController extends Controller
 
         return redirect()->back()
             ->with('success', 'Payroll schedule cancelled.');
+    }
+
+    /**
+     * Cancel overlapping pending/processing payroll jobs for selected employees so they can be included in the next run.
+     */
+    public function cancelOverlappingJobs(Request $request, PayrollSchedule $payrollSchedule)
+    {
+        $validated = $request->validate([
+            'employee_ids' => 'required|array',
+            'employee_ids.*' => 'exists:employees,id',
+        ]);
+
+        $employeeIds = $validated['employee_ids'];
+        $employeeIds = array_values(array_unique($employeeIds));
+
+        // Ensure employees belong to the schedule's business
+        $validEmployeeIds = Employee::where('business_id', $payrollSchedule->business_id)
+            ->whereIn('id', $employeeIds)
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validEmployeeIds)) {
+            return redirect()->back()
+                ->withErrors(['employee_ids' => 'No valid employees selected.']);
+        }
+
+        try {
+            $period = $payrollSchedule->calculatePayPeriod();
+        } catch (\Throwable $e) {
+            return redirect()->back()
+                ->withErrors(['employee_ids' => 'Cannot calculate pay period for this schedule. Set next run date and save first.']);
+        }
+
+        $periodStart = $period['start'];
+        $periodEnd = $period['end'];
+
+        $cancelled = 0;
+        foreach ($validEmployeeIds as $employeeId) {
+            $employee = Employee::find($employeeId);
+            if (! $employee) {
+                continue;
+            }
+            $overlapCheck = $this->payrollValidationService->checkPeriodOverlap($employee, $periodStart, $periodEnd);
+            if (! $overlapCheck['has_overlap']) {
+                continue;
+            }
+            foreach ($overlapCheck['overlapping_jobs'] as $jobInfo) {
+                $job = PayrollJob::find($jobInfo['id']);
+                if ($job && in_array($job->status, ['pending', 'processing'], true)) {
+                    try {
+                        $job->updateStatus('cancelled');
+                        $cancelled++;
+                    } catch (\Throwable $e) {
+                        Log::warning('Failed to cancel payroll job for include-in-next-run', [
+                            'payroll_job_id' => $job->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        $message = $cancelled === 0
+            ? 'No pending or processing jobs were found to cancel.'
+            : "Cancelled {$cancelled} overlapping job(s). Those employees will be included in the next payroll run.";
+
+        return redirect()->route('payroll.edit', $payrollSchedule)
+            ->with('success', $message);
     }
 
     /**
@@ -560,7 +876,7 @@ class PayrollController extends Controller
     /**
      * Adjust a date to the next business day if it falls on a weekend or holiday.
      */
-    private function adjustToBusinessDay(Carbon $date, CronExpression $cron): Carbon
+    private function adjustToBusinessDay(Carbon $date): Carbon
     {
         if ($this->holidayService->isBusinessDay($date)) {
             return $date;

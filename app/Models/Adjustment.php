@@ -15,6 +15,7 @@ class Adjustment extends Model
     protected $fillable = [
         'business_id',
         'employee_id',
+        'payroll_schedule_id',
         'name',
         'type',
         'amount',

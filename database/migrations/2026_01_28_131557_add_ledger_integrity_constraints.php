@@ -59,17 +59,34 @@ return new class extends Migration
         // Ensure reversal foreign key exists and is properly constrained
         if (Schema::hasColumn('financial_ledger', 'reversal_of_id')) {
             try {
-                // Check if foreign key already exists
-                $foreignKeys = DB::select("
-                    SELECT CONSTRAINT_NAME 
-                    FROM information_schema.KEY_COLUMN_USAGE 
-                    WHERE TABLE_SCHEMA = DATABASE() 
-                    AND TABLE_NAME = 'financial_ledger' 
-                    AND COLUMN_NAME = 'reversal_of_id'
-                    AND REFERENCED_TABLE_NAME IS NOT NULL
-                ");
+                $driver = DB::connection()->getDriverName();
+                $fkExists = false;
 
-                if (empty($foreignKeys)) {
+                if ($driver === 'pgsql') {
+                    $rows = DB::select("
+                        SELECT 1
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.constraint_column_usage ccu
+                            ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+                        WHERE tc.table_schema = 'public'
+                        AND tc.table_name = 'financial_ledger'
+                        AND tc.constraint_type = 'FOREIGN KEY'
+                        AND ccu.column_name = 'reversal_of_id'
+                    ");
+                    $fkExists = ! empty($rows);
+                } else {
+                    $foreignKeys = DB::select("
+                        SELECT CONSTRAINT_NAME
+                        FROM information_schema.KEY_COLUMN_USAGE
+                        WHERE TABLE_SCHEMA = DATABASE()
+                        AND TABLE_NAME = 'financial_ledger'
+                        AND COLUMN_NAME = 'reversal_of_id'
+                        AND REFERENCED_TABLE_NAME IS NOT NULL
+                    ");
+                    $fkExists = ! empty($foreignKeys);
+                }
+
+                if (! $fkExists) {
                     DB::statement('ALTER TABLE financial_ledger ADD CONSTRAINT fk_reversal_valid FOREIGN KEY (reversal_of_id) REFERENCES financial_ledger(id) ON DELETE RESTRICT');
                 }
             } catch (\Exception $e) {
@@ -103,7 +120,12 @@ return new class extends Migration
         }
 
         try {
-            DB::statement('ALTER TABLE financial_ledger DROP FOREIGN KEY IF EXISTS fk_reversal_valid');
+            $driver = DB::connection()->getDriverName();
+            if ($driver === 'pgsql') {
+                DB::statement('ALTER TABLE financial_ledger DROP CONSTRAINT IF EXISTS fk_reversal_valid');
+            } else {
+                DB::statement('ALTER TABLE financial_ledger DROP FOREIGN KEY IF EXISTS fk_reversal_valid');
+            }
         } catch (\Exception $e) {
             // Ignore if doesn't exist
         }

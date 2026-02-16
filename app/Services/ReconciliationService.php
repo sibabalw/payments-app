@@ -73,11 +73,15 @@ class ReconciliationService
                 } else {
                     // Significant discrepancy - requires manual approval
                     $this->createDiscrepancy($business, $discrepancy);
-                    $this->freezeAccount($business);
-                    Log::error('Significant balance discrepancy detected - account frozen', [
+                    // Only freeze if discrepancy is very large (> 1.00)
+                    if ($diff > 1.00) {
+                        $this->freezeAccount($business);
+                    }
+                    Log::warning('Significant balance discrepancy detected', [
                         'business_id' => $business->id,
                         'discrepancy' => $discrepancy,
                         'difference' => $diff,
+                        'threshold' => $roundingThreshold,
                     ]);
                 }
             }

@@ -192,9 +192,10 @@ class AdjustmentController extends Controller
                 $exists = Adjustment::where('business_id', $validated['business_id'])
                     ->where('employee_id', $validated['employee_id'])
                     ->where('payroll_schedule_id', $validated['payroll_schedule_id'])
-                    ->where('payroll_period_start', $validated['payroll_period_start'])
-                    ->where('payroll_period_end', $validated['payroll_period_end'])
-                    ->where('is_recurring', false)
+                    ->where('period_start', $validated['payroll_period_start'])
+                    ->where('period_end', $validated['payroll_period_end'])
+                    ->whereNotNull('period_start')
+                    ->whereNotNull('period_end')
                     ->exists();
 
                 if ($exists) {
@@ -227,8 +228,22 @@ class AdjustmentController extends Controller
             $validated['is_active'] = true;
         }
 
-        $adjustment = DB::transaction(function () use ($validated) {
-            $adjustment = Adjustment::create($validated);
+        $createAttributes = [
+            'business_id' => $validated['business_id'],
+            'employee_id' => $validated['employee_id'] ?? null,
+            'payroll_schedule_id' => $validated['payroll_schedule_id'] ?? null,
+            'name' => $validated['name'],
+            'type' => $validated['type'],
+            'amount' => $validated['amount'],
+            'adjustment_type' => $validated['adjustment_type'],
+            'period_start' => $validated['payroll_period_start'] ?? null,
+            'period_end' => $validated['payroll_period_end'] ?? null,
+            'is_active' => $validated['is_active'],
+            'description' => $validated['description'] ?? null,
+        ];
+
+        $adjustment = DB::transaction(function () use ($createAttributes) {
+            $adjustment = Adjustment::create($createAttributes);
             $this->auditService->log('adjustment.created', $adjustment, $adjustment->getAttributes());
 
             return $adjustment;
@@ -355,9 +370,10 @@ class AdjustmentController extends Controller
                 $exists = Adjustment::where('business_id', $validated['business_id'])
                     ->where('employee_id', $validated['employee_id'])
                     ->where('payroll_schedule_id', $validated['payroll_schedule_id'])
-                    ->where('payroll_period_start', $validated['payroll_period_start'])
-                    ->where('payroll_period_end', $validated['payroll_period_end'])
-                    ->where('is_recurring', false)
+                    ->where('period_start', $validated['payroll_period_start'])
+                    ->where('period_end', $validated['payroll_period_end'])
+                    ->whereNotNull('period_start')
+                    ->whereNotNull('period_end')
                     ->where('id', '!=', $adjustment->id)
                     ->exists();
 

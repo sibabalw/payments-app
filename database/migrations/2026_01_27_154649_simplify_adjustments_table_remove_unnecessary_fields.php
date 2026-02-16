@@ -37,20 +37,34 @@ return new class extends Migration
         }
 
         // Now try to drop the composite index (it may have become invalid or may still be protected by FK)
-        // If it fails, MySQL will handle it when we create new indexes
+        // If it fails, database will handle it when we create new indexes
+        $driver = DB::connection()->getDriverName();
         try {
-            DB::statement('ALTER TABLE adjustments DROP INDEX idx_employee_once_off_adjustment');
+            if ($driver === 'pgsql') {
+                DB::statement('DROP INDEX IF EXISTS idx_employee_once_off_adjustment');
+            } else {
+                DB::statement('ALTER TABLE adjustments DROP INDEX idx_employee_once_off_adjustment');
+            }
         } catch (\Exception $e) {
             // Index might still be protected by foreign key on employee_id, or already invalid
             // This is fine - we'll create new indexes below
         }
 
-        // Rename period columns using raw SQL (more reliable than renameColumn)
+        // Rename period columns using database-specific SQL
+        $driver = DB::connection()->getDriverName();
         if (Schema::hasColumn('adjustments', 'payroll_period_start')) {
-            DB::statement('ALTER TABLE adjustments CHANGE payroll_period_start period_start DATE NULL');
+            if ($driver === 'pgsql') {
+                DB::statement('ALTER TABLE adjustments RENAME COLUMN payroll_period_start TO period_start');
+            } else {
+                DB::statement('ALTER TABLE adjustments CHANGE payroll_period_start period_start DATE NULL');
+            }
         }
         if (Schema::hasColumn('adjustments', 'payroll_period_end')) {
-            DB::statement('ALTER TABLE adjustments CHANGE payroll_period_end period_end DATE NULL');
+            if ($driver === 'pgsql') {
+                DB::statement('ALTER TABLE adjustments RENAME COLUMN payroll_period_end TO period_end');
+            } else {
+                DB::statement('ALTER TABLE adjustments CHANGE payroll_period_end period_end DATE NULL');
+            }
         }
 
         // Drop is_recurring column and old index
@@ -60,8 +74,13 @@ return new class extends Migration
             }
 
             // Drop old index that included is_recurring
+            $driver = DB::connection()->getDriverName();
             try {
-                DB::statement('ALTER TABLE adjustments DROP INDEX adjustments_business_id_is_recurring_index');
+                if ($driver === 'pgsql') {
+                    DB::statement('DROP INDEX IF EXISTS adjustments_business_id_is_recurring_index');
+                } else {
+                    DB::statement('ALTER TABLE adjustments DROP INDEX adjustments_business_id_is_recurring_index');
+                }
             } catch (\Exception $e) {
                 // Try alternative index name format
                 try {
@@ -112,12 +131,21 @@ return new class extends Migration
             // Add back is_recurring column
             $table->boolean('is_recurring')->default(true)->after('adjustment_type');
 
-            // Rename period columns back using raw SQL
+            // Rename period columns back using database-specific SQL
+            $driver = DB::connection()->getDriverName();
             if (Schema::hasColumn('adjustments', 'period_start')) {
-                DB::statement('ALTER TABLE adjustments CHANGE period_start payroll_period_start DATE NULL');
+                if ($driver === 'pgsql') {
+                    DB::statement('ALTER TABLE adjustments RENAME COLUMN period_start TO payroll_period_start');
+                } else {
+                    DB::statement('ALTER TABLE adjustments CHANGE period_start payroll_period_start DATE NULL');
+                }
             }
             if (Schema::hasColumn('adjustments', 'period_end')) {
-                DB::statement('ALTER TABLE adjustments CHANGE period_end payroll_period_end DATE NULL');
+                if ($driver === 'pgsql') {
+                    DB::statement('ALTER TABLE adjustments RENAME COLUMN period_end TO payroll_period_end');
+                } else {
+                    DB::statement('ALTER TABLE adjustments CHANGE period_end payroll_period_end DATE NULL');
+                }
             }
 
             // Add back payroll_schedule_id

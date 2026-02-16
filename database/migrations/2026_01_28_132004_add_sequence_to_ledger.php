@@ -17,22 +17,8 @@ return new class extends Migration
                 $table->unsignedBigInteger('sequence_number')->nullable()->after('id');
             });
 
-            // Generate sequence numbers for existing entries (monotonic, gap-tolerant)
-            // Use created_at timestamp as base, then add row number for deterministic ordering
-            DB::statement('
-                UPDATE financial_ledger
-                SET sequence_number = (
-                    SELECT @row := @row + 1
-                    FROM (SELECT @row := 0) r
-                    WHERE financial_ledger.id >= (
-                        SELECT MIN(id) FROM financial_ledger
-                    )
-                    ORDER BY created_at ASC, id ASC
-                    LIMIT 1
-                )
-            ');
-
-            // Alternative approach: use auto-increment style
+            // Generate sequence numbers for existing entries (monotonic, gap-tolerant).
+            // Use PHP loop so it works on MySQL, PostgreSQL, and SQLite (no driver-specific SQL).
             $entries = DB::table('financial_ledger')->orderBy('created_at')->orderBy('id')->get();
             $sequence = 1;
             foreach ($entries as $entry) {

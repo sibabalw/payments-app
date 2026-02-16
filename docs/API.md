@@ -1,10 +1,10 @@
 # API & Routes Documentation
 
-This document details all HTTP routes and API endpoints in Swift Pay.
+This document details all HTTP routes and API endpoints in SwiftPay.
 
 ## Authentication
 
-Swift Pay uses Laravel Fortify for authentication with session-based auth for web and optional API tokens.
+SwiftPay uses Laravel Fortify for authentication with session-based auth for web and optional API tokens.
 
 ### Authentication Endpoints
 

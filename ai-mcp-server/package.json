@@ -1,7 +1,7 @@
 {
   "name": "ai-mvp-server",
   "version": "1.0.0",
-  "description": "AI MVP Server for Swift Pay - Secure AI gateway for business queries",
+  "description": "AI MVP Server for SwiftPay - Secure AI gateway for business queries",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

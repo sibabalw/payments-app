@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import {
     BarChart,
-    Bar,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -31,6 +30,7 @@ import {
     Legend,
     ResponsiveContainer,
 } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 import { useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [

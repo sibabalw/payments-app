@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { BusinessContext, ConversationMessage } from '../types/index.js';
 
-const SYSTEM_PROMPT = `You are an AI assistant for Swift Pay, a South African payments and payroll management system.
+const SYSTEM_PROMPT = `You are an AI assistant for SwiftPay, a South African payments and payroll management system.
 
 You help business owners understand their business data. You can answer questions about:
 - Business information and status

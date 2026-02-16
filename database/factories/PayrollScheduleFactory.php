@@ -20,7 +20,7 @@ class PayrollScheduleFactory extends Factory
         return [
             'business_id' => Business::factory(),
             'name' => fake()->words(3, true).' Payroll',
-            'frequency' => fake()->randomElement(['weekly', 'bi-weekly', 'monthly']),
+            'frequency' => '0 9 15 * *', // monthly on 15th at 09:00 (cron format for calculatePayPeriod)
             'schedule_type' => 'recurring',
             'status' => 'active',
             'next_run_at' => fake()->dateTimeBetween('now', '+1 month'),

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreBusinessRequest;
 use App\Mail\BusinessCreatedEmail;
 use App\Models\Business;
+use App\Models\User;
 use App\Services\AuditService;
 use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
@@ -70,8 +71,11 @@ class OnboardingController extends Controller
         $validated['business_type'] = $validated['business_type'] ?? 'small_business';
 
         try {
+            $userId = Auth::id();
+            $businessId = null;
+
             // Wrap all database operations in a transaction
-            DB::transaction(function () use ($logoPath, $validated, &$business, &$user) {
+            DB::transaction(function () use ($logoPath, $validated, &$businessId) {
                 $user = Auth::user();
 
                 // Create business
@@ -80,6 +84,8 @@ class OnboardingController extends Controller
                     'logo' => $logoPath,
                     ...$validated,
                 ]);
+
+                $businessId = $business->id;
 
                 // Add user as owner in pivot table
                 $business->users()->attach($user->id, ['role' => 'owner']);
@@ -94,13 +100,15 @@ class OnboardingController extends Controller
                 $this->auditService->log('business.created', $business, $business->getAttributes());
             });
 
-            // If we get here, transaction succeeded
-            // Send business created email (non-critical, happens after transaction)
+            // Queue business created email after transaction commits
+            // Business is already committed, so queue directly
+            $user = User::findOrFail($userId);
+            $business = Business::findOrFail($businessId);
             $emailService = app(EmailService::class);
             $emailService->send($user, new BusinessCreatedEmail($user, $business), 'business_created');
 
             return redirect()->route('dashboard')
-                ->with('success', 'Business created successfully. Welcome to Swift Pay!');
+                ->with('success', 'Business created successfully. Welcome to SwiftPay!');
 
         } catch (\Exception $e) {
             // If transaction failed, clean up uploaded file
@@ -122,6 +130,6 @@ class OnboardingController extends Controller
         Auth::user()->update(['onboarding_completed_at' => now()]);
 
         return redirect()->route('dashboard')
-            ->with('success', 'Welcome to Swift Pay! You can add a business later from the dashboard.');
+            ->with('success', 'Welcome to SwiftPay! You can add a business later from the dashboard.');
     }
 }

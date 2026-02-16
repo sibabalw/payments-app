@@ -89,9 +89,20 @@ class ErrorLogService
 
     /**
      * Notify all admin users about an error.
+     * Only sends emails in production environment.
      */
     protected function notifyAdmins(ErrorLog $errorLog): void
     {
+        // Only send error notification emails in production
+        if (! app()->environment('production')) {
+            Log::info('Skipping error notification email - not in production environment', [
+                'error_log_id' => $errorLog->id,
+                'environment' => app()->environment(),
+            ]);
+
+            return;
+        }
+
         try {
             // Get all admin users with verified emails
             $admins = User::query()

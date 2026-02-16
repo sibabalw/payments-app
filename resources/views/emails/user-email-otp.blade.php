@@ -31,6 +31,6 @@
     
     <p style="margin-top: 32px;">
         Regards,<br>
-        <strong>Swift Pay Team</strong>
+        <strong>SwiftPay Team</strong>
     </p>
 @endsection

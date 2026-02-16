@@ -1,16 +1,41 @@
 # Scheduled Jobs & Background Processing
 
-This document details all scheduled jobs, queue workers, and background processing in Swift Pay.
+This document details all scheduled jobs, queue workers, and background processing in SwiftPay.
 
 ## Overview
 
-Swift Pay uses Laravel's task scheduling and queue system for:
+SwiftPay uses Laravel's task scheduling and queue system for:
 
 - Processing scheduled payments
 - Processing scheduled payroll
 - Sending payment reminders
 - Checking escrow balances
 - Syncing job states
+
+**For payroll and payment schedules to run on time you need both:**
+
+1. **Queue worker** — processes jobs already in the queue (e.g. `php artisan queue:work database --queue=high,default`).
+2. **Scheduler** — runs every minute and executes due tasks (e.g. `payroll:process-scheduled`), which then **dispatches** payroll/payment jobs into the queue.
+
+If only the queue worker is running, jobs that are already in the queue will run, but **no new payroll or payment runs will be created** until the scheduler runs. In development, run the scheduler with `php artisan schedule:work` in a separate terminal, or use `composer run dev` which starts both the queue worker and the scheduler.
+
+### Using the test database (payment_app_test)
+
+By default, `composer run dev` uses your main database. To run the queue worker and scheduler against the **test** database (e.g. for E2E or manual testing with test data):
+
+```bash
+# Terminal 1 – queue worker (test DB)
+./run-queue-scheduler-test-db.sh queue
+
+# Terminal 2 – scheduler (test DB)
+./run-queue-scheduler-test-db.sh scheduler
+```
+
+Ensure the test DB exists and migrations are run first, e.g.:
+
+```bash
+DB_DATABASE=payment_app_test php artisan migrate --force
+```
 
 ## Scheduler Setup
 
@@ -213,17 +238,25 @@ REDIS_PORT=6379
 
 ### Queue Worker
 
-**Development**:
+Payroll jobs use the `high` queue; the worker must listen on it (e.g. `--queue=high,default`).
+
+**Development** (run both so payroll/payments run on time):
 ```bash
-php artisan queue:work
+# Terminal 1: queue worker (processes jobs)
+php artisan queue:work database --queue=high,default
 # or
-php artisan queue:listen --tries=3
+php artisan queue:listen database --queue=high,default --tries=3
+
+# Terminal 2: scheduler (dispatches payroll/payment jobs every minute)
+php artisan schedule:work
 ```
+Or use `composer run dev` to start server, queue worker, scheduler, pail, and Vite together.
 
 **Production** (Supervisor recommended):
 ```bash
-php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+php artisan queue:work database --queue=high,default --sleep=3 --tries=3 --max-time=3600
 ```
+Production also needs a cron entry so the scheduler runs every minute (see Scheduler Setup).
 
 ## Supervisor Configuration
 
@@ -234,7 +267,7 @@ Supervisor configs are in `supervisor/` directory.
 ```ini
 [program:payments-queue]
 process_name=%(program_name)s_%(process_num)02d
-command=php /var/www/payments-app/artisan queue:work database --sleep=3 --tries=3 --max-time=3600
+command=php /var/www/payments-app/artisan queue:work database --queue=high,default --sleep=3 --tries=3 --max-time=3600
 autostart=true
 autorestart=true
 stopasgroup=true
@@ -346,11 +379,18 @@ php artisan pail
 
 ## Troubleshooting
 
+### Payroll / payments did not run at scheduled time
+
+Payroll and payment runs are **dispatched** by the scheduler (every minute). If only the queue worker is running, no new runs are created.
+
+- **Fix**: Run the scheduler. In development: `php artisan schedule:work` in a separate terminal, or use `composer run dev` (which starts both queue worker and scheduler).
+- **Production**: Ensure cron runs `* * * * * cd /path/to/app && php artisan schedule:run` every minute.
+
 ### Jobs Not Processing
 
-1. **Check queue worker**:
+1. **Check queue worker** (must listen on `high` for payroll):
    ```bash
-   php artisan queue:work --verbose
+   php artisan queue:work database --queue=high,default --verbose
    ```
 
 2. **Check failed jobs**:

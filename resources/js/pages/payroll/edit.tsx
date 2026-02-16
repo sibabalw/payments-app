@@ -1,4 +1,4 @@
-import { useForm } from '@inertiajs/react';
+import { useForm, router } from '@inertiajs/react';
 import AppLayout from '@/layouts/app-layout';
 import { Head, Link } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,25 @@ import InputError from '@/components/input-error';
 import { Plus, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 
-export default function PayrollEdit({ schedule, businesses, employees, employeeTaxBreakdowns }: any) {
+interface EmployeeAlreadyPaid {
+    id: number;
+    name: string;
+    overlapping_jobs: Array<{ period_start: string; period_end: string; status: string }>;
+}
+
+export default function PayrollEdit({
+    schedule,
+    businesses,
+    employees,
+    employeeTaxBreakdowns,
+    employees_already_paid_this_period = [],
+}: {
+    schedule: any;
+    businesses: any;
+    employees: any;
+    employeeTaxBreakdowns?: any;
+    employees_already_paid_this_period?: EmployeeAlreadyPaid[];
+}) {
     // Parse scheduled date/time from schedule (provided by backend parser) or use defaults
     const initialScheduledDate = schedule.scheduled_date 
         ? new Date(schedule.scheduled_date + 'T' + (schedule.scheduled_time || '00:00'))
@@ -31,7 +49,18 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
     const [employeeSearch, setEmployeeSearch] = useState('');
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [includeInNextRunIds, setIncludeInNextRunIds] = useState<number[]>([]);
+    const [includeInNextRunProcessing, setIncludeInNextRunProcessing] = useState(false);
     const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Already paid this period: at least one overlapping job with status succeeded
+    const alreadyPaidThisPeriod = employees_already_paid_this_period.filter((emp) =>
+        emp.overlapping_jobs?.some((job) => job.status === 'succeeded')
+    );
+    // Pending/processing this period: overlapping jobs only pending or processing (can be "included in next run")
+    const pendingProcessingThisPeriod = employees_already_paid_this_period.filter((emp) =>
+        emp.overlapping_jobs?.every((job) => job.status === 'pending' || job.status === 'processing')
+    );
 
     const { data, setData, put, processing, errors } = useForm({
         business_id: schedule.business_id,
@@ -111,14 +140,25 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
         
         // Set employee_ids based on selection
         if (whoGetsThis === 'all') {
-            // All employees - set employee_ids to empty array (backend will interpret as all)
-            setData('employee_ids', []);
+            // All employees - send all employee IDs
+            const allEmployeeIds = employees?.map((emp: any) => emp.id) || [];
+            setData('employee_ids', allEmployeeIds);
         } else if (whoGetsThis === 'select') {
             // Selected employees
             setData('employee_ids', selectedEmployeeIds);
         }
         
         put(`/payroll/${schedule.id}`);
+    };
+
+    const handleIncludeInNextRun = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (includeInNextRunIds.length === 0) return;
+        setIncludeInNextRunProcessing(true);
+        router.post(`/payroll/${schedule.id}/cancel-overlapping-jobs`, { employee_ids: includeInNextRunIds }, {
+            preserveScroll: true,
+            onFinish: () => setIncludeInNextRunProcessing(false),
+        });
     };
 
     return (
@@ -173,6 +213,104 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
                                 )}
                             </div>
 
+                            {schedule.next_run_at_missing && (
+                                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                                    Next run not set. Set a date and time below and save to recalculate.
+                                </div>
+                            )}
+
+                            {alreadyPaidThisPeriod.length > 0 && (
+                                <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-100">
+                                    <p className="font-medium">
+                                        {alreadyPaidThisPeriod.length} employee(s) already paid for this period will be skipped on the next run.
+                                    </p>
+                                    <ul className="mt-2 list-inside list-disc space-y-1">
+                                        {alreadyPaidThisPeriod.map((emp) => (
+                                            <li key={emp.id}>
+                                                <span className="font-medium">{emp.name}</span>
+                                                {emp.overlapping_jobs?.length > 0 && (
+                                                    <span className="text-muted-foreground">
+                                                        {' '}
+                                                        — {emp.overlapping_jobs.map((job) => `${job.period_start} to ${job.period_end} (${job.status})`).join(', ')}
+                                                    </span>
+                                                )}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            {pendingProcessingThisPeriod.length > 0 && (
+                                <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-100">
+                                    <p className="font-medium">
+                                        {pendingProcessingThisPeriod.length} employee(s) with a pending or in-progress payment for this period will be skipped.
+                                    </p>
+                                    <ul className="mt-2 list-inside list-disc space-y-1">
+                                        {pendingProcessingThisPeriod.map((emp) => (
+                                            <li key={emp.id}>
+                                                <span className="font-medium">{emp.name}</span>
+                                                {emp.overlapping_jobs?.length > 0 && (
+                                                    <span className="text-muted-foreground">
+                                                        {' '}
+                                                        — {emp.overlapping_jobs.map((job) => `${job.period_start} to ${job.period_end} (${job.status})`).join(', ')}
+                                                    </span>
+                                                )}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    {!isReadOnly && (
+                                        <form onSubmit={handleIncludeInNextRun} className="mt-3 space-y-2">
+                                            <p className="text-xs font-medium">Include in next run (cancels pending/processing payment for this period):</p>
+                                            <div className="flex flex-wrap items-center gap-3">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <Checkbox
+                                                        checked={
+                                                            pendingProcessingThisPeriod.length > 0 &&
+                                                            pendingProcessingThisPeriod.every((emp) => includeInNextRunIds.includes(emp.id))
+                                                        }
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) {
+                                                                setIncludeInNextRunIds(pendingProcessingThisPeriod.map((emp) => emp.id));
+                                                            } else {
+                                                                setIncludeInNextRunIds((prev) =>
+                                                                    prev.filter((id) => !pendingProcessingThisPeriod.some((e) => e.id === id))
+                                                                );
+                                                            }
+                                                        }}
+                                                    />
+                                                    <span className="text-xs font-medium">Select all</span>
+                                                </label>
+                                            </div>
+                                            <div className="flex flex-wrap gap-3">
+                                                {pendingProcessingThisPeriod.map((emp) => (
+                                                    <label key={emp.id} className="flex items-center gap-2 cursor-pointer">
+                                                        <Checkbox
+                                                            checked={includeInNextRunIds.includes(emp.id)}
+                                                            onCheckedChange={(checked) => {
+                                                                if (checked) {
+                                                                    setIncludeInNextRunIds((prev) => [...prev, emp.id]);
+                                                                } else {
+                                                                    setIncludeInNextRunIds((prev) => prev.filter((id) => id !== emp.id));
+                                                                }
+                                                            }}
+                                                        />
+                                                        <span>{emp.name}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <Button
+                                                type="submit"
+                                                variant="secondary"
+                                                size="sm"
+                                                disabled={includeInNextRunIds.length === 0 || includeInNextRunProcessing}
+                                            >
+                                                {includeInNextRunProcessing ? 'Processing…' : 'Include selected in next run'}
+                                            </Button>
+                                        </form>
+                                    )}
+                                </div>
+                            )}
+
                             <div>
                                 <Label>Schedule Date & Time</Label>
                                 {isReadOnly ? (
@@ -187,7 +325,10 @@ export default function PayrollEdit({ schedule, businesses, employees, employeeT
                                             date={scheduledDate}
                                             onDateChange={(date) => {
                                                 if (date) {
-                                                    setData('scheduled_date', date.toISOString().split('T')[0]);
+                                                    const year = date.getFullYear();
+                                                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                                                    const day = String(date.getDate()).padStart(2, '0');
+                                                    setData('scheduled_date', `${year}-${month}-${day}`);
                                                 } else {
                                                     setData('scheduled_date', '');
                                                 }

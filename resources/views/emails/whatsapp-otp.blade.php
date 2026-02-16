@@ -5,7 +5,7 @@
     
     <p>Hi {{ $user->name }},</p>
     
-    <p>You're trying to log in to Swift Pay via WhatsApp. Here's your verification code:</p>
+    <p>You're trying to log in to SwiftPay via WhatsApp. Here's your verification code:</p>
     
     <div style="background-color: #f3f4f6; border-radius: 8px; padding: 24px; margin: 24px 0; text-align: center;">
         <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 0; color: #1f2937;">{{ $otp }}</p>

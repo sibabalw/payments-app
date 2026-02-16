@@ -14,7 +14,7 @@ make admins dashboard, first read what they need in current project, admin files
 
 add notification in dashboard, they will come from admins
  no calculation or filtering execute done in php or front end, unless acceptable all that must happen in sql level
-Brand web site public site (Swift pay- focus on service offered use catchy marketing terms)
+Brand web site public site (SwiftPay - focus on service offered use catchy marketing terms)
 On administrative there must be a page to view user business subscriptions
 
 Now focus on security of the web app to be very secure (current rate limit implemented in employees login is weak it blocks legit users)
@@ -48,7 +48,7 @@ Row level security implement it (for db im using postgre)
 optimize payroll and payments execution adn do it like banks 
 do it, be like an engineer, dont include tests in this plan, note system can use postgre based on config, by dfefault it's mysql
 
-optimize payroll and payments execution adn do it like banks do it, be like an engineer, dont include tests in this plan dont be too ambitious 
+optimize payroll and payments execution adn do it like banks do it, note im using postgre db it's no longer mysql, be like an engineer, dont include tests in this plan dont be too ambitious 
 focus on current system as it is not like banks but similar, also improve what can be improve be 100% honest and leave what cant be improved by 
 code alone, dont strive for perfect system just good enough design for failure, change, and recovery. Correct enough for today
 Safe under failure
@@ -59,12 +59,68 @@ Immutable instead of fragile
 Reversible instead of brittle
 Observable instead of magical
 Boring instead of clever
-
 That’s why the best systems:
 Assume bugs will exist
 Assume people will make mistakes
 Assume reality will break assumptions
 
-in /payment page when i clickcreate payment i am take to create bonus page, fix that so that im taken to right page
-when i create payroll with all clicked it gives error empoyees must be seleted
-payroll dont execute, test again
+
+have one custom alerts used in entire app, alerts, confirm alerts, dont use browser alerts and confirms
+
+make ticket system keep it simple and functional, start from user to admin, make sure when ticket it 
+openned admins are emailed, the email is scheduled, utilize postgre -since we are using postgre database use live db changes listeners
+to update tickets in real time
+
+make app based notifications it must be simple and sometimes can notify via email
+
+for pricing and billing add one month free trial
+
+payroll and payments dont handle leap years and February, feb ends 28 or 29 next run will be march 30 if i 
+created job in jan 30, in next run there should be no fallbacks, ai fixed, ai tested, to be confirmed by human
+
+make sure no payment and payroll created when escrow balance is 0 and when they shcedule more than they have, 
+make it air tight even in database level postgres, even in do checks in executions, make this impossible because 
+this is very critical, database we use is postgre, dont overdo it or rplace what exist with no reason, i repeat i only use postgres db
+
+now payroll jobs are never executing but in execution time next run is calculated and update but they never execute,
+i think i see now i edited payroll in the this same month that executed this month which is this month to execute again 
+in the same month with all employe option selected, 3 employees in total, 1 already received salary in previous run in
+the same month but 2 have not so payroll executed and 1 who already received salary in previous run in the same month is skipped 
+and 2 who have not received salary in previous run in the same month are paid, this is correct, this behaiviour is correct,
+it just that this still feels like in front end you need to notify user that x number employees who are already paid in the same month
+they are editing the payroll will be skipped, and they must have option to make all or selected employees not to be skipped.
+but sometimes jobs dont execute while queue worker is runnning now i have to restart queue and jobs will start executing,
+might this be caused by bad code? inefficient code ? just confirm this
+
+Why this is dangerous (especially for you)
+In systems like payments / payroll / scheduling:
+next_run must be correct
+A fallback like now() or +1 day is lying
+Silent fallbacks = silent financial bugs
+Bugs won’t crash — they’ll execute money at the wrong time
+That’s worse than an exception.
+Rule of thumb (non-negotiable)
+If the value is required for correctness any value not just next run, there must be NO fallback.
+Fail fast. Explode loudly. Wake someone up.
+
+give me ideas to compete with giants and to make my system 
+easier to use, to make buisinesses life easier, note im targeting small to medium businesses not big businesses
+
+use of tables modern tables in pages like payment and payroll jobs, payslips etc, that for business people not cards
+For business-facing pages like payments, payroll jobs, payslips, tables beat cards every time because:
+Users need to see and compare multiple rows at once
+Sorting, filtering, searching are essential for efficiency
+Cards are slow to scan and waste vertical space for large datasets
+Tables let you show actionable data directly (approve, retry, send, etc.)
+Exporting, bulk actions, inline edits—all naturally fit in a table
+The modern touch is not flashy cards—it’s features that make tables interactive, responsive, and clear (sticky headers, badges, filters, pagination).
+
+include what swiftpay is about in public pages, feautures what to expect etc, you may add some pages you are not limited
+
+make contact us page work with existing email system
+
+add blog page in public pages and to admin because they will use it to post
+
+implement database backup and management ui system in admin side
+
+testing

@@ -93,8 +93,8 @@ class JobSyncService
                     continue;
                 }
 
-                // Re-dispatch the job
-                ProcessPayrollJob::dispatch($payrollJob);
+                // Re-dispatch the job to database connection and high queue so the worker picks it up
+                ProcessPayrollJob::dispatch($payrollJob)->onConnection('database')->onQueue('high');
                 $synced++;
 
                 Log::info('Re-dispatched payroll job to queue', [
@@ -119,18 +119,17 @@ class JobSyncService
 
     /**
      * Check if a job exists in the queue by checking the payload.
-     * Uses a simpler approach: just check if job class exists in payload.
+     * Queries all queues the worker processes (high, default) so payroll jobs on "high"
+     * and payment jobs on "default" are found and not re-dispatched.
      */
     protected function jobExistsInQueue(string $jobClass, int $jobId): bool
     {
         $queueTable = config('queue.connections.database.table', 'jobs');
-        $queueName = config('queue.connections.database.queue', 'default');
+        $queuesToCheck = ['high', 'default'];
 
         try {
-            // Get jobs from queue that haven't been processed yet
             $jobs = DB::table($queueTable)
-                ->where('queue', $queueName)
-                ->whereNull('reserved_at') // Not currently being processed
+                ->whereIn('queue', $queuesToCheck)
                 ->get();
 
             foreach ($jobs as $job) {
@@ -140,10 +139,8 @@ class JobSyncService
                     continue;
                 }
 
-                // Check if this is the job class we're looking for
                 if (str_contains($payload['data']['commandName'], $jobClass)) {
                     try {
-                        // Try to deserialize and check the job ID
                         $command = unserialize($payload['data']['command']);
 
                         if ($command instanceof ProcessPaymentJob && isset($command->paymentJob)) {
@@ -156,7 +153,6 @@ class JobSyncService
                             }
                         }
                     } catch (\Exception $e) {
-                        // If deserialization fails, continue checking other jobs
                         continue;
                     }
                 }

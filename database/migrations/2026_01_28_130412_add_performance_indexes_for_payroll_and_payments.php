@@ -104,20 +104,29 @@ return new class extends Migration
 
     protected function hasIndex(string $table, string $indexName): bool
     {
+        $connection = Schema::getConnection();
+        $driver = $connection->getDriverName();
+
+        if ($driver === 'pgsql') {
+            $result = $connection->selectOne(
+                "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = ? AND indexname = ?",
+                [$table, $indexName]
+            );
+
+            return $result !== null;
+        }
+
         try {
-            $connection = Schema::getConnection();
             $databaseName = $connection->getDatabaseName();
             $indexes = $connection->select(
-                'SELECT COUNT(*) as count FROM information_schema.statistics 
+                'SELECT COUNT(*) as count FROM information_schema.statistics
                  WHERE table_schema = ? AND table_name = ? AND index_name = ?',
                 [$databaseName, $table, $indexName]
             );
 
             return ! empty($indexes) && $indexes[0]->count > 0;
         } catch (\Exception $e) {
-            // Fallback to SHOW INDEX if information_schema query fails
             try {
-                $connection = Schema::getConnection();
                 $indexes = $connection->select("SHOW INDEX FROM {$table} WHERE Key_name = ?", [$indexName]);
 
                 return ! empty($indexes);

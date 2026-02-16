@@ -23,10 +23,10 @@ class DatabaseController extends Controller
             'host' => config('database.connections.'.config('database.default').'.host'),
         ];
 
-        // Get database size (MySQL/MariaDB)
+        // Get database size
         $dbSize = null;
-        if (in_array($dbConfig['driver'], ['mysql', 'mariadb'])) {
-            try {
+        try {
+            if (in_array($dbConfig['driver'], ['mysql', 'mariadb'])) {
                 $result = DB::selectOne('
                     SELECT 
                         ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
@@ -35,16 +35,32 @@ class DatabaseController extends Controller
                 ', [$dbConfig['database']]);
 
                 $dbSize = $result ? round($result->size_mb, 2).' MB' : 'Unknown';
-            } catch (\Exception $e) {
-                $dbSize = 'Unable to calculate';
+            } elseif ($dbConfig['driver'] === 'pgsql') {
+                $result = DB::selectOne('
+                    SELECT 
+                        pg_size_pretty(pg_database_size(?)) AS size
+                ', [$dbConfig['database']]);
+
+                $dbSize = $result ? $result->size : 'Unknown';
             }
+        } catch (\Exception $e) {
+            $dbSize = 'Unable to calculate';
         }
 
         // Get table count
         $tableCount = 0;
         try {
-            $tables = DB::select('SHOW TABLES');
-            $tableCount = count($tables);
+            if (in_array($dbConfig['driver'], ['mysql', 'mariadb'])) {
+                $tables = DB::select('SHOW TABLES');
+                $tableCount = count($tables);
+            } elseif ($dbConfig['driver'] === 'pgsql') {
+                $result = DB::selectOne('
+                    SELECT COUNT(*) as count
+                    FROM information_schema.tables 
+                    WHERE table_schema = \'public\'
+                ');
+                $tableCount = $result ? (int) $result->count : 0;
+            }
         } catch (\Exception $e) {
             // Not supported or error
         }

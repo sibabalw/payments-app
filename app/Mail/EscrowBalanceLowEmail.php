@@ -30,7 +30,7 @@ class EscrowBalanceLowEmail extends Mailable
      */
     public function envelope(): Envelope
     {
-        // Get business email and name, fallback to Swift Pay defaults
+        // Get business email and name, fallback to SwiftPay defaults
         $fromEmail = $this->business->email ?? config('mail.from.address');
         $fromName = $this->business->name ?? config('mail.from.name');
 

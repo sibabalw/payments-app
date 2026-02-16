@@ -5,7 +5,7 @@
     
     <p>Hello {{ $user->name }},</p>
     
-    <p>Thank you for registering with Swift Pay. This is a verification email to confirm your email address and complete your registration.</p>
+    <p>Thank you for registering with SwiftPay. This is a verification email to confirm your email address and complete your registration.</p>
     
     <p>Please click the button below to verify your email address and activate your account:</p>
     
@@ -34,11 +34,11 @@
     </p>
     
     <p class="text-muted" style="margin-top: 24px; font-size: 14px;">
-        If you did not create an account with Swift Pay, you can safely ignore this email.
+        If you did not create an account with SwiftPay, you can safely ignore this email.
     </p>
     
     <p style="margin-top: 32px;">
         Regards,<br>
-        <strong>Swift Pay Team</strong>
+        <strong>SwiftPay Team</strong>
     </p>
 @endsection

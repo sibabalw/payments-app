@@ -93,12 +93,20 @@ class PayrollSchedule extends Model
      * - One-time schedules: pay for the scheduled month
      * - Other schedules: use current month
      *
-     * @param  Carbon|null  $executionDate  If null, uses next_run_at or now()
+     * @param  Carbon|null  $executionDate  If null, uses next_run_at. Throws if both are null.
      * @return array{start: Carbon, end: Carbon}
+     *
+     * @throws \RuntimeException When both $executionDate and next_run_at are null (no fallback for correctness).
      */
     public function calculatePayPeriod(?Carbon $executionDate = null): array
     {
-        $executionDate = $executionDate ?? $this->next_run_at ?? now();
+        $executionDate = $executionDate ?? $this->next_run_at;
+
+        if ($executionDate === null) {
+            throw new \RuntimeException(
+                'Pay period cannot be calculated: no execution date and schedule has no next_run_at.'
+            );
+        }
 
         // Ensure we're working with a Carbon instance
         if (! $executionDate instanceof Carbon) {
@@ -108,16 +116,20 @@ class PayrollSchedule extends Model
         // Parse cron frequency to determine schedule type
         $cronParts = explode(' ', $this->frequency);
 
-        // For monthly recurring schedules: pay for previous month
-        // Cron format: "0 0 25 * *" (runs on 25th) means pay for previous month
+        // For monthly recurring schedules: pay period depends on pay day
+        // Cron format: "0 9 1 * *" (1st) vs "0 9 20 * *" (20th)
+        // - Pay on 1st: pay for current month (month we're in), so changing from 20th to 1st doesn't re-pay last month
+        // - Pay on 2nd–31st: pay for previous month
         if ($this->isRecurring() && count($cronParts) === 5) {
-            // Check if it's a monthly schedule (day of month is specified, not *)
             if ($cronParts[2] !== '*' && $cronParts[3] === '*') {
-                $previousMonth = $executionDate->copy()->subMonth();
+                $dayOfMonth = (int) $cronParts[2];
+                $targetMonth = ($dayOfMonth === 1)
+                    ? $executionDate->copy()
+                    : $executionDate->copy()->subMonth();
 
                 return [
-                    'start' => $previousMonth->copy()->startOfMonth(),
-                    'end' => $previousMonth->copy()->endOfMonth(),
+                    'start' => $targetMonth->copy()->startOfMonth(),
+                    'end' => $targetMonth->copy()->endOfMonth(),
                 ];
             }
         }

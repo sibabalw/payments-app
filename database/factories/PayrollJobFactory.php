@@ -70,6 +70,19 @@ class PayrollJobFactory extends Factory
     }
 
     /**
+     * Indicate that the job succeeded.
+     */
+    public function succeeded(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => 'succeeded',
+            'error_message' => null,
+            'processed_at' => now(),
+            'transaction_id' => \Illuminate\Support\Str::uuid(),
+        ]);
+    }
+
+    /**
      * Set the pay period to a specific month.
      */
     public function forMonth(int $year, int $month): static

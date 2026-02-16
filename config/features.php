@@ -18,4 +18,15 @@ return [
         'idempotency' => env('REDIS_IDEMPOTENCY_ENABLED', false),
         'queues' => env('REDIS_QUEUES_ENABLED', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | PostgreSQL Feature Flags
+    |--------------------------------------------------------------------------
+    |
+    | These flags control PostgreSQL-specific features.
+    |
+    */
+
+    'postgres_notifications' => env('POSTGRES_NOTIFICATIONS_ENABLED', true),
 ];

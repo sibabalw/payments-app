@@ -26,7 +26,7 @@ class BusinessFactory extends Factory
             'city' => fake()->city(),
             'country' => fake()->country(),
             'contact_person_name' => fake()->name(),
-            'escrow_balance' => 0.00,
+            'escrow_balance' => app()->environment('testing') ? 10000000.00 : 0.00,
             'bank_account_details' => null,
         ];
     }

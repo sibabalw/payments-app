@@ -18,7 +18,6 @@ import {
     LineChart,
     Line,
     BarChart,
-    Bar,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -26,6 +25,7 @@ import {
     Legend,
     ResponsiveContainer,
 } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Admin', href: '/admin' },

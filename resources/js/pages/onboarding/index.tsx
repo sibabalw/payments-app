@@ -327,7 +327,7 @@ export default function Onboarding() {
                                 </div>
                             </div>
                             <h1 className="text-4xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                                Welcome to Swift Pay!
+                                Welcome to SwiftPay!
                             </h1>
                             <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
                                 Let's set up your first business profile. This will only take a minute, and you can always add more later.

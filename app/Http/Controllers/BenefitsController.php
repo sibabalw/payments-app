@@ -33,13 +33,13 @@ class BenefitsController extends Controller
 
         // Get all company-wide recurring benefits (employee_id = null, period_start/end = null)
         $benefits = Adjustment::query();
-        
+
         if ($businessId) {
             $benefits->where('business_id', $businessId);
         } else {
             $benefits->whereRaw('1 = 0'); // Return empty if no business
         }
-        
+
         $benefits = $benefits->whereNull('employee_id')
             ->whereNull('period_start')
             ->whereNull('period_end')
@@ -179,6 +179,27 @@ class BenefitsController extends Controller
 
         return redirect()->route('benefits.index', ['business_id' => $validated['business_id']])
             ->with('success', 'Benefit updated successfully.');
+    }
+
+    /**
+     * Show the form to temporarily change a company benefit.
+     */
+    public function showTemporarilyChange(Adjustment $benefit): Response
+    {
+        // Ensure this is a company-wide recurring benefit
+        if ($benefit->employee_id !== null || $benefit->period_start !== null || $benefit->period_end !== null) {
+            abort(404, 'This is not a company benefit.');
+        }
+
+        return Inertia::render('benefits/temporarily-change', [
+            'benefit' => [
+                'id' => $benefit->id,
+                'name' => $benefit->name,
+                'type' => $benefit->type,
+                'amount' => $benefit->amount,
+                'adjustment_type' => $benefit->adjustment_type,
+            ],
+        ]);
     }
 
     /**

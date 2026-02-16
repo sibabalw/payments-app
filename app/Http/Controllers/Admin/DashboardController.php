@@ -15,6 +15,28 @@ use Inertia\Response;
 class DashboardController extends Controller
 {
     /**
+     * Get database-agnostic date format expression.
+     */
+    private function dateFormat(string $column, string $format = '%Y-%m-%d'): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            // PostgreSQL: to_char(column, 'YYYY-MM-DD')
+            $pgFormat = match ($format) {
+                '%Y-%m-%d' => 'YYYY-MM-DD',
+                '%Y-%m' => 'YYYY-MM',
+                default => 'YYYY-MM-DD',
+            };
+
+            return "to_char({$column}, '{$pgFormat}')";
+        } else {
+            // MySQL/MariaDB: DATE_FORMAT(column, '%Y-%m-%d')
+            return "DATE_FORMAT({$column}, '{$format}')";
+        }
+    }
+
+    /**
      * Display the admin dashboard with platform-wide metrics.
      */
     public function index(): Response
@@ -32,7 +54,7 @@ class DashboardController extends Controller
         $userMetricsData = User::query()
             ->selectRaw('
                 COUNT(*) as total,
-                SUM(CASE WHEN is_admin = 1 THEN 1 ELSE 0 END) as admins,
+                SUM(CASE WHEN is_admin THEN 1 ELSE 0 END) as admins,
                 SUM(CASE WHEN email_verified_at IS NOT NULL THEN 1 ELSE 0 END) as verified
             ')
             ->first();
@@ -81,15 +103,16 @@ class DashboardController extends Controller
             ->get();
 
         // Monthly trends (last 6 months)
+        $monthExpr = $this->dateFormat('processed_at', '%Y-%m');
         $monthlyPayments = PaymentJob::query()
             ->where('status', 'succeeded')
             ->where('processed_at', '>=', now()->subMonths(6))
             ->select(
-                DB::raw("DATE_FORMAT(processed_at, '%Y-%m') as month"),
+                DB::raw("{$monthExpr} as month"),
                 DB::raw('COUNT(*) as count'),
                 DB::raw('SUM(amount) as total')
             )
-            ->groupBy('month')
+            ->groupBy(DB::raw($monthExpr))
             ->orderBy('month')
             ->get();
 
@@ -97,11 +120,11 @@ class DashboardController extends Controller
             ->where('status', 'succeeded')
             ->where('processed_at', '>=', now()->subMonths(6))
             ->select(
-                DB::raw("DATE_FORMAT(processed_at, '%Y-%m') as month"),
+                DB::raw("{$monthExpr} as month"),
                 DB::raw('COUNT(*) as count'),
                 DB::raw('SUM(gross_salary) as total')
             )
-            ->groupBy('month')
+            ->groupBy(DB::raw($monthExpr))
             ->orderBy('month')
             ->get();
 

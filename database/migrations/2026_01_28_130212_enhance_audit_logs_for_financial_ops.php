@@ -59,12 +59,22 @@ return new class extends Migration
     }
 
     /**
-     * Check if index exists
+     * Check if index exists (MySQL: SHOW INDEX; PostgreSQL: pg_indexes)
      */
     protected function hasIndex(string $table, string $indexName): bool
     {
         $connection = Schema::getConnection();
-        $database = $connection->getDatabaseName();
+        $driver = $connection->getDriverName();
+
+        if ($driver === 'pgsql') {
+            $result = $connection->selectOne(
+                "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = ? AND indexname = ?",
+                [$table, $indexName]
+            );
+
+            return $result !== null;
+        }
+
         $indexes = $connection->select("SHOW INDEX FROM {$table} WHERE Key_name = ?", [$indexName]);
 
         return ! empty($indexes);

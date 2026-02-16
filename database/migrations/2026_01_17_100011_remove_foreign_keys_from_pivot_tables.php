@@ -14,52 +14,72 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Remove foreign keys from payment_schedule_recipient
-        // MySQL auto-generates FK names, so we need to query them first
         $connection = Schema::getConnection();
+        $driver = $connection->getDriverName();
 
         if (Schema::hasTable('payment_schedule_recipient')) {
-            $fks = $connection->select("
-                SELECT CONSTRAINT_NAME 
-                FROM information_schema.KEY_COLUMN_USAGE 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'payment_schedule_recipient' 
-                AND REFERENCED_TABLE_NAME IS NOT NULL
-            ");
-
-            foreach ($fks as $fk) {
-                $connection->statement("ALTER TABLE payment_schedule_recipient DROP FOREIGN KEY {$fk->CONSTRAINT_NAME}");
+            $constraints = $this->getForeignKeys($connection, $driver, 'payment_schedule_recipient');
+            foreach ($constraints as $name) {
+                $this->dropForeignKey($connection, $driver, 'payment_schedule_recipient', $name);
             }
         }
 
-        // Remove foreign keys from payroll_schedule_employee
         if (Schema::hasTable('payroll_schedule_employee')) {
-            $fks = $connection->select("
-                SELECT CONSTRAINT_NAME 
-                FROM information_schema.KEY_COLUMN_USAGE 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'payroll_schedule_employee' 
-                AND REFERENCED_TABLE_NAME IS NOT NULL
-            ");
-
-            foreach ($fks as $fk) {
-                $connection->statement("ALTER TABLE payroll_schedule_employee DROP FOREIGN KEY {$fk->CONSTRAINT_NAME}");
+            $constraints = $this->getForeignKeys($connection, $driver, 'payroll_schedule_employee');
+            foreach ($constraints as $name) {
+                $this->dropForeignKey($connection, $driver, 'payroll_schedule_employee', $name);
             }
         }
 
-        // Remove foreign keys from business_user
         if (Schema::hasTable('business_user')) {
-            $fks = $connection->select("
-                SELECT CONSTRAINT_NAME 
-                FROM information_schema.KEY_COLUMN_USAGE 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'business_user' 
-                AND REFERENCED_TABLE_NAME IS NOT NULL
-            ");
-
-            foreach ($fks as $fk) {
-                $connection->statement("ALTER TABLE business_user DROP FOREIGN KEY {$fk->CONSTRAINT_NAME}");
+            $constraints = $this->getForeignKeys($connection, $driver, 'business_user');
+            foreach ($constraints as $name) {
+                $this->dropForeignKey($connection, $driver, 'business_user', $name);
             }
+        }
+    }
+
+    /**
+     * Get foreign key constraint names for a table.
+     *
+     * @return array<int, string>
+     */
+    private function getForeignKeys($connection, string $driver, string $table): array
+    {
+        if ($driver === 'pgsql') {
+            $rows = $connection->select("
+                SELECT tc.constraint_name
+                FROM information_schema.table_constraints tc
+                WHERE tc.table_schema = 'public'
+                AND tc.table_name = ?
+                AND tc.constraint_type = 'FOREIGN KEY'
+            ", [$table]);
+
+            return array_map(fn ($row) => $row->constraint_name, $rows);
+        }
+
+        $rows = $connection->select('
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+        ', [$table]);
+
+        $names = [];
+        foreach ($rows as $row) {
+            $names[$row->CONSTRAINT_NAME] = true;
+        }
+
+        return array_keys($names);
+    }
+
+    private function dropForeignKey($connection, string $driver, string $table, string $constraintName): void
+    {
+        if ($driver === 'pgsql') {
+            $connection->statement("ALTER TABLE {$table} DROP CONSTRAINT \"{$constraintName}\"");
+        } else {
+            $connection->statement("ALTER TABLE {$table} DROP FOREIGN KEY {$constraintName}");
         }
     }
 

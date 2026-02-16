@@ -17,6 +17,81 @@ use Inertia\Inertia;
 
 class DashboardController extends Controller
 {
+    /**
+     * Get database-agnostic date extraction expression.
+     */
+    private function dateExtract(string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return $driver === 'pgsql' ? "({$column})::date" : "DATE({$column})";
+    }
+
+    /**
+     * Get database-agnostic date format expression.
+     */
+    private function dateFormat(string $column, string $format = '%Y-%m-%d'): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            $pgFormat = match ($format) {
+                '%Y-%m-%d' => 'YYYY-MM-DD',
+                '%Y-%m' => 'YYYY-MM',
+                default => 'YYYY-MM-DD',
+            };
+
+            return "to_char({$column}, '{$pgFormat}')";
+        } else {
+            return "DATE_FORMAT({$column}, '{$format}')";
+        }
+    }
+
+    /**
+     * Get database-agnostic year extraction.
+     */
+    private function yearExtract(string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return $driver === 'pgsql' ? "EXTRACT(YEAR FROM {$column})" : "YEAR({$column})";
+    }
+
+    /**
+     * Get database-agnostic quarter extraction.
+     */
+    private function quarterExtract(string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return $driver === 'pgsql' ? "EXTRACT(QUARTER FROM {$column})" : "QUARTER({$column})";
+    }
+
+    /**
+     * Get database-agnostic quarter format expression.
+     */
+    private function quarterFormat(string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'pgsql') {
+            return "CONCAT(EXTRACT(YEAR FROM {$column})::text, '-Q', EXTRACT(QUARTER FROM {$column})::text)";
+        } else {
+            return "CONCAT(YEAR({$column}), '-Q', QUARTER({$column}))";
+        }
+    }
+
+    /**
+     * Get database-agnostic year-week expression (ISO year * 100 + week, for grouping).
+     */
+    private function yearWeekExpr(string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return $driver === 'pgsql'
+            ? "(EXTRACT(ISOYEAR FROM {$column})::int * 100 + EXTRACT(WEEK FROM {$column})::int)"
+            : "YEARWEEK({$column}, 1)";
+    }
+
     public function __construct(
         private EscrowService $escrowService,
         private BillingService $billingService
@@ -191,37 +266,37 @@ class DashboardController extends Controller
         // Payment schedules - single query with conditional counts
         $paymentScheduleStats = PaymentSchedule::query()
             ->whereIn('business_id', $businessFilter)
-            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = "active" THEN 1 ELSE 0 END) as active')
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active")
             ->first();
 
         // Payroll schedules - single query with conditional counts
         $payrollScheduleStats = PayrollSchedule::query()
             ->whereIn('business_id', $businessFilter)
-            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = "active" THEN 1 ELSE 0 END) as active')
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active")
             ->first();
 
         // Payment jobs - single query with all status counts using JOIN
         $paymentJobStats = PaymentJob::query()
             ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
             ->whereIn('payment_schedules.business_id', $businessFilter)
-            ->selectRaw('
-                SUM(CASE WHEN payment_jobs.status = "pending" THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN payment_jobs.status = "processing" THEN 1 ELSE 0 END) as processing,
-                SUM(CASE WHEN payment_jobs.status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN payment_jobs.status = "failed" THEN 1 ELSE 0 END) as failed
-            ')
+            ->selectRaw("
+                SUM(CASE WHEN payment_jobs.status = 'pending' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN payment_jobs.status = 'processing' THEN 1 ELSE 0 END) as processing,
+                SUM(CASE WHEN payment_jobs.status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN payment_jobs.status = 'failed' THEN 1 ELSE 0 END) as failed
+            ")
             ->first();
 
         // Payroll jobs - single query with all status counts using JOIN
         $payrollJobStats = PayrollJob::query()
             ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
             ->whereIn('payroll_schedules.business_id', $businessFilter)
-            ->selectRaw('
-                SUM(CASE WHEN payroll_jobs.status = "pending" THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN payroll_jobs.status = "processing" THEN 1 ELSE 0 END) as processing,
-                SUM(CASE WHEN payroll_jobs.status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN payroll_jobs.status = "failed" THEN 1 ELSE 0 END) as failed
-            ')
+            ->selectRaw("
+                SUM(CASE WHEN payroll_jobs.status = 'pending' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN payroll_jobs.status = 'processing' THEN 1 ELSE 0 END) as processing,
+                SUM(CASE WHEN payroll_jobs.status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN payroll_jobs.status = 'failed' THEN 1 ELSE 0 END) as failed
+            ")
             ->first();
 
         $pending = ($paymentJobStats->pending ?? 0) + ($payrollJobStats->pending ?? 0);
@@ -258,13 +333,13 @@ class DashboardController extends Controller
             ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
             ->whereIn('payment_schedules.business_id', $businessFilter)
             ->whereBetween('payment_jobs.processed_at', [$currentMonthStart, $currentMonthEnd])
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN payment_jobs.status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN payment_jobs.status = "succeeded" THEN payment_jobs.amount ELSE 0 END) as total_amount,
-                SUM(CASE WHEN payment_jobs.status = "succeeded" THEN COALESCE(payment_jobs.fee, 0) ELSE 0 END) as total_fees,
-                AVG(CASE WHEN payment_jobs.status = "succeeded" THEN payment_jobs.amount ELSE NULL END) as avg_amount
-            ')
+                SUM(CASE WHEN payment_jobs.status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN payment_jobs.status = 'succeeded' THEN payment_jobs.amount ELSE 0 END) as total_amount,
+                SUM(CASE WHEN payment_jobs.status = 'succeeded' THEN COALESCE(payment_jobs.fee, 0) ELSE 0 END) as total_fees,
+                AVG(CASE WHEN payment_jobs.status = 'succeeded' THEN payment_jobs.amount ELSE NULL END) as avg_amount
+            ")
             ->first();
 
         // Payroll jobs financial stats - single query
@@ -272,13 +347,13 @@ class DashboardController extends Controller
             ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
             ->whereIn('payroll_schedules.business_id', $businessFilter)
             ->whereBetween('payroll_jobs.processed_at', [$currentMonthStart, $currentMonthEnd])
-            ->selectRaw('
+            ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN payroll_jobs.status = "succeeded" THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN payroll_jobs.status = "succeeded" THEN payroll_jobs.net_salary ELSE 0 END) as total_amount,
-                SUM(CASE WHEN payroll_jobs.status = "succeeded" THEN COALESCE(payroll_jobs.fee, 0) ELSE 0 END) as total_fees,
-                AVG(CASE WHEN payroll_jobs.status = "succeeded" THEN payroll_jobs.net_salary ELSE NULL END) as avg_amount
-            ')
+                SUM(CASE WHEN payroll_jobs.status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                SUM(CASE WHEN payroll_jobs.status = 'succeeded' THEN payroll_jobs.net_salary ELSE 0 END) as total_amount,
+                SUM(CASE WHEN payroll_jobs.status = 'succeeded' THEN COALESCE(payroll_jobs.fee, 0) ELSE 0 END) as total_fees,
+                AVG(CASE WHEN payroll_jobs.status = 'succeeded' THEN payroll_jobs.net_salary ELSE NULL END) as avg_amount
+            ")
             ->first();
 
         $totalJobs = ($paymentStats->total ?? 0) + ($payrollStats->total ?? 0);
@@ -348,25 +423,27 @@ class DashboardController extends Controller
 
         // Payment daily trends - combined into single query with both total and count
         // Note: DATE() in SELECT is fine; the index (status, processed_at) handles the WHERE clause
+        $dateExpr = $this->dateExtract('payment_jobs.processed_at');
         $paymentData = PaymentJob::query()
             ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
             ->whereIn('payment_schedules.business_id', $businessFilter)
             ->where('payment_jobs.status', 'succeeded')
             ->where('payment_jobs.processed_at', '>=', $startDate)
-            ->selectRaw('DATE(payment_jobs.processed_at) as date, SUM(payment_jobs.amount) as total, COUNT(*) as count')
-            ->groupBy('date')
+            ->selectRaw("{$dateExpr} as date, SUM(payment_jobs.amount) as total, COUNT(*) as count")
+            ->groupBy(DB::raw($dateExpr))
             ->get()
             ->keyBy('date')
             ->toArray();
 
         // Payroll daily trends - combined into single query
+        $dateExpr = $this->dateExtract('payroll_jobs.processed_at');
         $payrollData = PayrollJob::query()
             ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
             ->whereIn('payroll_schedules.business_id', $businessFilter)
             ->where('payroll_jobs.status', 'succeeded')
             ->where('payroll_jobs.processed_at', '>=', $startDate)
-            ->selectRaw('DATE(payroll_jobs.processed_at) as date, SUM(payroll_jobs.net_salary) as total, COUNT(*) as count')
-            ->groupBy('date')
+            ->selectRaw("{$dateExpr} as date, SUM(payroll_jobs.net_salary) as total, COUNT(*) as count")
+            ->groupBy(DB::raw($dateExpr))
             ->get()
             ->keyBy('date')
             ->toArray();
@@ -398,24 +475,26 @@ class DashboardController extends Controller
         $businessFilter = $businessId ? [$businessId] : $userBusinessIds;
         $startDate = now()->subWeeks(11)->startOfWeek();
 
-        // Payment weekly trends - single query
+        // Payment weekly trends - single query (year-week expression is driver-agnostic)
+        $weekExprPayment = $this->yearWeekExpr('payment_jobs.processed_at');
         $paymentWeekly = PaymentJob::query()
             ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
             ->whereIn('payment_schedules.business_id', $businessFilter)
             ->where('payment_jobs.status', 'succeeded')
             ->where('payment_jobs.processed_at', '>=', $startDate)
-            ->selectRaw('YEARWEEK(payment_jobs.processed_at, 1) as week, SUM(payment_jobs.amount) as total')
+            ->selectRaw("{$weekExprPayment} as week, SUM(payment_jobs.amount) as total")
             ->groupBy('week')
             ->pluck('total', 'week')
             ->toArray();
 
         // Payroll weekly trends - single query
+        $weekExprPayroll = $this->yearWeekExpr('payroll_jobs.processed_at');
         $payrollWeekly = PayrollJob::query()
             ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
             ->whereIn('payroll_schedules.business_id', $businessFilter)
             ->where('payroll_jobs.status', 'succeeded')
             ->where('payroll_jobs.processed_at', '>=', $startDate)
-            ->selectRaw('YEARWEEK(payroll_jobs.processed_at, 1) as week, SUM(payroll_jobs.net_salary) as total')
+            ->selectRaw("{$weekExprPayroll} as week, SUM(payroll_jobs.net_salary) as total")
             ->groupBy('week')
             ->pluck('total', 'week')
             ->toArray();
@@ -812,7 +891,7 @@ class DashboardController extends Controller
 
         switch ($frequency) {
             case 'weekly':
-                $dateFormat = 'YEARWEEK(processed_at, 1)';
+                $dateFormat = $this->yearWeekExpr('processed_at');
                 $labelKey = 'week';
                 $startDate = now()->subWeeks(11)->startOfWeek();
                 for ($i = 11; $i >= 0; $i--) {
@@ -826,7 +905,7 @@ class DashboardController extends Controller
                 break;
 
             case 'monthly':
-                $dateFormat = 'DATE_FORMAT(processed_at, "%Y-%m")';
+                $dateFormat = $this->dateFormat('processed_at', '%Y-%m');
                 $labelKey = 'month';
                 $startDate = now()->subMonths(5)->startOfMonth();
                 for ($i = 5; $i >= 0; $i--) {
@@ -839,7 +918,7 @@ class DashboardController extends Controller
                 break;
 
             case 'quarterly':
-                $dateFormat = 'CONCAT(YEAR(processed_at), "-Q", QUARTER(processed_at))';
+                $dateFormat = $this->quarterFormat('processed_at');
                 $labelKey = 'quarter';
                 $startDate = now()->subQuarters(7)->startOfQuarter();
                 for ($i = 7; $i >= 0; $i--) {
@@ -853,7 +932,7 @@ class DashboardController extends Controller
                 break;
 
             case 'yearly':
-                $dateFormat = 'YEAR(processed_at)';
+                $dateFormat = $this->yearExtract('processed_at');
                 $labelKey = 'year';
                 $startDate = now()->subYears(4)->startOfYear();
                 for ($i = 4; $i >= 0; $i--) {

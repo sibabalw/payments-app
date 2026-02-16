@@ -41,7 +41,6 @@ class ErrorClassificationService
             'Invalid status transition',
             'Validation failed',
             'Record not found',
-            'Duplicate entry',
         ];
 
         foreach ($permanentPatterns as $pattern) {
@@ -50,8 +49,34 @@ class ErrorClassificationService
             }
         }
 
-        // Database constraint violations
-        if ($code === '23000' || str_contains($message, 'Duplicate entry')) {
+        // Database unique/duplicate constraint violations (MySQL and PostgreSQL)
+        if ($this->isUniqueConstraintViolation($exception)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the exception is a unique constraint or duplicate key violation.
+     * Works for both MySQL and PostgreSQL so duplicate job insert or settlement
+     * assignment can be treated as "already done" (idempotent).
+     *
+     * MySQL: SQLSTATE 23000 (integrity constraint), message "Duplicate entry"
+     * PostgreSQL: SQLSTATE 23505 (unique_violation), message "unique constraint" / "duplicate key"
+     */
+    public function isUniqueConstraintViolation(\Throwable $exception): bool
+    {
+        $message = $exception->getMessage();
+        $code = $exception->getCode();
+
+        // MySQL/MariaDB
+        if ($code === '23000' || $code === 23000 || str_contains($message, 'Duplicate entry')) {
+            return true;
+        }
+
+        // PostgreSQL (SQLSTATE 23505 = unique_violation)
+        if ($code === '23505' || $code === 23505 || str_contains($message, 'unique constraint') || str_contains($message, 'duplicate key value')) {
             return true;
         }
 
