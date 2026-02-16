@@ -2,6 +2,43 @@
 
 use Illuminate\Support\Str;
 
+// Helper function to build Redis connection based on provider
+if (! function_exists('buildRedisConnection')) {
+    function buildRedisConnection(string $name): array
+    {
+        $provider = env('REDIS_PROVIDER', 'self-hosted');
+        $baseConfig = [
+            'max_retries' => env('REDIS_MAX_RETRIES', 3),
+            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
+            'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
+            'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
+        ];
+
+        if ($provider === 'upstash') {
+            // Upstash uses URL-based connection
+            // Format: redis://default:password@host:port
+            return array_merge($baseConfig, [
+                'url' => env('REDIS_URL'),
+                'host' => null,
+                'port' => null,
+                'username' => null,
+                'password' => null,
+                'database' => $name === 'cache' ? env('REDIS_CACHE_DB', '1') : env('REDIS_DB', '0'),
+            ]);
+        } else {
+            // Self-hosted Redis uses traditional host/port/auth
+            return array_merge($baseConfig, [
+                'url' => env('REDIS_URL'),
+                'host' => env('REDIS_HOST', '127.0.0.1'),
+                'username' => env('REDIS_USERNAME'),
+                'password' => env('REDIS_PASSWORD'),
+                'port' => env('REDIS_PORT', '6379'),
+                'database' => $name === 'cache' ? env('REDIS_CACHE_DB', '1') : env('REDIS_DB', '0'),
+            ]);
+        }
+    }
+}
+
 return [
 
     /*
@@ -61,6 +98,18 @@ return [
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? \Pdo\Mysql::ATTR_SSL_CA : \PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
+            // Read/write connections for bank-grade performance
+            'read' => [
+                'host' => [
+                    env('DB_READ_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'write' => [
+                'host' => [
+                    env('DB_WRITE_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'sticky' => env('DB_STICKY', true),
         ],
 
         'mariadb' => [
@@ -96,6 +145,18 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Read/write connections for bank-grade performance
+            'read' => [
+                'host' => [
+                    env('DB_READ_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'write' => [
+                'host' => [
+                    env('DB_WRITE_HOST', env('DB_HOST', '127.0.0.1')),
+                ],
+            ],
+            'sticky' => env('DB_STICKY', true),
         ],
 
         'sqlsrv' => [
@@ -140,6 +201,11 @@ return [
     | provides a richer body of commands than a typical key-value system
     | such as Memcached. You may define your connection settings here.
     |
+    | Supports both Upstash (managed Redis) and self-hosted Redis:
+    | - Upstash: Set REDIS_PROVIDER=upstash and provide REDIS_URL
+    |   Format: redis://default:password@host:port
+    | - Self-hosted: Set REDIS_PROVIDER=self-hosted and provide host/port/auth
+    |
     */
 
     'redis' => [
@@ -152,31 +218,9 @@ return [
             'persistent' => env('REDIS_PERSISTENT', false),
         ],
 
-        'default' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
-            'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_DB', '0'),
-            'max_retries' => env('REDIS_MAX_RETRIES', 3),
-            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
-            'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
-            'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
-        ],
+        'default' => buildRedisConnection('default'),
 
-        'cache' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
-            'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_CACHE_DB', '1'),
-            'max_retries' => env('REDIS_MAX_RETRIES', 3),
-            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
-            'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
-            'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
-        ],
+        'cache' => buildRedisConnection('cache'),
 
     ],
 

@@ -1,12 +1,14 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import InputError from '@/components/input-error';
-import AppLayout from '@/layouts/app-layout';
+import AdminLayout from '@/layouts/admin-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { CheckCircle, XCircle, Plus, Wallet } from 'lucide-react';
+import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -53,7 +55,7 @@ interface AdminEscrowProps {
         processed_at: string;
         fee_released_manually_at: string | null;
         payment_schedule: { name: string; business: { name: string } };
-        receiver: { name: string };
+        recipient: { name: string };
         escrow_deposit: { fee_amount: string } | null;
     }>;
     failedPayments: Array<{
@@ -64,7 +66,7 @@ interface AdminEscrowProps {
         processed_at: string;
         funds_returned_manually_at: string | null;
         payment_schedule: { name: string; business: { name: string } };
-        receiver: { name: string };
+        recipient: { name: string };
     }>;
 }
 
@@ -76,26 +78,63 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
         bank_reference: '',
     });
 
+    const [feeReleaseConfirmOpen, setFeeReleaseConfirmOpen] = useState(false);
+    const [fundReturnConfirmOpen, setFundReturnConfirmOpen] = useState(false);
+    const [paymentJobId, setPaymentJobId] = useState<number | null>(null);
+    const [confirmingDepositId, setConfirmingDepositId] = useState<number | null>(null);
+
     const submitDeposit = (e: React.FormEvent) => {
         e.preventDefault();
         post('/admin/escrow/deposits');
     };
 
     const confirmDeposit = (depositId: number, bankRef?: string) => {
-        router.post(`/admin/escrow/deposits/${depositId}/confirm`, {
-            bank_reference: bankRef || '',
-        });
+        router.post(
+            `/admin/escrow/deposits/${depositId}/confirm`,
+            {
+                bank_reference: bankRef || '',
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    // Page will refresh automatically with updated data
+                },
+                onError: (errors) => {
+                    console.error('Error confirming deposit:', errors);
+                },
+            }
+        );
     };
 
-    const recordFeeRelease = (paymentJobId: number) => {
-        if (confirm('Record that bank has released the fee for this payment?')) {
-            router.post(`/admin/escrow/payments/${paymentJobId}/fee-release`);
+    const recordFeeRelease = (id: number) => {
+        setPaymentJobId(id);
+        setFeeReleaseConfirmOpen(true);
+    };
+
+    const confirmFeeRelease = () => {
+        if (paymentJobId) {
+            router.post(`/admin/escrow/payments/${paymentJobId}/fee-release`, {}, {
+                onSuccess: () => {
+                    setFeeReleaseConfirmOpen(false);
+                    setPaymentJobId(null);
+                },
+            });
         }
     };
 
-    const recordFundReturn = (paymentJobId: number) => {
-        if (confirm('Record that bank has returned funds for this failed payment?')) {
-            router.post(`/admin/escrow/payments/${paymentJobId}/fund-return`);
+    const recordFundReturn = (id: number) => {
+        setPaymentJobId(id);
+        setFundReturnConfirmOpen(true);
+    };
+
+    const confirmFundReturn = () => {
+        if (paymentJobId) {
+            router.post(`/admin/escrow/payments/${paymentJobId}/fund-return`, {}, {
+                onSuccess: () => {
+                    setFundReturnConfirmOpen(false);
+                    setPaymentJobId(null);
+                },
+            });
         }
     };
 
@@ -107,7 +146,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
     };
 
     return (
-        <AppLayout breadcrumbs={breadcrumbs}>
+        <AdminLayout breadcrumbs={breadcrumbs}>
             <Head title="Admin - Escrow Management" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
@@ -313,7 +352,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                                         <div>
                                             <p className="font-semibold">{payment.payment_schedule.business.name}</p>
                                             <p className="text-sm text-muted-foreground">
-                                                {payment.payment_schedule.name} • {payment.receiver.name}
+                                                {payment.payment_schedule.name} • {payment.recipient.name}
                                             </p>
                                             <p className="text-sm font-medium">
                                                 {formatCurrency(payment.amount)} • Fee: {payment.escrow_deposit ? formatCurrency(payment.escrow_deposit.fee_amount) : 'N/A'}
@@ -351,7 +390,7 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                                         <div>
                                             <p className="font-semibold">{payment.payment_schedule.business.name}</p>
                                             <p className="text-sm text-muted-foreground">
-                                                {payment.payment_schedule.name} • {payment.receiver.name}
+                                                {payment.payment_schedule.name} • {payment.recipient.name}
                                             </p>
                                             <p className="text-sm font-medium">
                                                 {formatCurrency(payment.amount)}
@@ -376,6 +415,26 @@ export default function AdminEscrow({ pendingDeposits, confirmedDeposits, busine
                     </CardContent>
                 </Card>
             </div>
-        </AppLayout>
+
+            <ConfirmationDialog
+                open={feeReleaseConfirmOpen}
+                onOpenChange={setFeeReleaseConfirmOpen}
+                onConfirm={confirmFeeRelease}
+                title="Record Fee Release"
+                description="Record that the bank has released the fee for this payment?"
+                confirmText="Confirm"
+                variant="info"
+            />
+
+            <ConfirmationDialog
+                open={fundReturnConfirmOpen}
+                onOpenChange={setFundReturnConfirmOpen}
+                onConfirm={confirmFundReturn}
+                title="Record Fund Return"
+                description="Record that the bank has returned funds for this failed payment?"
+                confirmText="Confirm"
+                variant="info"
+            />
+        </AdminLayout>
     );
 }

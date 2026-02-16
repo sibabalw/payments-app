@@ -3,10 +3,13 @@
 namespace App\Services;
 
 use Carbon\Carbon;
-use Cron\CronExpression;
 
 class CronExpressionParser
 {
+    public function __construct(
+        protected CronExpressionService $cronService
+    ) {}
+
     /**
      * Parse a cron expression to extract date/time information
      * Returns array with 'date', 'time', and 'frequency' (if recurring)
@@ -14,7 +17,6 @@ class CronExpressionParser
     public function parse(string $cronExpression): ?array
     {
         try {
-            $cron = CronExpression::factory($cronExpression);
             $parts = explode(' ', $cronExpression);
 
             if (count($parts) !== 5) {
@@ -29,9 +31,8 @@ class CronExpressionParser
             $isWeekly = $day === '*' && $month === '*' && $weekday !== '*';
             $isMonthly = $day !== '*' && $month === '*' && $weekday === '*';
 
-            // Get next run date to extract the actual date/time
-            $nextRun = $cron->getNextRunDate(now());
-            $carbon = Carbon::instance($nextRun);
+            // Get next run date to extract the actual date/time (month-aware for monthly schedules)
+            $carbon = $this->cronService->getNextRunDate($cronExpression);
 
             $result = [
                 'date' => $carbon->format('Y-m-d'),
@@ -70,9 +71,7 @@ class CronExpressionParser
     public function extractDateTime(string $cronExpression): ?Carbon
     {
         try {
-            $cron = CronExpression::factory($cronExpression);
-            $nextRun = $cron->getNextRunDate(now());
-            return Carbon::instance($nextRun);
+            return $this->cronService->getNextRunDate($cronExpression);
         } catch (\Exception $e) {
             return null;
         }

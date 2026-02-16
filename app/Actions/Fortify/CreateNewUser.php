@@ -3,6 +3,7 @@
 namespace App\Actions\Fortify;
 
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Laravel\Fortify\Contracts\CreatesNewUsers;
@@ -30,10 +31,21 @@ class CreateNewUser implements CreatesNewUsers
             'password' => $this->passwordRules(),
         ])->validate();
 
-        return User::create([
-            'name' => $input['name'],
-            'email' => $input['email'],
-            'password' => $input['password'],
-        ]);
+        // Create user in transaction
+        $user = DB::transaction(function () use ($input) {
+            return User::create([
+                'name' => $input['name'],
+                'email' => $input['email'],
+                'password' => $input['password'],
+            ]);
+        });
+
+        // Queue email verification notification after transaction commits
+        // User is already committed, so queue directly
+        $user->sendEmailVerificationNotification();
+
+        // Welcome email will be sent after email verification
+
+        return $user;
     }
 }

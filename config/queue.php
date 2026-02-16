@@ -41,7 +41,37 @@ return [
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
-            'after_commit' => false,
+            'after_commit' => true,
+        ],
+
+        'high' => [
+            'driver' => env('QUEUE_DRIVER', 'database'),
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'high',
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 600), // 10 minutes for bulk operations
+            'after_commit' => true,
+            'block_for' => env('QUEUE_BLOCK_FOR', 5), // Wait up to 5 seconds for jobs
+        ],
+
+        'normal' => [
+            'driver' => env('QUEUE_DRIVER', 'database'),
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'normal',
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 600), // 10 minutes for bulk operations
+            'after_commit' => true,
+            'block_for' => env('QUEUE_BLOCK_FOR', 5),
+        ],
+
+        'low' => [
+            'driver' => env('QUEUE_DRIVER', 'database'),
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'low',
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 600),
+            'after_commit' => true,
+            'block_for' => env('QUEUE_BLOCK_FOR', 5),
         ],
 
         'beanstalkd' => [
@@ -68,8 +98,8 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
-            'block_for' => null,
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 600), // 10 minutes for bulk operations
+            'block_for' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5), // Wait up to 5 seconds for jobs
             'after_commit' => false,
         ],
 

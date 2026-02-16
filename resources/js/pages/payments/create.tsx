@@ -4,231 +4,403 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DatePicker } from '@/components/ui/date-picker';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, useForm } from '@inertiajs/react';
-import { isBusinessDay } from '@/lib/sa-holidays';
+import { Head, Link, useForm, router } from '@inertiajs/react';
+import { CalendarIcon, X, Plus } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { format } from 'date-fns';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
-    { title: 'Create', href: '#' },
+    { title: 'Payroll', href: '/payroll' },
+    { title: 'Bonuses', href: '/payroll/bonuses' },
+    { title: 'Add Bonus', href: '#' },
 ];
 
-interface PaymentsCreateProps {
-    businesses: Array<{ id: number; name: string }>;
-    receivers: Array<{ id: number; name: string }>;
-    selectedBusinessId?: number;
-    type?: string;
-    escrowBalance?: number | null;
-}
+export default function PaymentsCreate({ businesses, selectedBusinessId, employee, employees }: any) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const businessIdFromUrl = urlParams.get('business_id');
+    const employeeIdFromUrl = urlParams.get('employee_id');
 
-export default function PaymentsCreate({ businesses, receivers, selectedBusinessId, type = 'generic', escrowBalance }: PaymentsCreateProps) {
-    // Get next business day as default date
-    const getDefaultDate = () => {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        if (!isBusinessDay(tomorrow)) {
-            const next = new Date(tomorrow);
-            while (!isBusinessDay(next)) {
-                next.setDate(next.getDate() + 1);
-            }
-            return next;
-        }
-        return tomorrow;
-    };
+    const [whoGetsThis, setWhoGetsThis] = useState<'all' | 'select'>(employee?.id || employeeIdFromUrl ? 'select' : 'all');
+    const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>(employee?.id ? [employee.id] : []);
+    const [employeeSearch, setEmployeeSearch] = useState('');
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    const defaultDate = getDefaultDate();
-    const defaultTime = '09:00';
+    // Period selection - simple month picker
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const nextMonth = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0, 7);
+    const [selectedPeriod, setSelectedPeriod] = useState<string>(currentMonth);
 
     const { data, setData, post, processing, errors } = useForm({
-        business_id: selectedBusinessId || businesses[0]?.id || '',
-        type: type,
+        business_id: selectedBusinessId || businessIdFromUrl || businesses[0]?.id || '',
+        employee_id: employee?.id || employeeIdFromUrl || null,
+        employee_ids: [] as number[],
         name: '',
-        schedule_type: 'recurring',
-        scheduled_date: defaultDate.toISOString().split('T')[0],
-        scheduled_time: defaultTime,
-        frequency: 'daily',
+        type: 'fixed',
         amount: '',
-        currency: 'ZAR',
-        receiver_ids: [] as number[],
+        adjustment_type: 'addition', // Bonuses are usually additions
+        period_start: '',
+        period_end: '',
+        is_active: true,
+        description: '',
     });
 
-    const submit = (e: React.FormEvent) => {
+    // Auto-set period from selected month
+    useEffect(() => {
+        if (selectedPeriod) {
+            const [year, month] = selectedPeriod.split('-');
+            const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
+            const endDate = new Date(parseInt(year), parseInt(month), 0);
+            setData('period_start', format(startDate, 'yyyy-MM-dd'));
+            setData('period_end', format(endDate, 'yyyy-MM-dd'));
+        }
+    }, [selectedPeriod]);
+
+    // Employee search
+    useEffect(() => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        if (!employeeSearch.trim() || !data.business_id) {
+            setSearchResults([]);
+            return;
+        }
+
+        searchTimeoutRef.current = setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const params = new URLSearchParams({
+                    business_id: String(data.business_id),
+                    query: employeeSearch.trim(),
+                });
+
+                const response = await fetch(`/employees/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+
+                if (response.ok) {
+                    const results = await response.json();
+                    setSearchResults(results);
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 300);
+    }, [employeeSearch, data.business_id]);
+
+    const handleAddEmployee = (employee: any) => {
+        if (!selectedEmployeeIds.includes(employee.id)) {
+            setSelectedEmployeeIds([...selectedEmployeeIds, employee.id]);
+            setData('employee_ids', [...selectedEmployeeIds, employee.id]);
+        }
+        setEmployeeSearch('');
+        setSearchResults([]);
+    };
+
+    const handleRemoveEmployee = (employeeId: number) => {
+        const newIds = selectedEmployeeIds.filter(id => id !== employeeId);
+        setSelectedEmployeeIds(newIds);
+        setData('employee_ids', newIds);
+        if (newIds.length === 0) {
+            setData('employee_id', null);
+        }
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        post('/payments');
+        
+        // Set employee_ids based on selection
+        if (whoGetsThis === 'all') {
+            setData('employee_id', null);
+            setData('employee_ids', []);
+        } else if (whoGetsThis === 'select') {
+            if (selectedEmployeeIds.length === 1) {
+                // Single employee - use employee_id
+                setData('employee_id', selectedEmployeeIds[0]);
+                setData('employee_ids', []);
+            } else {
+                // Multiple employees - use employee_ids
+                setData('employee_id', null);
+                setData('employee_ids', selectedEmployeeIds);
+            }
+        }
+        
+        post('/payroll/bonuses');
     };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Create Payment Schedule" />
+            <Head title="Add Bonus" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold">Add Bonus</h1>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            One-time bonus or allowance for a specific period
+                        </p>
+                    </div>
+                </div>
+
+                {employee && (
+                    <div className="p-3 bg-muted rounded-lg">
+                        <p className="text-sm text-muted-foreground">Bonus for:</p>
+                        <p className="font-medium">{employee.name}</p>
+                    </div>
+                )}
+
                 <Card>
                     <CardHeader>
-                        <CardTitle>Create Payment Schedule</CardTitle>
+                        <CardTitle>Bonus Details</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={submit} className="space-y-4">
-                            <div>
-                                <Label htmlFor="business_id">Business</Label>
-                                <Select
-                                    value={String(data.business_id)}
-                                    onValueChange={(value) => setData('business_id', Number(value))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {businesses.map((business) => (
-                                            <SelectItem key={business.id} value={String(business.id)}>
-                                                {business.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <InputError message={errors.business_id} />
-                            </div>
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            {businesses && businesses.length > 0 && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="business_id">Business</Label>
+                                    <Select
+                                        value={String(data.business_id)}
+                                        onValueChange={(value) => setData('business_id', value)}
+                                    >
+                                        <SelectTrigger id="business_id">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {businesses.map((business: any) => (
+                                                <SelectItem key={business.id} value={String(business.id)}>
+                                                    {business.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <InputError message={errors.business_id} />
+                                </div>
+                            )}
 
-                            <div>
-                                <Label htmlFor="name">Schedule Name</Label>
+                            {!employee && (
+                                <div className="space-y-4">
+                                    <Label>Who gets this?</Label>
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="all_employees"
+                                            checked={whoGetsThis === 'all'}
+                                            onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                    setWhoGetsThis('all');
+                                                    setSelectedEmployeeIds([]);
+                                                    setData('employee_id', null);
+                                                    setData('employee_ids', []);
+                                                }
+                                            }}
+                                        />
+                                        <Label htmlFor="all_employees" className="cursor-pointer font-normal">
+                                            All Employees
+                                        </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="select_employees"
+                                            checked={whoGetsThis === 'select'}
+                                            onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                    setWhoGetsThis('select');
+                                                }
+                                            }}
+                                        />
+                                        <Label htmlFor="select_employees" className="cursor-pointer font-normal">
+                                            Select Employees
+                                        </Label>
+                                    </div>
+                                    <InputError message={errors.employee_id} />
+                                </div>
+                            )}
+
+                            {whoGetsThis === 'select' && !employee && (
+                                <div className="space-y-2">
+                                    <Label>Select Employees</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" variant="outline" className="w-full justify-start">
+                                                <Plus className="mr-2 h-4 w-4" />
+                                                {isSearching ? 'Searching...' : 'Search and add employees'}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-80 p-0" align="start">
+                                            <div className="p-2">
+                                                <Input
+                                                    placeholder="Search employees..."
+                                                    value={employeeSearch}
+                                                    onChange={(e) => setEmployeeSearch(e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="max-h-60 overflow-auto">
+                                                {searchResults.length > 0 ? (
+                                                    <div className="p-2 space-y-1">
+                                                        {searchResults.map((emp: any) => (
+                                                            <Button
+                                                                key={emp.id}
+                                                                type="button"
+                                                                variant="ghost"
+                                                                className="w-full justify-start"
+                                                                onClick={() => handleAddEmployee(emp)}
+                                                                disabled={selectedEmployeeIds.includes(emp.id)}
+                                                            >
+                                                                {emp.name}
+                                                                {emp.email && (
+                                                                    <span className="text-xs text-muted-foreground ml-2">
+                                                                        ({emp.email})
+                                                                    </span>
+                                                                )}
+                                                            </Button>
+                                                        ))}
+                                                    </div>
+                                                ) : employeeSearch && !isSearching && (
+                                                    <div className="p-4 text-center text-sm text-muted-foreground">
+                                                        No employees found
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+
+                                    {selectedEmployeeIds.length > 0 && (
+                                        <div className="space-y-2 mt-2">
+                                            {selectedEmployeeIds.map((empId) => {
+                                                const emp = employees?.find((e: any) => e.id === empId);
+                                                if (!emp) return null;
+                                                return (
+                                                    <div key={empId} className="flex items-center justify-between p-2 border rounded-md">
+                                                        <span>{emp.name}</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6"
+                                                            onClick={() => handleRemoveEmployee(empId)}
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <Label htmlFor="name">Bonus Type</Label>
                                 <Input
                                     id="name"
                                     value={data.name}
                                     onChange={(e) => setData('name', e.target.value)}
+                                    placeholder="e.g., Performance Bonus, Year-End Bonus, Allowance"
                                     required
                                 />
                                 <InputError message={errors.name} />
                             </div>
 
-                            <div>
-                                <Label htmlFor="schedule_type">Schedule Type</Label>
+                            <div className="space-y-2">
+                                <Label htmlFor="type">Amount Type</Label>
                                 <Select
-                                    value={data.schedule_type}
-                                    onValueChange={(value) => setData('schedule_type', value)}
+                                    value={data.type}
+                                    onValueChange={(value) => setData('type', value as 'fixed' | 'percentage')}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger id="type">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="recurring">Recurring Payment</SelectItem>
-                                        <SelectItem value="one_time">One-time Payment</SelectItem>
+                                        <SelectItem value="fixed">Fixed amount</SelectItem>
+                                        <SelectItem value="percentage">Percentage of salary</SelectItem>
                                     </SelectContent>
                                 </Select>
-                                <InputError message={errors.schedule_type} />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    {data.schedule_type === 'one_time' 
-                                        ? 'Payment will execute once at the scheduled time and then be cancelled'
-                                        : 'Payment will execute repeatedly based on the selected frequency'}
-                                </p>
+                                <InputError message={errors.type} />
                             </div>
 
-                            <div>
-                                <Label>Schedule Date & Time</Label>
-                                <DatePicker
-                                    date={data.scheduled_date ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00')) : undefined}
-                                    onDateChange={(date) => {
-                                        if (date) {
-                                            setData('scheduled_date', date.toISOString().split('T')[0]);
-                                            setData('scheduled_time', date.toTimeString().slice(0, 5));
-                                        }
-                                    }}
-                                    time={data.scheduled_time}
-                                    onTimeChange={(time) => setData('scheduled_time', time)}
-                                    showTime={true}
-                                />
-                                <InputError message={errors.scheduled_date} />
-                                <InputError message={errors.scheduled_time} />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    Weekends and South Africa public holidays are not allowed
-                                </p>
-                            </div>
-
-                            {data.schedule_type === 'recurring' && (
-                                <div>
-                                    <Label htmlFor="frequency">Frequency</Label>
-                                    <Select
-                                        value={data.frequency}
-                                        onValueChange={(value) => setData('frequency', value)}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="daily">Daily</SelectItem>
-                                            <SelectItem value="weekly">Weekly</SelectItem>
-                                            <SelectItem value="monthly">Monthly</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    <InputError message={errors.frequency} />
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        {data.frequency === 'daily' && 'Payment will execute every day at the selected time'}
-                                        {data.frequency === 'weekly' && 'Payment will execute every week on the same weekday at the selected time'}
-                                        {data.frequency === 'monthly' && 'Payment will execute every month on the same day at the selected time'}
-                                    </p>
-                                </div>
-                            )}
-
-                            <div>
-                                <Label htmlFor="amount">Amount (ZAR)</Label>
+                            <div className="space-y-2">
+                                <Label htmlFor="amount">
+                                    {data.type === 'percentage' ? 'Percentage' : 'Amount'} 
+                                    {data.type === 'percentage' && ' (0-100)'}
+                                </Label>
                                 <Input
                                     id="amount"
                                     type="number"
-                                    step="0.01"
+                                    step={data.type === 'percentage' ? '0.01' : '0.01'}
+                                    min="0"
+                                    max={data.type === 'percentage' ? '100' : undefined}
                                     value={data.amount}
                                     onChange={(e) => setData('amount', e.target.value)}
+                                    placeholder={data.type === 'percentage' ? 'e.g., 5' : 'e.g., 5000'}
                                     required
                                 />
                                 <InputError message={errors.amount} />
-                                {escrowBalance !== null && escrowBalance !== undefined && (
-                                    <div className="mt-2">
-                                        <p className="text-sm text-muted-foreground">
-                                            Available Escrow Balance: {new Intl.NumberFormat('en-ZA', {
-                                                style: 'currency',
-                                                currency: 'ZAR',
-                                            }).format(escrowBalance)}
-                                        </p>
-                                        {data.amount && Number(data.amount) > escrowBalance && (
-                                            <p className="text-sm text-red-600 dark:text-red-400 mt-1 font-medium">
-                                                ⚠️ Insufficient escrow balance. Please make a deposit first.
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
                             </div>
 
-                            <div>
-                                <Label>Receivers</Label>
-                                <div className="space-y-2 mt-2">
-                                    {receivers.map((receiver) => (
-                                        <label key={receiver.id} className="flex items-center space-x-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={data.receiver_ids.includes(receiver.id)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                        setData('receiver_ids', [...data.receiver_ids, receiver.id]);
-                                                    } else {
-                                                        setData('receiver_ids', data.receiver_ids.filter(id => id !== receiver.id));
-                                                    }
-                                                }}
-                                            />
-                                            <span>{receiver.name}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                                <InputError message={errors.receiver_ids} />
+                            <div className="space-y-2">
+                                <Label htmlFor="period">For Period</Label>
+                                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                                    <SelectTrigger id="period">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value={currentMonth}>
+                                            {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (Current month)
+                                        </SelectItem>
+                                        <SelectItem value={nextMonth}>
+                                            {new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (Next month)
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <InputError message={errors.period_start} />
+                                <p className="text-xs text-muted-foreground">
+                                    Period: {data.period_start && data.period_end 
+                                        ? `${new Date(data.period_start).toLocaleDateString()} - ${new Date(data.period_end).toLocaleDateString()}`
+                                        : 'Select a month'
+                                    }
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="description">Description (Optional)</Label>
+                                <Textarea
+                                    id="description"
+                                    value={data.description}
+                                    onChange={(e) => setData('description', e.target.value)}
+                                    placeholder="Add any notes about this bonus"
+                                    rows={3}
+                                />
+                                <InputError message={errors.description} />
+                            </div>
+
+                            <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                                <p className="text-sm text-blue-900 dark:text-blue-100">
+                                    <strong>Note:</strong> This bonus will be included in the payroll for the selected period only.
+                                </p>
                             </div>
 
                             <div className="flex gap-2">
-                                <Button type="submit" disabled={processing}>
-                                    Create Schedule
-                                </Button>
-                                <Link href="/payments">
+                                <Link href="/payroll/bonuses">
                                     <Button type="button" variant="outline">
                                         Cancel
                                     </Button>
                                 </Link>
+                                <Button type="submit" disabled={processing}>
+                                    {processing ? 'Creating...' : 'Create Bonus'}
+                                </Button>
                             </div>
                         </form>
                     </CardContent>

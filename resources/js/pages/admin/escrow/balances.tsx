@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import AppLayout from '@/layouts/app-layout';
+import AdminLayout from '@/layouts/admin-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/react';
 import { ArrowLeft } from 'lucide-react';
@@ -32,7 +32,7 @@ export default function Balances({ businesses }: BalancesProps) {
     };
 
     return (
-        <AppLayout breadcrumbs={breadcrumbs}>
+        <AdminLayout breadcrumbs={breadcrumbs}>
             <Head title="Admin - Business Balances" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
@@ -90,6 +90,6 @@ export default function Balances({ businesses }: BalancesProps) {
                     )}
                 </div>
             </div>
-        </AppLayout>
+        </AdminLayout>
     );
 }

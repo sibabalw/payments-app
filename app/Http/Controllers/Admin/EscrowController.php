@@ -16,8 +16,7 @@ class EscrowController extends Controller
 {
     public function __construct(
         protected EscrowService $escrowService
-    ) {
-    }
+    ) {}
 
     /**
      * Display escrow management dashboard.
@@ -48,7 +47,7 @@ class EscrowController extends Controller
         $succeededPayments = PaymentJob::where('status', 'succeeded')
             ->whereNull('fee_released_manually_at')
             ->whereNotNull('escrow_deposit_id')
-            ->with(['paymentSchedule.business', 'receiver', 'escrowDeposit'])
+            ->with(['paymentSchedule.business', 'recipient', 'escrowDeposit'])
             ->orderBy('processed_at', 'desc')
             ->limit(20)
             ->get();
@@ -56,7 +55,7 @@ class EscrowController extends Controller
         $failedPayments = PaymentJob::where('status', 'failed')
             ->whereNull('funds_returned_manually_at')
             ->whereNotNull('escrow_deposit_id')
-            ->with(['paymentSchedule.business', 'receiver', 'escrowDeposit'])
+            ->with(['paymentSchedule.business', 'recipient', 'escrowDeposit'])
             ->orderBy('processed_at', 'desc')
             ->limit(20)
             ->get();
@@ -168,18 +167,35 @@ class EscrowController extends Controller
             $totalFees = $deposits->sum('fee_amount');
             $totalAuthorized = $deposits->sum('authorized_amount');
 
-            $used = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-                $query->where('business_id', $business->id);
-            })
-            ->whereNotNull('escrow_deposit_id')
-            ->whereIn('status', ['succeeded', 'processing'])
-            ->sum('amount');
+            $paymentJobsUsed = PaymentJob::query()
+                ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+                ->where('payment_schedules.business_id', $business->id)
+                ->whereNotNull('payment_jobs.escrow_deposit_id')
+                ->whereIn('payment_jobs.status', ['succeeded', 'processing'])
+                ->sum('payment_jobs.amount');
 
-            $returned = PaymentJob::whereHas('paymentSchedule', function ($query) use ($business) {
-                $query->where('business_id', $business->id);
-            })
-            ->whereNotNull('funds_returned_manually_at')
-            ->sum('amount');
+            $payrollJobsUsed = \App\Models\PayrollJob::query()
+                ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+                ->where('payroll_schedules.business_id', $business->id)
+                ->whereNotNull('payroll_jobs.escrow_deposit_id')
+                ->whereIn('payroll_jobs.status', ['succeeded', 'processing'])
+                ->sum('payroll_jobs.gross_salary');
+
+            $used = $paymentJobsUsed + $payrollJobsUsed;
+
+            $paymentJobsReturned = PaymentJob::query()
+                ->join('payment_schedules', 'payment_jobs.payment_schedule_id', '=', 'payment_schedules.id')
+                ->where('payment_schedules.business_id', $business->id)
+                ->whereNotNull('payment_jobs.funds_returned_manually_at')
+                ->sum('payment_jobs.amount');
+
+            $payrollJobsReturned = \App\Models\PayrollJob::query()
+                ->join('payroll_schedules', 'payroll_jobs.payroll_schedule_id', '=', 'payroll_schedules.id')
+                ->where('payroll_schedules.business_id', $business->id)
+                ->whereNotNull('payroll_jobs.funds_returned_manually_at')
+                ->sum('payroll_jobs.gross_salary');
+
+            $returned = $paymentJobsReturned + $payrollJobsReturned;
 
             return [
                 'id' => $business->id,

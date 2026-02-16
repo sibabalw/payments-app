@@ -1,15 +1,37 @@
+import ConfirmationDialog from '@/components/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { cronToHumanReadable } from '@/lib/cronUtils';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Payroll', href: '/payroll' },
 ];
 
+function formatNextRunDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    };
+    return date.toLocaleDateString('en-US', options);
+}
+
 export default function PayrollIndex({ schedules, filters }: any) {
+    const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+    const [scheduleToCancel, setScheduleToCancel] = useState<number | null>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [scheduleToDelete, setScheduleToDelete] = useState<number | null>(null);
+    const [scheduleToDeleteName, setScheduleToDeleteName] = useState<string>('');
+
     const handlePause = (id: number) => {
         router.post(`/payroll/${id}/pause`);
     };
@@ -18,101 +40,179 @@ export default function PayrollIndex({ schedules, filters }: any) {
         router.post(`/payroll/${id}/resume`);
     };
 
+    const handleCancel = (id: number) => {
+        setScheduleToCancel(id);
+        setCancelConfirmOpen(true);
+    };
+
+    const confirmCancel = () => {
+        if (scheduleToCancel) {
+            router.post(`/payroll/${scheduleToCancel}/cancel`, {
+                onSuccess: () => {
+                    setCancelConfirmOpen(false);
+                    setScheduleToCancel(null);
+                },
+            });
+        }
+    };
+
+    const handleDelete = (id: number, name: string) => {
+        setScheduleToDelete(id);
+        setScheduleToDeleteName(name);
+        setDeleteConfirmOpen(true);
+    };
+
+    const confirmDelete = () => {
+        if (scheduleToDelete) {
+            router.delete(`/payroll/${scheduleToDelete}`, {
+                onSuccess: () => {
+                    setDeleteConfirmOpen(false);
+                    setScheduleToDelete(null);
+                    setScheduleToDeleteName('');
+                },
+            });
+        }
+    };
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Payroll" />
             <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold">Payroll Schedules</h1>
+                    <div className="flex gap-2">
+                        <Link href="/employees/create">
+                            <Button variant="outline">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add Employee
+                            </Button>
+                        </Link>
                     <Link href="/payroll/create">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Create Payroll
                         </Button>
                     </Link>
+                    </div>
                 </div>
 
-                <div className="grid gap-4">
-                    {schedules?.data?.map((schedule: any) => (
-                        <Card key={schedule.id}>
-                            <CardHeader>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <CardTitle>{schedule.name}</CardTitle>
-                                        <p className="text-sm text-muted-foreground mt-1">
-                                            {schedule.receivers?.length || 0} employee(s) • {schedule.frequency}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                                schedule.schedule_type === 'one_time'
-                                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-                                            }`}
-                                        >
-                                            {schedule.schedule_type === 'one_time' ? 'One-time' : 'Recurring'}
-                                        </span>
-                                        <span
-                                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                                schedule.status === 'active'
-                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                                    : schedule.status === 'paused'
-                                                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                                                      : schedule.schedule_type === 'one_time' && schedule.status === 'cancelled'
-                                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                        : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
-                                            }`}
-                                        >
-                                            {schedule.schedule_type === 'one_time' && schedule.status === 'cancelled' ? 'Completed' : schedule.status}
-                                        </span>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-2xl font-bold">
-                                            {schedule.currency} {schedule.amount}
-                                        </p>
-                                        {schedule.next_run_at && (
-                                            <p className="text-sm text-muted-foreground">
-                                                Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                {schedules?.data && schedules.data.length > 0 ? (
+                    <div className="grid gap-4">
+                        {schedules.data.map((schedule: any) => (
+                            <Card key={schedule.id}>
+                                <CardHeader>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <CardTitle>{schedule.name}</CardTitle>
+                                            <p className="text-sm text-muted-foreground mt-1">
+                                                {schedule.employees?.length || 0} employee(s) • {cronToHumanReadable(schedule.frequency)}
                                             </p>
-                                        )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span
+                                                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                                                    schedule.schedule_type === 'one_time'
+                                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                                                        : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                                                }`}
+                                            >
+                                                {schedule.schedule_type === 'one_time' ? 'One-time' : 'Recurring'}
+                                            </span>
+                                            <span
+                                                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                                                    schedule.status === 'active'
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                                        : schedule.status === 'paused'
+                                                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                                                          : schedule.schedule_type === 'one_time' && schedule.status === 'cancelled'
+                                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                                                            : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                                }`}
+                                            >
+                                                {schedule.schedule_type === 'one_time' && schedule.status === 'cancelled' ? 'Completed' : schedule.status}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        {schedule.status === 'active' && (
-                                            <Button variant="outline" size="sm" onClick={() => handlePause(schedule.id)}>
-                                                Pause
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-2xl font-bold">
+                                                {schedule.currency} {schedule.amount}
+                                            </p>
+                                            {schedule.next_run_at && (
+                                                <p className="text-sm text-muted-foreground">
+                                                    Next run: {formatNextRunDate(schedule.next_run_at)}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {schedule.status === 'active' && (
+                                                <Button variant="outline" size="sm" onClick={() => handlePause(schedule.id)}>
+                                                    Pause
+                                                </Button>
+                                            )}
+                                            {schedule.status === 'paused' && (
+                                                <Button variant="outline" size="sm" onClick={() => handleResume(schedule.id)}>
+                                                    Resume
+                                                </Button>
+                                            )}
+                                            {schedule.status !== 'cancelled' && (
+                                                <Button variant="outline" size="sm" onClick={() => handleCancel(schedule.id)}>
+                                                    Cancel
+                                                </Button>
+                                            )}
+                                            <Link href={`/payroll/${schedule.id}/edit`}>
+                                                <Button variant="outline" size="sm">
+                                                    Edit
+                                                </Button>
+                                            </Link>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => handleDelete(schedule.id, schedule.name)}
+                                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+                                            >
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Delete
                                             </Button>
-                                        )}
-                                        {schedule.status === 'paused' && (
-                                            <Button variant="outline" size="sm" onClick={() => handleResume(schedule.id)}>
-                                                Resume
-                                            </Button>
-                                        )}
-                                        {schedule.status !== 'cancelled' && (
-                                            <Button variant="outline" size="sm" onClick={() => {
-                                                if (confirm('Are you sure you want to cancel this schedule?')) {
-                                                    router.post(`/payroll/${schedule.id}/cancel`);
-                                                }
-                                            }}>
-                                                Cancel
-                                            </Button>
-                                        )}
-                                        <Link href={`/payroll/${schedule.id}/edit`}>
-                                            <Button variant="outline" size="sm">
-                                                Edit
-                                            </Button>
-                                        </Link>
+                                        </div>
                                     </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                ) : (
+                    <Card>
+                        <CardContent className="py-10 text-center">
+                            <p className="text-muted-foreground">No payroll schedules found.</p>
+                            <Link href="/payroll/create" className="mt-4 inline-block">
+                                <Button>Create your first payroll schedule</Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                )}
             </div>
+
+            <ConfirmationDialog
+                open={cancelConfirmOpen}
+                onOpenChange={setCancelConfirmOpen}
+                onConfirm={confirmCancel}
+                title="Are you sure you want to cancel this schedule?"
+                description="This action cannot be undone. The payroll schedule will be cancelled and no further payroll will be processed."
+                confirmText="Cancel Schedule"
+                variant="destructive"
+            />
+
+            <ConfirmationDialog
+                open={deleteConfirmOpen}
+                onOpenChange={setDeleteConfirmOpen}
+                onConfirm={confirmDelete}
+                title="Permanently Delete Payroll Schedule"
+                description={`Are you sure you want to permanently delete "${scheduleToDeleteName}"? This action cannot be undone and will permanently remove the schedule and all associated data.`}
+                confirmText="Delete Permanently"
+                variant="destructive"
+            />
         </AppLayout>
     );
 }

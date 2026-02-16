@@ -9,8 +9,7 @@ class PaymentScheduleObserver
 {
     public function __construct(
         protected AuditService $auditService
-    ) {
-    }
+    ) {}
 
     /**
      * Handle the PaymentSchedule "created" event.
@@ -41,13 +40,18 @@ class PaymentScheduleObserver
 
     /**
      * Handle the PaymentSchedule "deleted" event.
+     * Note: Audit logging is handled in the controller before deletion
+     * to ensure all related data is captured. This observer only handles
+     * cascade deletion of pivot table entries.
      */
     public function deleted(PaymentSchedule $paymentSchedule): void
     {
-        $this->auditService->log(
-            'payment_schedule.deleted',
-            $paymentSchedule,
-            $paymentSchedule->getAttributes()
-        );
+        // Cascade delete: Remove pivot table entries (no FK constraint)
+        \Illuminate\Support\Facades\DB::table('payment_schedule_recipient')
+            ->where('payment_schedule_id', $paymentSchedule->id)
+            ->delete();
+
+        // Audit logging is done in PaymentScheduleController::destroy() before deletion
+        // to ensure comprehensive data capture including related recipients
     }
 }

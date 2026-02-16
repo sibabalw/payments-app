@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Business extends Model
 {
@@ -15,6 +16,7 @@ class Business extends Model
     protected $fillable = [
         'user_id',
         'name',
+        'logo',
         'business_type',
         'status',
         'status_reason',
@@ -26,14 +28,24 @@ class Business extends Model
         'website',
         'street_address',
         'city',
+        'province',
         'postal_code',
         'country',
         'description',
         'contact_person_name',
+        'escrow_balance', // CACHED PROJECTION: Ledger is source of truth. This is for performance only.
+        'is_frozen', // Account frozen due to reconciliation discrepancy
+        'hold_amount', // Amount on hold for pending transactions
+        'bank_account_details',
+        'version',
     ];
 
     protected $casts = [
         'status_changed_at' => 'datetime',
+        'escrow_balance' => 'decimal:2',
+        'is_frozen' => 'boolean',
+        'hold_amount' => 'decimal:2',
+        'bank_account_details' => 'array',
     ];
 
     public function owner(): BelongsTo
@@ -48,21 +60,30 @@ class Business extends Model
             ->withTimestamps();
     }
 
-    public function receivers(): HasMany
-    {
-        return $this->hasMany(Receiver::class);
-    }
-
     public function paymentSchedules(): HasMany
     {
         return $this->hasMany(PaymentSchedule::class);
+    }
+
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class);
+    }
+
+    public function recipients(): HasMany
+    {
+        return $this->hasMany(Recipient::class);
+    }
+
+    public function payrollSchedules(): HasMany
+    {
+        return $this->hasMany(PayrollSchedule::class);
     }
 
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
     }
-
 
     public function escrowDeposits(): HasMany
     {
@@ -72,6 +93,26 @@ class Business extends Model
     public function monthlyBillings(): HasMany
     {
         return $this->hasMany(MonthlyBilling::class);
+    }
+
+    public function adjustments(): HasMany
+    {
+        return $this->hasMany(Adjustment::class)->whereNull('employee_id');
+    }
+
+    public function timeEntries(): HasMany
+    {
+        return $this->hasMany(TimeEntry::class);
+    }
+
+    public function leaveEntries(): HasMany
+    {
+        return $this->hasMany(LeaveEntry::class);
+    }
+
+    public function templates(): HasMany
+    {
+        return $this->hasMany(BusinessTemplate::class);
     }
 
     /**
@@ -135,7 +176,7 @@ class Business extends Model
      */
     public function updateStatus(string $status, ?string $reason = null): void
     {
-        if (!in_array($status, ['active', 'suspended', 'banned'])) {
+        if (! in_array($status, ['active', 'suspended', 'banned'])) {
             throw new \InvalidArgumentException("Invalid status: {$status}");
         }
 
@@ -144,5 +185,59 @@ class Business extends Model
             'status_reason' => $reason,
             'status_changed_at' => now(),
         ]);
+    }
+
+    /**
+     * Check if business has bank account details configured.
+     */
+    public function hasBankAccountDetails(): bool
+    {
+        return ! empty($this->bank_account_details) && is_array($this->bank_account_details);
+    }
+
+    /**
+     * Increment escrow balance with optimistic locking
+     */
+    public function incrementEscrowBalance(float $amount): bool
+    {
+        $currentVersion = $this->version ?? 1;
+        $updated = $this->newQueryWithoutScopes()
+            ->where('id', $this->id)
+            ->where('version', $currentVersion)
+            ->update([
+                'escrow_balance' => DB::raw("escrow_balance + {$amount}"),
+                'version' => $currentVersion + 1,
+            ]);
+
+        if ($updated > 0) {
+            $this->refresh();
+
+            return true;
+        }
+
+        throw new \RuntimeException('Optimistic locking failed: escrow balance was modified by another process.');
+    }
+
+    /**
+     * Decrement escrow balance with optimistic locking
+     */
+    public function decrementEscrowBalance(float $amount): bool
+    {
+        $currentVersion = $this->version ?? 1;
+        $updated = $this->newQueryWithoutScopes()
+            ->where('id', $this->id)
+            ->where('version', $currentVersion)
+            ->update([
+                'escrow_balance' => DB::raw("escrow_balance - {$amount}"),
+                'version' => $currentVersion + 1,
+            ]);
+
+        if ($updated > 0) {
+            $this->refresh();
+
+            return true;
+        }
+
+        throw new \RuntimeException('Optimistic locking failed: escrow balance was modified by another process.');
     }
 }

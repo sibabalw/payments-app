@@ -7,10 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DatePicker } from '@/components/ui/date-picker';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import InputError from '@/components/input-error';
 import { isBusinessDay } from '@/lib/sa-holidays';
+import { Plus, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 
-export default function PayrollCreate({ businesses, receivers, selectedBusinessId }: any) {
+export default function PayrollCreate({ businesses, employees, selectedBusinessId, escrowBalance }: any) {
     // Get next business day as default date
     const getDefaultDate = () => {
         const tomorrow = new Date();
@@ -28,21 +32,92 @@ export default function PayrollCreate({ businesses, receivers, selectedBusinessI
     const defaultDate = getDefaultDate();
     const defaultTime = '09:00';
 
+    const [whoGetsThis, setWhoGetsThis] = useState<'all' | 'select'>('all');
+    const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>([]);
+    const [employeeSearch, setEmployeeSearch] = useState('');
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
     const { data, setData, post, processing, errors } = useForm({
         business_id: selectedBusinessId || businesses[0]?.id || '',
-        type: 'payroll',
         name: '',
         schedule_type: 'recurring',
         scheduled_date: defaultDate.toISOString().split('T')[0],
         scheduled_time: defaultTime,
         frequency: 'monthly',
-        amount: '',
-        currency: 'ZAR',
-        receiver_ids: [] as number[],
+        employee_ids: [] as number[],
     });
+
+    // Employee search
+    useEffect(() => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        if (!employeeSearch.trim() || !data.business_id) {
+            setSearchResults([]);
+            return;
+        }
+
+        searchTimeoutRef.current = setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const params = new URLSearchParams({
+                    business_id: String(data.business_id),
+                    query: employeeSearch.trim(),
+                });
+
+                const response = await fetch(`/employees/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+
+                if (response.ok) {
+                    const results = await response.json();
+                    setSearchResults(results);
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 300);
+    }, [employeeSearch, data.business_id]);
+
+    const handleAddEmployee = (employee: any) => {
+        if (!selectedEmployeeIds.includes(employee.id)) {
+            const newIds = [...selectedEmployeeIds, employee.id];
+            setSelectedEmployeeIds(newIds);
+            setData('employee_ids', newIds);
+        }
+        setEmployeeSearch('');
+        setSearchResults([]);
+    };
+
+    const handleRemoveEmployee = (employeeId: number) => {
+        const newIds = selectedEmployeeIds.filter(id => id !== employeeId);
+        setSelectedEmployeeIds(newIds);
+        setData('employee_ids', newIds);
+    };
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Set employee_ids based on selection
+        if (whoGetsThis === 'all') {
+            // All employees - send all employee IDs
+            const allEmployeeIds = employees?.map((emp: any) => emp.id) || [];
+            setData('employee_ids', allEmployeeIds);
+        } else if (whoGetsThis === 'select') {
+            // Selected employees
+            setData('employee_ids', selectedEmployeeIds);
+        }
+        
         post('/payroll');
     };
 
@@ -92,11 +167,21 @@ export default function PayrollCreate({ businesses, receivers, selectedBusinessI
                             <div>
                                 <Label>Schedule Date & Time</Label>
                                 <DatePicker
-                                    date={data.scheduled_date ? new Date(data.scheduled_date + 'T' + (data.scheduled_time || '00:00')) : undefined}
+                                    date={data.scheduled_date ? (() => {
+                                        const [year, month, day] = data.scheduled_date.split('-').map(Number);
+                                        const [hours, minutes] = (data.scheduled_time || '00:00').split(':').map(Number);
+                                        return new Date(year, month - 1, day, hours, minutes);
+                                    })() : undefined}
                                     onDateChange={(date) => {
                                         if (date) {
-                                            setData('scheduled_date', date.toISOString().split('T')[0]);
-                                            setData('scheduled_time', date.toTimeString().slice(0, 5));
+                                            // Use local date formatting to avoid timezone issues
+                                            const year = date.getFullYear();
+                                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                                            const day = String(date.getDate()).padStart(2, '0');
+                                            setData('scheduled_date', `${year}-${month}-${day}`);
+                                            const hours = String(date.getHours()).padStart(2, '0');
+                                            const minutes = String(date.getMinutes()).padStart(2, '0');
+                                            setData('scheduled_time', `${hours}:${minutes}`);
                                         }
                                     }}
                                     time={data.scheduled_time}
@@ -136,46 +221,151 @@ export default function PayrollCreate({ businesses, receivers, selectedBusinessI
                             )}
 
                             <div>
-                                <Label htmlFor="amount">Amount (ZAR)</Label>
-                                <Input
-                                    id="amount"
-                                    type="number"
-                                    step="0.01"
-                                    value={data.amount}
-                                    onChange={(e) => setData('amount', e.target.value)}
-                                    required
-                                />
-                                <InputError message={errors.amount} />
+                                <Label>Who gets this payroll?</Label>
+                                <div className="space-y-4 mt-2">
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="all_employees"
+                                            checked={whoGetsThis === 'all'}
+                                            onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                    setWhoGetsThis('all');
+                                                    setSelectedEmployeeIds([]);
+                                                    setData('employee_ids', []);
+                                                }
+                                            }}
+                                        />
+                                        <Label htmlFor="all_employees" className="cursor-pointer font-normal">
+                                            All Employees
+                                        </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="select_employees"
+                                            checked={whoGetsThis === 'select'}
+                                            onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                    setWhoGetsThis('select');
+                                                }
+                                            }}
+                                        />
+                                        <Label htmlFor="select_employees" className="cursor-pointer font-normal">
+                                            Select Employees
+                                        </Label>
+                                    </div>
+                                    <InputError message={errors.employee_ids} />
+                                </div>
+
+                                {whoGetsThis === 'select' && (
+                                    <div className="space-y-2 mt-4">
+                                        <Label>Select Employees</Label>
+                                        {employees.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No employees found for this business. <Link href="/employees/create" className="text-primary underline">Create an employee</Link> first.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <Popover>
+                                                    <PopoverTrigger asChild>
+                                                        <Button type="button" variant="outline" className="w-full justify-start">
+                                                            <Plus className="mr-2 h-4 w-4" />
+                                                            {isSearching ? 'Searching...' : 'Search and add employees'}
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-80 p-0" align="start">
+                                                        <div className="p-2">
+                                                            <Input
+                                                                placeholder="Search employees..."
+                                                                value={employeeSearch}
+                                                                onChange={(e) => setEmployeeSearch(e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <div className="max-h-60 overflow-auto">
+                                                            {searchResults.length > 0 ? (
+                                                                <div className="p-2 space-y-1">
+                                                                    {searchResults.map((emp: any) => (
+                                                                        <Button
+                                                                            key={emp.id}
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            className="w-full justify-start"
+                                                                            onClick={() => handleAddEmployee(emp)}
+                                                                            disabled={selectedEmployeeIds.includes(emp.id)}
+                                                                        >
+                                                                            {emp.name}
+                                                                            {emp.email && (
+                                                                                <span className="text-xs text-muted-foreground ml-2">
+                                                                                    ({emp.email})
+                                                                                </span>
+                                                                            )}
+                                                                        </Button>
+                                                                    ))}
+                                                                </div>
+                                                            ) : employeeSearch && !isSearching && (
+                                                                <div className="p-4 text-center text-sm text-muted-foreground">
+                                                                    No employees found
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </PopoverContent>
+                                                </Popover>
+
+                                                {selectedEmployeeIds.length > 0 && (
+                                                    <div className="space-y-2 mt-2">
+                                                        {selectedEmployeeIds.map((empId) => {
+                                                            const emp = employees?.find((e: any) => e.id === empId);
+                                                            if (!emp) return null;
+                                                            return (
+                                                                <div key={empId} className="flex items-center justify-between p-2 border rounded-md">
+                                                                    <div className="flex-1">
+                                                                        <span className="font-medium">{emp.name}</span>
+                                                                        <p className="text-xs text-muted-foreground">
+                                                                            Gross: ZAR {parseFloat(emp.gross_salary || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                        </p>
+                                                                    </div>
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-6 w-6"
+                                                                        onClick={() => handleRemoveEmployee(empId)}
+                                                                    >
+                                                                        <X className="h-4 w-4" />
+                                                                    </Button>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
-                            <div>
-                                <Label>Receivers</Label>
-                                <div className="space-y-2 mt-2">
-                                    {receivers.length === 0 ? (
+                            {(whoGetsThis === 'all' || selectedEmployeeIds.length > 0) && (
+                                <Card className="bg-muted">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg">Total Payroll Summary</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
                                         <p className="text-sm text-muted-foreground">
-                                            No receivers found for this business. <Link href="/receivers/create" className="text-primary underline">Create a receiver</Link> first.
+                                            {whoGetsThis === 'all' 
+                                                ? `All employees (${employees.length} total). Tax calculations will be performed automatically for each employee when the payroll runs.`
+                                                : `${selectedEmployeeIds.length} employee(s) selected. Tax calculations will be performed automatically for each employee when the payroll runs.`
+                                            }
                                         </p>
-                                    ) : (
-                                        receivers.map((receiver: any) => (
-                                            <label key={receiver.id} className="flex items-center space-x-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={data.receiver_ids.includes(receiver.id)}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) {
-                                                            setData('receiver_ids', [...data.receiver_ids, receiver.id]);
-                                                        } else {
-                                                            setData('receiver_ids', data.receiver_ids.filter((id: number) => id !== receiver.id));
-                                                        }
-                                                    }}
-                                                />
-                                                <span>{receiver.name}</span>
-                                            </label>
-                                        ))
-                                    )}
-                                </div>
-                                <InputError message={errors.receiver_ids} />
-                            </div>
+                                        {escrowBalance !== null && escrowBalance !== undefined && (
+                                            <p className="text-sm mt-2">
+                                                Available Escrow Balance: {new Intl.NumberFormat('en-ZA', {
+                                                    style: 'currency',
+                                                    currency: 'ZAR',
+                                                }).format(escrowBalance)}
+                                            </p>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
 
                             <div className="flex gap-2">
                                 <Button type="submit" disabled={processing}>

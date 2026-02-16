@@ -1,11 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
-import { payments } from '@/routes';
+import payments from '@/routes/payments';
 import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/react';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Payments', href: payments().url },
+    { title: 'Payments', href: payments.index().url },
     { title: 'Jobs', href: '#' },
 ];
 
@@ -16,18 +16,18 @@ interface PaymentJob {
     currency: string;
     processed_at: string | null;
     error_message: string | null;
-    receiver: { name: string };
-    payment_schedule: { name: string };
+    recipient?: { id: number; name: string } | null;
+    payment_schedule?: { id: number; name: string } | null;
 }
 
 interface PaymentsJobsProps {
-    jobs: {
+    jobs?: {
         data: PaymentJob[];
         links: any;
     };
 }
 
-export default function PaymentsJobs({ jobs }: PaymentsJobsProps) {
+export default function PaymentsJobs({ jobs = { data: [], links: [] } }: PaymentsJobsProps) {
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Payment Jobs" />
@@ -35,15 +35,15 @@ export default function PaymentsJobs({ jobs }: PaymentsJobsProps) {
                 <h1 className="text-2xl font-bold">Payment Jobs</h1>
 
                 <div className="space-y-4">
-                    {jobs.data.map((job) => (
+                    {(jobs?.data ?? []).map((job) => (
                         <Card key={job.id}>
                             <CardHeader>
-                                <CardTitle>{job.payment_schedule.name}</CardTitle>
+                                <CardTitle>{job.payment_schedule?.name ?? 'Payment'}</CardTitle>
                             </CardHeader>
                             <CardContent>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="font-medium">{job.receiver.name}</p>
+                                        <p className="font-medium">{job.recipient?.name ?? '—'}</p>
                                         <p className="text-sm text-muted-foreground">
                                             {job.currency} {job.amount}
                                         </p>
@@ -77,7 +77,7 @@ export default function PaymentsJobs({ jobs }: PaymentsJobsProps) {
                     ))}
                 </div>
 
-                {jobs.data.length === 0 && (
+                {(jobs?.data?.length ?? 0) === 0 && (
                     <Card>
                         <CardContent className="py-10 text-center">
                             <p className="text-muted-foreground">No payment jobs found.</p>

@@ -11,6 +11,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('settings/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('settings/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('settings/profile/send-email-otp', [ProfileController::class, 'sendEmailOtp'])->name('profile.send-email-otp');
+    Route::post('settings/profile/verify-email-otp', [ProfileController::class, 'verifyEmailOtp'])->name('profile.verify-email-otp');
+    Route::post('settings/profile/cancel-email-otp', [ProfileController::class, 'cancelEmailOtp'])->name('profile.cancel-email-otp');
     Route::delete('settings/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     Route::get('settings/password', [PasswordController::class, 'edit'])->name('user-password.edit');

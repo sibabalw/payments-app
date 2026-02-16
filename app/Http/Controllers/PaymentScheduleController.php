@@ -2,18 +2,24 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\PaymentScheduleCancelledEmail;
+use App\Mail\PaymentScheduleCreatedEmail;
 use App\Models\Business;
 use App\Models\PaymentSchedule;
-use App\Models\Receiver;
+use App\Models\Recipient;
 use App\Rules\BusinessDay;
 use App\Services\AuditService;
-use App\Services\CronExpressionService;
 use App\Services\CronExpressionParser;
+use App\Services\CronExpressionService;
+use App\Services\EmailService;
 use App\Services\EscrowService;
+use App\Services\SouthAfricaHolidayService;
 use Carbon\Carbon;
 use Cron\CronExpression;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -23,20 +29,38 @@ class PaymentScheduleController extends Controller
         protected AuditService $auditService,
         protected EscrowService $escrowService,
         protected CronExpressionService $cronService,
-        protected CronExpressionParser $cronParser
-    ) {
-    }
+        protected CronExpressionParser $cronParser,
+        protected SouthAfricaHolidayService $holidayService
+    ) {}
 
     /**
      * Display a listing of the resource.
      */
     public function index(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $type = $request->get('type'); // 'generic' or 'payroll'
         $status = $request->get('status'); // 'active', 'paused', 'cancelled'
 
-        $query = PaymentSchedule::query()->with(['business', 'receivers']);
+        $query = PaymentSchedule::query()
+            ->select([
+                'id',
+                'business_id',
+                'type',
+                'name',
+                'frequency',
+                'amount',
+                'currency',
+                'schedule_type',
+                'status',
+                'next_run_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->with([
+                'business:id,name',
+                'recipients:id,name,email',
+            ]);
 
         if ($businessId) {
             $query->where('business_id', $businessId);
@@ -45,8 +69,12 @@ class PaymentScheduleController extends Controller
             $query->whereIn('business_id', $userBusinessIds);
         }
 
-        if ($type) {
-            $query->ofType($type);
+        // Only show generic payment schedules (not payroll)
+        $query->ofType('generic');
+
+        if ($type && $type !== 'generic') {
+            // If type is specified and not generic, return empty (payroll uses separate controller)
+            $query->whereRaw('1 = 0');
         }
 
         if ($status) {
@@ -55,7 +83,7 @@ class PaymentScheduleController extends Controller
 
         $schedules = $query->latest()->paginate(15);
 
-        return Inertia::render('payments/index', [
+        return Inertia::render('payments/schedules', [
             'schedules' => $schedules,
             'filters' => [
                 'type' => $type,
@@ -70,25 +98,25 @@ class PaymentScheduleController extends Controller
      */
     public function create(Request $request): Response
     {
-        $businessId = $request->get('business_id') ?? session('current_business_id');
+        $businessId = $request->get('business_id') ?? Auth::user()->current_business_id ?? session('current_business_id');
         $type = $request->get('type', 'generic');
         $businesses = Auth::user()->businesses()->get();
-        
-        $receivers = [];
+
+        $recipients = [];
         $escrowBalance = null;
         if ($businessId) {
-            $receivers = Receiver::where('business_id', $businessId)->get();
+            $recipients = Recipient::where('business_id', $businessId)->get();
             $business = Business::find($businessId);
             if ($business) {
                 $escrowBalance = $this->escrowService->getAvailableBalance($business);
             }
         }
 
-        return Inertia::render('payments/create', [
+        return Inertia::render('payments/schedule-create', [
             'businesses' => $businesses,
-            'receivers' => $receivers,
+            'recipients' => $recipients,
             'selectedBusinessId' => $businessId,
-            'type' => $type,
+            'type' => 'generic',
             'escrowBalance' => $escrowBalance,
         ]);
     }
@@ -101,12 +129,11 @@ class PaymentScheduleController extends Controller
         // Accept both old format (frequency as cron) and new format (scheduled_date/scheduled_time)
         $rules = [
             'business_id' => 'required|exists:businesses,id',
-            'type' => 'required|in:generic,payroll',
             'name' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0.01',
             'schedule_type' => 'required|in:one_time,recurring',
-            'receiver_ids' => 'required|array|min:1',
-            'receiver_ids.*' => 'exists:receivers,id',
+            'recipient_ids' => 'required|array|min:1',
+            'recipient_ids.*' => 'exists:recipients,id',
         ];
 
         // If scheduled_date is provided, use new format; otherwise use old format for backward compatibility
@@ -124,19 +151,60 @@ class PaymentScheduleController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot create payment schedule. Business is {$business->status}."])
                 ->withInput();
         }
 
+        // Check escrow balance before creating schedule
+        // Note: This is a user-facing validation check. The actual job creation is protected
+        // by database triggers and the ProcessScheduledPayments command which locks the business row.
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $validated['amount'] * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['amount' => 'Cannot create payment schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // Calculate total from existing active schedules
+        $existingSchedulesTotal = PaymentSchedule::where('business_id', $validated['business_id'])
+            ->where('status', 'active')
+            ->with('recipients')
+            ->get()
+            ->sum(function ($schedule) {
+                return $schedule->amount * max($schedule->recipients->count(), 1);
+            });
+
+        $totalScheduledAmount = $existingSchedulesTotal + $totalAmountRequired;
+
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
+        // Explicit check: total scheduled amount (existing + new) should not exceed available balance
+        // This prevents creating schedules that would exceed balance when combined with existing schedules
+        if ($escrowBalance < $totalScheduledAmount) {
+            return back()
+                ->withErrors(['amount' => 'Creating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total scheduled (including existing): '.number_format($totalScheduledAmount, 2).' ZAR.'])
+                ->withInput();
+        }
+
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            // Parse in app timezone to ensure consistency
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -151,32 +219,81 @@ class PaymentScheduleController extends Controller
             return back()->withErrors(['frequency' => 'Invalid cron expression.'])->withInput();
         }
 
-        $schedule = PaymentSchedule::create([
-            'business_id' => $validated['business_id'],
-            'type' => $validated['type'],
-            'name' => $validated['name'],
-            'frequency' => $frequency,
-            'amount' => $validated['amount'],
-            'currency' => 'ZAR',
-            'schedule_type' => $validated['schedule_type'],
-            'status' => 'active',
-        ]);
+        // Wrap all database operations in a transaction
+        $schedule = DB::transaction(function () use ($validated, $frequency) {
+            $schedule = PaymentSchedule::create([
+                'business_id' => $validated['business_id'],
+                'type' => 'generic',
+                'name' => $validated['name'],
+                'frequency' => $frequency,
+                'amount' => $validated['amount'],
+                'currency' => 'ZAR',
+                'schedule_type' => $validated['schedule_type'],
+                'status' => 'active',
+            ]);
 
-        // Calculate next run time
-        try {
-            $cron = CronExpression::factory($frequency);
-            $schedule->next_run_at = $cron->getNextRunDate(now());
-            $schedule->save();
-        } catch (\Exception $e) {
-            // If calculation fails, set to null (will be handled by scheduler)
+            // Calculate next run time (required for correctness — no fallback)
+            try {
+                $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
+                // Skip weekends and holidays
+                $nextRun = $this->adjustToBusinessDay($nextRun);
+                $schedule->next_run_at = $nextRun;
+                $schedule->save();
+            } catch (\Throwable $e) {
+                Log::error('Unable to compute next run date for payment schedule', [
+                    'schedule_id' => $schedule->id,
+                    'frequency' => $frequency,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException(
+                    'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                    0,
+                    $e
+                );
+            }
+
+            return $schedule;
+        });
+
+        // CRITICAL: Re-validate escrow balance before attaching recipients
+        // This provides application-level defense even if database triggers are bypassed
+        $business = Business::findOrFail($validated['business_id']);
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $schedule->amount * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            // Delete the schedule since we can't attach recipients
+            $schedule->delete();
+
+            return back()
+                ->withErrors(['amount' => 'Cannot attach recipients. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
         }
 
-        // Attach receivers
-        $schedule->receivers()->attach($validated['receiver_ids']);
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            // Delete the schedule since we can't attach recipients
+            $schedule->delete();
 
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance to attach recipients. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
+        // Attach recipients outside transaction to avoid lock timeout
+        $schedule->recipients()->attach($validated['recipient_ids']);
+
+        // Log audit trail outside transaction (non-critical)
         $this->auditService->log('payment_schedule.created', $schedule, $schedule->getAttributes());
 
-        $route = $validated['type'] === 'payroll' ? 'payroll.index' : 'payments.index';
+        // Send payment schedule created email (non-critical, happens after transaction)
+        $user = $business->owner;
+        $emailService = app(EmailService::class);
+        $emailService->send($user, new PaymentScheduleCreatedEmail($user, $schedule), 'payment_schedule_created');
+
+        $route = 'payments.index';
 
         return redirect()->route($route)
             ->with('success', 'Payment schedule created successfully.');
@@ -187,23 +304,38 @@ class PaymentScheduleController extends Controller
      */
     public function edit(PaymentSchedule $paymentSchedule): Response
     {
-        $businesses = Auth::user()->businesses()->get();
-        $receivers = Receiver::where('business_id', $paymentSchedule->business_id)->get();
+        // Only allow editing generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
 
-        // Parse cron expression to extract date/time for editing
+        $businesses = Auth::user()->businesses()->get();
+        $recipients = Recipient::where('business_id', $paymentSchedule->business_id)->get();
+
+        $schedule = $paymentSchedule->load(['business', 'recipients']);
+
+        // Use next_run_at to populate date/time fields; do not guess from cron when null
+        if ($schedule->next_run_at) {
+            $nextRun = \Carbon\Carbon::parse($schedule->next_run_at);
+            $schedule->scheduled_date = $nextRun->format('Y-m-d');
+            $schedule->scheduled_time = $nextRun->format('H:i');
+            $schedule->next_run_at_missing = false;
+        } else {
+            $schedule->scheduled_date = null;
+            $schedule->scheduled_time = null;
+            $schedule->next_run_at_missing = true;
+        }
+
+        // Parse frequency for display
         $parsed = $this->cronParser->parse($paymentSchedule->frequency);
-        
-        $schedule = $paymentSchedule->load(['business', 'receivers']);
         if ($parsed) {
-            $schedule->scheduled_date = $parsed['date'];
-            $schedule->scheduled_time = $parsed['time'];
             $schedule->parsed_frequency = $parsed['frequency'];
         }
 
-        return Inertia::render('payments/edit', [
+        return Inertia::render('payments/schedule-edit', [
             'schedule' => $schedule,
             'businesses' => $businesses,
-            'receivers' => $receivers,
+            'recipients' => $recipients,
         ]);
     }
 
@@ -212,6 +344,11 @@ class PaymentScheduleController extends Controller
      */
     public function update(Request $request, PaymentSchedule $paymentSchedule)
     {
+        // Only allow updating generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
+
         // Accept both old format (frequency as cron) and new format (scheduled_date/scheduled_time)
         $rules = [
             'business_id' => 'required|exists:businesses,id',
@@ -219,8 +356,8 @@ class PaymentScheduleController extends Controller
             'amount' => 'required|numeric|min:0.01',
             'currency' => 'required|string|size:3',
             'schedule_type' => 'required|in:one_time,recurring',
-            'receiver_ids' => 'required|array|min:1',
-            'receiver_ids.*' => 'exists:receivers,id',
+            'recipient_ids' => 'required|array|min:1',
+            'recipient_ids.*' => 'exists:recipients,id',
         ];
 
         // If scheduled_date is provided, use new format; otherwise use old format for backward compatibility
@@ -238,19 +375,58 @@ class PaymentScheduleController extends Controller
 
         // Check if business is active
         $business = Business::findOrFail($validated['business_id']);
-        if (!$business->canPerformActions()) {
+        if (! $business->canPerformActions()) {
             return back()
                 ->withErrors(['business_id' => "Cannot update payment schedule. Business is {$business->status}."])
                 ->withInput();
         }
 
+        // Check escrow balance before updating schedule
+        $escrowBalance = $this->escrowService->getAvailableBalance($business);
+        $recipientCount = count($validated['recipient_ids']);
+        $totalAmountRequired = $validated['amount'] * $recipientCount;
+
+        // Explicit check: escrow balance must be greater than zero
+        if ($escrowBalance <= 0) {
+            return back()
+                ->withErrors(['amount' => 'Cannot update payment schedule. Escrow balance is zero or negative. Please deposit funds first.'])
+                ->withInput();
+        }
+
+        // Calculate total from existing active schedules (excluding this one)
+        $existingSchedulesTotal = PaymentSchedule::where('business_id', $validated['business_id'])
+            ->where('status', 'active')
+            ->where('id', '!=', $paymentSchedule->id)
+            ->with('recipients')
+            ->get()
+            ->sum(function ($schedule) {
+                return $schedule->amount * max($schedule->recipients->count(), 1);
+            });
+
+        $totalScheduledAmount = $existingSchedulesTotal + $totalAmountRequired;
+
+        // Explicit check: available balance must be sufficient for total amount required
+        if ($escrowBalance < $totalAmountRequired) {
+            return back()
+                ->withErrors(['amount' => 'Insufficient escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.'])
+                ->withInput();
+        }
+
+        // Explicit check: total scheduled amount (existing + updated) should not exceed available balance
+        if ($escrowBalance < $totalScheduledAmount) {
+            return back()
+                ->withErrors(['amount' => 'Updating this schedule would exceed available escrow balance. Available: '.number_format($escrowBalance, 2).' ZAR, Total scheduled (including existing): '.number_format($totalScheduledAmount, 2).' ZAR.'])
+                ->withInput();
+        }
+
         // Generate cron expression from date/time or use provided frequency
         $frequency = $validated['frequency'] ?? null;
-        
+
         if (isset($validated['scheduled_date']) && isset($validated['scheduled_time'])) {
             // New format: Generate cron from date/time
-            $dateTime = Carbon::parse($validated['scheduled_date'] . ' ' . $validated['scheduled_time']);
-            
+            // Parse in app timezone to ensure consistency
+            $dateTime = Carbon::parse($validated['scheduled_date'].' '.$validated['scheduled_time'], config('app.timezone'));
+
             if ($validated['schedule_type'] === 'one_time') {
                 $frequency = $this->cronService->fromOneTime($dateTime);
             } else {
@@ -265,35 +441,67 @@ class PaymentScheduleController extends Controller
             return back()->withErrors(['frequency' => 'Invalid cron expression.'])->withInput();
         }
 
-        $paymentSchedule->update([
-            'business_id' => $validated['business_id'],
-            'name' => $validated['name'],
-            'frequency' => $frequency,
-            'amount' => $validated['amount'],
-            'currency' => 'ZAR',
-            'schedule_type' => $validated['schedule_type'],
-        ]);
+        // Wrap all database operations in a transaction
+        DB::transaction(function () use ($validated, $frequency, $paymentSchedule) {
+            $paymentSchedule->update([
+                'business_id' => $validated['business_id'],
+                'name' => $validated['name'],
+                'frequency' => $frequency,
+                'amount' => $validated['amount'],
+                'currency' => 'ZAR',
+                'schedule_type' => $validated['schedule_type'],
+            ]);
 
-        // Recalculate next run time if frequency changed
-        if ($paymentSchedule->wasChanged('frequency')) {
-            try {
-                $cron = CronExpression::factory($frequency);
-                $paymentSchedule->next_run_at = $cron->getNextRunDate(now());
-                $paymentSchedule->save();
-            } catch (\Exception $e) {
-                // If calculation fails, set to null
+            // Recalculate next run time if frequency changed (required for correctness — no fallback)
+            if ($paymentSchedule->wasChanged('frequency')) {
+                try {
+                    $nextRun = $this->cronService->getNextRunDate($frequency, now(config('app.timezone')));
+                    // Skip weekends and holidays
+                    $nextRun = $this->adjustToBusinessDay($nextRun);
+                    $paymentSchedule->next_run_at = $nextRun;
+                    $paymentSchedule->save();
+                } catch (\Throwable $e) {
+                    Log::error('Unable to compute next run date for payment schedule update', [
+                        'schedule_id' => $paymentSchedule->id,
+                        'frequency' => $frequency,
+                        'error' => $e->getMessage(),
+                    ]);
+                    throw new \RuntimeException(
+                        'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                        0,
+                        $e
+                    );
+                }
             }
-        }
 
-        // Sync receivers
-        $paymentSchedule->receivers()->sync($validated['receiver_ids']);
+            // CRITICAL: Re-validate escrow balance before syncing recipients
+            // This provides application-level defense even if database triggers are bypassed
+            $business = Business::findOrFail($validated['business_id']);
+            $escrowBalance = $this->escrowService->getAvailableBalance($business);
+            $recipientCount = count($validated['recipient_ids']);
+            $totalAmountRequired = $paymentSchedule->amount * $recipientCount;
 
-        $this->auditService->log('payment_schedule.updated', $paymentSchedule, [
-            'old' => $paymentSchedule->getOriginal(),
-            'new' => $paymentSchedule->getChanges(),
-        ]);
+            // Explicit check: escrow balance must be greater than zero
+            if ($escrowBalance <= 0) {
+                throw new \RuntimeException('Cannot sync recipients. Escrow balance is zero or negative. Please deposit funds first.');
+            }
 
-        $route = $paymentSchedule->type === 'payroll' ? 'payroll.index' : 'payments.index';
+            // Explicit check: available balance must be sufficient for total amount required
+            if ($escrowBalance < $totalAmountRequired) {
+                throw new \RuntimeException('Insufficient escrow balance to sync recipients. Available: '.number_format($escrowBalance, 2).' ZAR, Required: '.number_format($totalAmountRequired, 2).' ZAR.');
+            }
+
+            // Sync recipients
+            $paymentSchedule->recipients()->sync($validated['recipient_ids']);
+
+            // Log audit trail
+            $this->auditService->log('payment_schedule.updated', $paymentSchedule, [
+                'old' => $paymentSchedule->getOriginal(),
+                'new' => $paymentSchedule->getChanges(),
+            ]);
+        });
+
+        $route = 'payments.index';
 
         return redirect()->route($route)
             ->with('success', 'Payment schedule updated successfully.');
@@ -301,17 +509,77 @@ class PaymentScheduleController extends Controller
 
     /**
      * Remove the specified resource from storage.
+     * Permanently deletes the schedule but keeps full audit trail.
      */
     public function destroy(PaymentSchedule $paymentSchedule)
     {
-        $this->auditService->log('payment_schedule.deleted', $paymentSchedule, $paymentSchedule->getAttributes());
+        // Only allow deleting generic payment schedules
+        if ($paymentSchedule->type !== 'generic') {
+            abort(404);
+        }
 
+        // Load all related data before deletion for audit logging
+        $paymentSchedule->load([
+            'business:id,name,user_id',
+            'business.owner:id,name,email',
+            'recipients:id,name,email',
+        ]);
+
+        $business = $paymentSchedule->business;
+        $user = $business->owner;
+
+        // Capture comprehensive data for audit log before deletion
+        $auditData = [
+            'schedule' => [
+                'id' => $paymentSchedule->id,
+                'name' => $paymentSchedule->name,
+                'business_id' => $paymentSchedule->business_id,
+                'business_name' => $business->name,
+                'type' => $paymentSchedule->type,
+                'frequency' => $paymentSchedule->frequency,
+                'amount' => $paymentSchedule->amount,
+                'currency' => $paymentSchedule->currency,
+                'schedule_type' => $paymentSchedule->schedule_type,
+                'status' => $paymentSchedule->status,
+                'next_run_at' => $paymentSchedule->next_run_at?->toIso8601String(),
+                'last_run_at' => $paymentSchedule->last_run_at?->toIso8601String(),
+                'created_at' => $paymentSchedule->created_at?->toIso8601String(),
+                'updated_at' => $paymentSchedule->updated_at?->toIso8601String(),
+            ],
+            'recipients' => $paymentSchedule->recipients->map(function ($recipient) {
+                return [
+                    'id' => $recipient->id,
+                    'name' => $recipient->name,
+                    'email' => $recipient->email,
+                ];
+            })->toArray(),
+            'deleted_by' => [
+                'user_id' => Auth::id(),
+                'user_email' => Auth::user()?->email,
+            ],
+            'deleted_at' => now()->toIso8601String(),
+        ];
+
+        // Log comprehensive audit trail before deletion
+        $this->auditService->log(
+            'payment_schedule.deleted',
+            $paymentSchedule,
+            $auditData,
+            Auth::user(),
+            $business
+        );
+
+        // Send payment schedule cancelled email before deleting
+        $emailService = app(EmailService::class);
+        $emailService->send($user, new PaymentScheduleCancelledEmail($user, $paymentSchedule), 'payment_schedule_cancelled');
+
+        // Permanently delete the schedule (no soft delete)
         $paymentSchedule->delete();
 
-        $route = $paymentSchedule->type === 'payroll' ? 'payroll.index' : 'payments.index';
+        $route = 'payments.index';
 
         return redirect()->route($route)
-            ->with('success', 'Payment schedule deleted successfully.');
+            ->with('success', 'Payment schedule permanently deleted. All data has been logged in audit trail.');
     }
 
     /**
@@ -334,16 +602,26 @@ class PaymentScheduleController extends Controller
      */
     public function resume(PaymentSchedule $paymentSchedule)
     {
-        // Recalculate next run time when resuming
+        // Recalculate next run time when resuming (required — do not mark active without valid next_run_at)
         try {
-            $cron = CronExpression::factory($paymentSchedule->frequency);
-            $nextRun = $cron->getNextRunDate(now());
+            $nextRun = $this->cronService->getNextRunDate($paymentSchedule->frequency, now(config('app.timezone')));
+            // Skip weekends and holidays
+            $nextRun = $this->adjustToBusinessDay($nextRun);
             $paymentSchedule->update([
                 'status' => 'active',
                 'next_run_at' => $nextRun,
             ]);
-        } catch (\Exception $e) {
-            $paymentSchedule->update(['status' => 'active']);
+        } catch (\Throwable $e) {
+            Log::error('Unable to compute next run date when resuming payment schedule', [
+                'schedule_id' => $paymentSchedule->id,
+                'frequency' => $paymentSchedule->frequency,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException(
+                'Unable to compute next run date for schedule: '.$e->getMessage().'. Fix the schedule or contact support.',
+                0,
+                $e
+            );
         }
 
         $this->auditService->log('payment_schedule.resumed', $paymentSchedule, [
@@ -367,5 +645,28 @@ class PaymentScheduleController extends Controller
 
         return redirect()->back()
             ->with('success', 'Payment schedule cancelled.');
+    }
+
+    /**
+     * Adjust a date to the next business day if it falls on a weekend or holiday.
+     */
+    private function adjustToBusinessDay(Carbon $date): Carbon
+    {
+        if ($this->holidayService->isBusinessDay($date)) {
+            return $date;
+        }
+
+        $originalDate = $date->format('Y-m-d');
+        $originalTime = $date->format('H:i');
+        $adjustedDate = $this->holidayService->getNextBusinessDay($date);
+        $adjustedDate->setTime((int) $date->format('H'), (int) $date->format('i'));
+
+        Log::info('Payment schedule next run adjusted to skip weekend/holiday', [
+            'original_date' => $originalDate,
+            'adjusted_date' => $adjustedDate->format('Y-m-d'),
+            'time' => $originalTime,
+        ]);
+
+        return $adjustedDate;
     }
 }

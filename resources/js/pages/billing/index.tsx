@@ -2,8 +2,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/react';
-import { CreditCard, Receipt } from 'lucide-react';
+import { Head, Link } from '@inertiajs/react';
+import { CreditCard, Receipt, AlertCircle, CheckCircle2, Building2 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Billing', href: '/billing' },
@@ -16,6 +16,13 @@ interface BillingIndexProps {
         id: number;
         name: string;
         business_type: string;
+        bank_account_details: {
+            account_number?: string;
+            bank_name?: string;
+            account_holder_name?: string;
+            account_type?: string;
+            branch_code?: string;
+        } | null;
     };
     currentMonthBilling?: {
         id: number;
@@ -68,6 +75,54 @@ export default function BillingIndex({
 
                 {business ? (
                     <>
+                        {!business.bank_account_details && (
+                            <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
+                                <CardContent className="pt-6">
+                                    <div className="flex items-start gap-4">
+                                        <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+                                        <div className="flex-1">
+                                            <h3 className="font-semibold text-yellow-900 dark:text-yellow-100 mb-1">
+                                                Bank Account Not Configured
+                                            </h3>
+                                            <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">
+                                                You need to add your bank account details to enable automatic subscription charges.
+                                            </p>
+                                            <Link href={`/businesses/${business.id}/bank-account`}>
+                                                <Button size="sm" className="bg-yellow-600 hover:bg-yellow-700 text-white">
+                                                    <Building2 className="h-4 w-4 mr-2" />
+                                                    Add Bank Account Details
+                                                </Button>
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
+                        {business.bank_account_details && (
+                            <Card className="border-green-500 bg-green-50 dark:bg-green-950">
+                                <CardContent className="pt-6">
+                                    <div className="flex items-center gap-4">
+                                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                                        <div className="flex-1">
+                                            <h3 className="font-semibold text-green-900 dark:text-green-100 mb-1">
+                                                Bank Account Configured
+                                            </h3>
+                                            <p className="text-sm text-green-800 dark:text-green-200">
+                                                {business.bank_account_details.bank_name} • 
+                                                {' '}Account ending in {business.bank_account_details.account_number?.slice(-4) || '****'}
+                                            </p>
+                                        </div>
+                                        <Link href={`/businesses/${business.id}/bank-account`}>
+                                            <Button size="sm" variant="outline">
+                                                Update Details
+                                            </Button>
+                                        </Link>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
                         <div className="grid gap-4 md:grid-cols-3">
                             <Card>
                                 <CardHeader>

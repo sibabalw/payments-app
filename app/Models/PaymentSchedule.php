@@ -40,9 +40,9 @@ class PaymentSchedule extends Model
         return $this->belongsTo(Business::class);
     }
 
-    public function receivers(): BelongsToMany
+    public function recipients(): BelongsToMany
     {
-        return $this->belongsToMany(Receiver::class, 'payment_schedule_receiver')
+        return $this->belongsToMany(Recipient::class, 'payment_schedule_recipient')
             ->withTimestamps();
     }
 
