@@ -83,10 +83,7 @@ export function PublicNav() {
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="flex h-16 items-center justify-between">
                     <Link href="/" className="flex items-center gap-2">
-                        <AppLogoIcon className="h-8 w-8" aria-hidden />
-                        <span className="font-display text-2xl font-bold tracking-tight text-primary">
-                            SwiftPay
-                        </span>
+                        <AppLogoIcon className="h-8 w-8" alt="SwiftPay" />
                     </Link>
 
                     {isMobile ? (
