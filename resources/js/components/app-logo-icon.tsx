@@ -1,10 +1,10 @@
 import { cn } from '@/lib/utils';
 import { ImgHTMLAttributes } from 'react';
 
-const LOGO_SRC = '/storage/SwiftPay.png';
+const LOGO_SRC = '/logo.svg';
 
 /**
- * SwiftPay logo image (from storage). Use for app icon, nav, and auth layouts.
+ * SwiftPay logo image. Uses public asset for reliability (works without storage symlink).
  */
 export default function AppLogoIcon({
     className,

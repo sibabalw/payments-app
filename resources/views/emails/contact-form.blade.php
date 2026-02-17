@@ -6,7 +6,7 @@
     <p><strong>From:</strong> {{ $senderName }} &lt;{{ $senderEmail }}&gt;</p>
 
     <h2>Message</h2>
-    <p style="white-space: pre-wrap;">{{ $message }}</p>
+    <p style="white-space: pre-wrap;">{{ $messageContent }}</p>
 
     <p class="text-muted" style="margin-top: 24px; font-size: 14px;">
         Reply directly to this email to respond to {{ $senderName }}.

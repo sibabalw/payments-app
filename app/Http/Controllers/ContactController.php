@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ContactFormRequest;
 use App\Mail\ContactFormSubmittedEmail;
-use App\Models\User;
 use Illuminate\Support\Facades\Mail;
 
 class ContactController extends Controller
@@ -16,20 +15,14 @@ class ContactController extends Controller
     {
         $validated = $request->validated();
 
-        $admins = User::query()->where('is_admin', true)->get();
-
         $mailable = new ContactFormSubmittedEmail(
             $validated['name'],
             $validated['email'],
             $validated['message']
         );
 
-        if ($admins->isNotEmpty()) {
-            Mail::to($admins)->send($mailable);
-        } else {
-            Mail::to(config('mail.from.address'))->send($mailable);
-        }
+        Mail::to(config('mail.from.address'))->send($mailable);
 
-        return back()->with('success', 'Thank you for your message. We will get back to you soon.');
+        return redirect()->route('contact')->with('success', 'Thank you for your message. We will get back to you soon.');
     }
 }
