@@ -19,7 +19,7 @@ class ContactFormSubmittedEmail extends Mailable
     public function __construct(
         public string $senderName,
         public string $senderEmail,
-        public string $message
+        public string $messageContent
     ) {}
 
     /**
@@ -45,7 +45,7 @@ class ContactFormSubmittedEmail extends Mailable
             with: [
                 'senderName' => $this->senderName,
                 'senderEmail' => $this->senderEmail,
-                'message' => $this->message,
+                'messageContent' => $this->messageContent,
             ],
         );
     }

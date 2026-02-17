@@ -41,7 +41,7 @@ return [
             'transport' => 'smtp',
             'scheme' => env('MAIL_SCHEME'),
             'url' => env('MAIL_URL'),
-            'host' => env('MAIL_HOST', env('SMTP_HOST', 'smtp.gmail.com')),
+            'host' => env('MAIL_HOST', env('SMTP_HOST', 'smtp-relay.brevo.com')),
             'port' => env('MAIL_PORT', env('SMTP_PORT', 587)),
             'username' => env('MAIL_USERNAME', env('SMTP_USER')),
             'password' => env('MAIL_PASSWORD', env('SMTP_PASSWORD')),
