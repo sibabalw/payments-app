@@ -19,6 +19,7 @@
 !/storage/framework/views/.gitignore
 /storage/logs/*
 !/storage/logs/.gitignore
+public/storage
 /vendor
 .DS_Store
 .env

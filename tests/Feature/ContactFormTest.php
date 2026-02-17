@@ -1,14 +1,10 @@
 <?php
 
 use App\Mail\ContactFormSubmittedEmail;
-use App\Models\User;
 use Illuminate\Support\Facades\Mail;
 
-test('contact form submission sends email to admins and redirects with success', function () {
+test('contact form submission sends email to info address and redirects with success', function () {
     Mail::fake();
-
-    $admin1 = User::factory()->admin()->create(['email' => 'admin1@example.com']);
-    $admin2 = User::factory()->admin()->create(['email' => 'admin2@example.com']);
 
     $response = $this->post(route('contact.store'), [
         'name' => 'Jane Doe',
@@ -19,19 +15,15 @@ test('contact form submission sends email to admins and redirects with success',
     $response->assertRedirect(route('contact'));
     $response->assertSessionHas('success');
 
-    Mail::assertSent(ContactFormSubmittedEmail::class, 2);
-    Mail::assertSent(ContactFormSubmittedEmail::class, function (ContactFormSubmittedEmail $mail) use ($admin1) {
-        return $mail->hasTo($admin1->email)
+    Mail::assertSent(ContactFormSubmittedEmail::class, function (ContactFormSubmittedEmail $mail) {
+        return $mail->hasTo(config('mail.from.address'))
             && $mail->senderName === 'Jane Doe'
             && $mail->senderEmail === 'jane@example.com'
-            && $mail->message === 'I would like to learn more about SwiftPay.';
-    });
-    Mail::assertSent(ContactFormSubmittedEmail::class, function (ContactFormSubmittedEmail $mail) use ($admin2) {
-        return $mail->hasTo($admin2->email);
+            && $mail->messageContent === 'I would like to learn more about SwiftPay.';
     });
 });
 
-test('contact form sends to default address when no admins exist', function () {
+test('contact form sends to config mail from address', function () {
     Mail::fake();
 
     $response = $this->post(route('contact.store'), [

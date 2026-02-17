@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { useEffect } from 'react';
 import { Mail, MessageSquare, Clock, ArrowRight } from 'lucide-react';
@@ -48,21 +49,28 @@ export default function Contact() {
                 {/* Contact Section */}
                 <AnimatedSection className="py-16">
                     <PublicSectionInner>
-                        <div className="grid gap-8 lg:grid-cols-2">
-                            {/* Contact Information */}
-                            <div className="space-y-6">
-                                <div>
-                                    <h2 className="font-display text-2xl font-bold text-foreground">
-                                        Let's Start a Conversation
-                                    </h2>
-                                    <p className="mt-2 text-muted-foreground">
-                                        Whether you're looking to get started, have questions about our features, or need
-                                        support, we're here to help. Reach out and we'll get back to you as soon as
-                                        possible.
-                                    </p>
-                                </div>
-
-                                <PublicCard variant="elevated" className="p-6">
+                        <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
+                            {/* Row 1: Headings - aligned */}
+                            <div>
+                                <h2 className="font-display text-2xl font-bold text-foreground">
+                                    Let's Start a Conversation
+                                </h2>
+                                <p className="mt-2 text-muted-foreground">
+                                    Whether you're looking to get started, have questions about our features, or need
+                                    support, we're here to help. Reach out and we'll get back to you as soon as
+                                    possible.
+                                </p>
+                            </div>
+                            <div>
+                                <h2 className="font-display text-2xl font-bold text-foreground">
+                                    Send Us a Message
+                                </h2>
+                                <p className="mt-2 text-muted-foreground">
+                                    Fill out the form below and we'll get back to you as soon as possible.
+                                </p>
+                            </div>
+                            {/* Row 2: Cards - aligned */}
+                            <PublicCard variant="elevated" className="p-6">
                                     <div className="pt-0">
                                         <div className="space-y-6">
                                             <div className="flex items-start gap-4">
@@ -123,36 +131,15 @@ export default function Contact() {
                                     </div>
                                 </PublicCard>
 
-                                <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-6 dark:bg-primary/10">
-                                    <h3 className="font-semibold text-foreground">
-                                        Ready to Get Started?
-                                    </h3>
-                                    <p className="mt-2 text-sm text-muted-foreground">
-                                        Don't wait—start your free trial today. No credit card required, and you can
-                                        explore all features risk-free.
-                                    </p>
-                                    <Link href={register()} className="mt-4 block">
-                                        <Button className="w-full sm:w-auto">
-                                            Start Free Trial
-                                            <ArrowRight className="ml-2 h-4 w-4" />
-                                        </Button>
-                                    </Link>
-                                </div>
-                            </div>
-
-                            {/* Contact Form */}
-                            <Card>
-                                <CardContent className="pt-6">
-                                    <h2 className="mb-6 text-xl font-semibold text-foreground">
-                                        Send Us a Message
-                                    </h2>
+                            {/* Form card - same row as contact info card */}
+                            <PublicCard variant="elevated" className="p-6">
                                     {flash?.success && (
                                         <div className="mb-4 rounded-md bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-300">
                                             {flash.success}
                                         </div>
                                     )}
                                     <form onSubmit={submit} className="space-y-4">
-                                        <div>
+                                        <div className="space-y-2">
                                             <Label htmlFor="name">Name</Label>
                                             <Input
                                                 id="name"
@@ -163,7 +150,7 @@ export default function Contact() {
                                             />
                                             <InputError message={errors.name} className="mt-1" />
                                         </div>
-                                        <div>
+                                        <div className="space-y-2">
                                             <Label htmlFor="email">Email</Label>
                                             <Input
                                                 id="email"
@@ -175,11 +162,11 @@ export default function Contact() {
                                             />
                                             <InputError message={errors.email} className="mt-1" />
                                         </div>
-                                        <div>
+                                        <div className="space-y-2">
                                             <Label htmlFor="message">Message</Label>
-                                            <textarea
+                                            <Textarea
                                                 id="message"
-                                                className="flex min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                className="min-h-[120px] resize-none"
                                                 value={data.message}
                                                 onChange={(e) => setData('message', e.target.value)}
                                                 required
@@ -195,8 +182,24 @@ export default function Contact() {
                                             your information with third parties.
                                         </p>
                                     </form>
-                                </CardContent>
-                            </Card>
+                            </PublicCard>
+
+                            {/* CTA - spans full width */}
+                            <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-6 dark:bg-primary/10 lg:col-span-2">
+                                <h3 className="font-semibold text-foreground">
+                                    Ready to Get Started?
+                                </h3>
+                                <p className="mt-2 text-sm text-muted-foreground">
+                                    Don't wait—start your free trial today. No credit card required, and you can
+                                    explore all features risk-free.
+                                </p>
+                                <Link href={register()} className="mt-4 block">
+                                    <Button className="w-full sm:w-auto">
+                                        Start Free Trial
+                                        <ArrowRight className="ml-2 h-4 w-4" />
+                                    </Button>
+                                </Link>
+                            </div>
                         </div>
                     </PublicSectionInner>
                 </AnimatedSection>
@@ -213,8 +216,8 @@ export default function Contact() {
                             </p>
                         </div>
                         <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                            <Card>
-                                <CardContent className="pt-6">
+                            <Card className="flex flex-col">
+                                <CardContent className="flex flex-1 flex-col pt-6">
                                     <h3 className="font-semibold">Getting Started</h3>
                                     <p className="mt-2 text-sm text-muted-foreground">
                                         Learn how to set up your account, create your first payment schedule, and start
@@ -222,15 +225,15 @@ export default function Contact() {
                                     </p>
                                     <Link
                                         href="/features"
-                                        className="mt-4 inline-flex items-center text-sm text-primary hover:underline"
+                                        className="mt-auto pt-4 inline-flex items-center text-sm text-primary hover:underline"
                                     >
                                         View Features
                                         <ArrowRight className="ml-1 h-4 w-4" />
                                     </Link>
                                 </CardContent>
                             </Card>
-                            <Card>
-                                <CardContent className="pt-6">
+                            <Card className="flex flex-col">
+                                <CardContent className="flex flex-1 flex-col pt-6">
                                     <h3 className="font-semibold">Pricing & Plans</h3>
                                     <p className="mt-2 text-sm text-muted-foreground">
                                         Understand our transparent pricing model, escrow system, and find the plan that
@@ -238,15 +241,15 @@ export default function Contact() {
                                     </p>
                                     <Link
                                         href="/pricing"
-                                        className="mt-4 inline-flex items-center text-sm text-primary hover:underline"
+                                        className="mt-auto pt-4 inline-flex items-center text-sm text-primary hover:underline"
                                     >
                                         View Pricing
                                         <ArrowRight className="ml-1 h-4 w-4" />
                                     </Link>
                                 </CardContent>
                             </Card>
-                            <Card>
-                                <CardContent className="pt-6">
+                            <Card className="flex flex-col">
+                                <CardContent className="flex flex-1 flex-col pt-6">
                                     <h3 className="font-semibold">Tax Compliance</h3>
                                     <p className="mt-2 text-sm text-muted-foreground">
                                         Discover how SwiftPay handles PAYE, UIF, SDL, and generates SARS-compliant
@@ -254,7 +257,7 @@ export default function Contact() {
                                     </p>
                                     <Link
                                         href="/features"
-                                        className="mt-4 inline-flex items-center text-sm text-primary hover:underline"
+                                        className="mt-auto pt-4 inline-flex items-center text-sm text-primary hover:underline"
                                     >
                                         Learn More
                                         <ArrowRight className="ml-1 h-4 w-4" />

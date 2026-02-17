@@ -29,6 +29,7 @@ use Illuminate\Queue\Events\WorkerStarting;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -62,6 +63,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Force HTTPS in production so signed URLs (e.g. email verification) use correct scheme
+        if (config('app.env') === 'production') {
+            URL::forceScheme('https');
+        }
+
         $this->ensureWayfinderDirectoriesExist();
 
         // Register observers for cascade delete handling (pivot tables have no foreign keys)

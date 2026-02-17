@@ -10,6 +10,7 @@ use App\Services\EmailService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Laravel\Socialite\Facades\Socialite;
 
 class GoogleAuthController extends Controller
@@ -97,6 +98,12 @@ class GoogleAuthController extends Controller
 
             return redirect('/onboarding');
         } catch (\Exception $e) {
+            Log::error('Google OAuth failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return redirect()->route('login')
                 ->with('error', 'Failed to authenticate with Google. Please try again.');
         }

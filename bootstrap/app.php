@@ -21,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
+        // Trust proxies so X-Forwarded-Proto is respected (fixes signed URL signature mismatch behind HTTPS proxy)
+        $middleware->trustProxies(at: '*');
+
         $middleware->web(append: [
             HandleAppearance::class,
             SetUserBusinessContext::class,
