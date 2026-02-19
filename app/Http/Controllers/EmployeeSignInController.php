@@ -65,7 +65,7 @@ class EmployeeSignInController extends Controller
             $otp = $this->otpService->generateOtp($email);
 
             // Send OTP email
-            Mail::to($employee->email)->queue(new EmployeeOtpEmail($employee, $otp));
+            Mail::to($employee->email)->send(new EmployeeOtpEmail($employee, $otp));
 
             return redirect()->route('employee.sign-in')
                 ->with('otp_sent', true)
