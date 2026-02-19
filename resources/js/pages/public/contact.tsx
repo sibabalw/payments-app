@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { useEffect } from 'react';
+import { trackEvent } from '@/lib/umami';
 import { Mail, MessageSquare, Clock, ArrowRight } from 'lucide-react';
 import InputError from '@/components/input-error';
 import { login, register } from '@/routes';
@@ -26,6 +27,7 @@ export default function Contact() {
 
     useEffect(() => {
         if (wasSuccessful) {
+            trackEvent('Contact form submitted', { page: 'contact' });
             reset();
         }
     }, [wasSuccessful, reset]);
@@ -193,7 +195,11 @@ export default function Contact() {
                                     Don't wait—start your free trial today. No credit card required, and you can
                                     explore all features risk-free.
                                 </p>
-                                <Link href={register()} className="mt-4 block">
+                                <Link
+                                    href={register()}
+                                    className="mt-4 block"
+                                    onClick={() => trackEvent('Start Free Trial clicked', { page: 'contact' })}
+                                >
                                     <Button className="w-full sm:w-auto">
                                         Start Free Trial
                                         <ArrowRight className="ml-2 h-4 w-4" />
@@ -274,7 +280,10 @@ export default function Contact() {
                         title="Ready to Transform Your Business?"
                         description="Join South African businesses that trust SwiftPay. Start your free trial today—no credit card required."
                     >
-                        <Link href={register()}>
+                        <Link
+                            href={register()}
+                            onClick={() => trackEvent('Start Free Trial clicked', { page: 'contact_cta_band' })}
+                        >
                             <Button variant="gradient" size="lg">
                                 Start Free Trial
                                 <ArrowRight className="ml-2 h-4 w-4" />

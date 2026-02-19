@@ -43,6 +43,16 @@
         @viteReactRefresh
         @vite(['resources/js/app.tsx'])
         @inertiaHead
+
+        @if(config('services.umami.website_id'))
+        <script
+            defer
+            src="{{ config('services.umami.script_url') }}"
+            data-website-id="{{ config('services.umami.website_id') }}"
+            @if(config('services.umami.do_not_track')) data-do-not-track="true" @endif
+            @if(config('services.umami.host_url')) data-host-url="{{ config('services.umami.host_url') }}" @endif
+        ></script>
+        @endif
     </head>
     <body class="font-sans antialiased">
         @inertia
