@@ -10,8 +10,8 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Form } from '@inertiajs/react';
 import { useRef } from 'react';
 
@@ -79,9 +79,8 @@ export default function DeleteUser({ formAction, formMethod = 'delete' }: Delete
                                             Password
                                         </Label>
 
-                                        <Input
+                                        <PasswordInput
                                             id="password"
-                                            type="password"
                                             name="password"
                                             ref={passwordInput}
                                             placeholder="Password"

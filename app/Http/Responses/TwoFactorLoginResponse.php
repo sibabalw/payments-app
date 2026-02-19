@@ -31,7 +31,7 @@ class TwoFactorLoginResponse implements TwoFactorLoginResponseContract
 
             $otpService = app(AdminOtpService::class);
             $otp = $otpService->generateOtp($user->id, $user->email);
-            Mail::to($user->email)->queue(new AdminOtpEmail($user->email, $user->name, $otp));
+            Mail::to($user->email)->send(new AdminOtpEmail($user->email, $user->name, $otp));
 
             Auth::logout();
 

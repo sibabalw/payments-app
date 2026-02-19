@@ -34,7 +34,7 @@ test('employee can request OTP with valid email', function () {
     $response->assertSessionHas('otp_email', 'employee@example.com');
     $response->assertSessionHas('status');
 
-    Mail::assertQueued(\App\Mail\EmployeeOtpEmail::class, function ($mail) use ($employee) {
+    Mail::assertSent(\App\Mail\EmployeeOtpEmail::class, function ($mail) use ($employee) {
         return $mail->employee->id === $employee->id;
     });
 });

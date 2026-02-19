@@ -13,7 +13,19 @@ import {
     SheetTrigger,
 } from '@/components/ui/sheet';
 import { Link, usePage } from '@inertiajs/react';
-import { ChevronDown, Menu } from 'lucide-react';
+import {
+    Building2,
+    ChevronDown,
+    ChevronRight,
+    CreditCard,
+    HelpCircle,
+    Home,
+    LayoutGrid,
+    Mail,
+    Menu,
+    PlayCircle,
+    Zap,
+} from 'lucide-react';
 import { useState } from 'react';
 import { dashboard, login, register } from '@/routes';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -25,50 +37,20 @@ import { PublicNavigationProgress } from './public-navigation-progress';
 const adminDashboardUrl = '/admin';
 
 const productLinks = [
-    { href: '/overview', label: 'Overview' },
-    { href: '/features', label: 'Features' },
-    { href: '/how-it-works', label: 'How it works' },
-    { href: '/pricing', label: 'Pricing' },
+    { href: '/overview', label: 'Overview', icon: LayoutGrid },
+    { href: '/features', label: 'Features', icon: Zap },
+    { href: '/how-it-works', label: 'How it works', icon: PlayCircle },
+    { href: '/pricing', label: 'Pricing', icon: CreditCard },
 ];
 
 const companyLinks = [
-    { href: '/about', label: 'About' },
-    { href: '/faq', label: 'FAQ' },
-    { href: '/contact', label: 'Contact' },
+    { href: '/about', label: 'About', icon: Building2 },
+    { href: '/faq', label: 'FAQ', icon: HelpCircle },
+    { href: '/contact', label: 'Contact', icon: Mail },
 ];
 
 const navLinkBase =
     'relative after:absolute after:bottom-0 after:left-0 after:h-px after:w-full after:origin-right after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 hover:after:origin-left hover:after:scale-x-100';
-
-function NavLinks({ onNavigate, mobile }: { onNavigate?: () => void; mobile?: boolean }) {
-    const linkClass = mobile
-        ? 'block rounded-md px-3 py-2 text-base font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground'
-        : `rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted/80 hover:text-foreground ${navLinkBase}`;
-    return (
-        <>
-            {productLinks.map(({ href, label }) => (
-                <Link
-                    key={href}
-                    href={href}
-                    onClick={onNavigate}
-                    className={linkClass}
-                >
-                    {label}
-                </Link>
-            ))}
-            {companyLinks.map(({ href, label }) => (
-                <Link
-                    key={href}
-                    href={href}
-                    onClick={onNavigate}
-                    className={linkClass}
-                >
-                    {label}
-                </Link>
-            ))}
-        </>
-    );
-}
 
 export function PublicNav() {
     const isMobile = useIsMobile();
@@ -98,45 +80,101 @@ export function PublicNav() {
                                         <Menu className="h-5 w-5" />
                                     </Button>
                                 </SheetTrigger>
-                                <SheetContent side="right" className="flex flex-col gap-6">
-                                    <SheetHeader>
+                                <SheetContent
+                                    side="right"
+                                    className="flex h-full w-[min(100vw-1.5rem,340px)] max-w-[340px] flex-col gap-0 overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[340px] [background:linear-gradient(to_bottom,var(--hero-gradient-start-value)_0%,oklch(0.98_0.01_260_/_0.95)_35%,var(--background)_70%)] dark:[background:linear-gradient(to_bottom,var(--hero-gradient-start-value)_0%,oklch(0.22_0.02_260)_40%,var(--background)_75%)]"
+                                >
+                                    <SheetHeader className="relative flex shrink-0 flex-row items-center justify-between border-b border-white/10 px-4 py-3 pr-12 dark:border-white/5">
                                         <SheetTitle className="sr-only">Menu</SheetTitle>
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20 shadow-sm dark:bg-white/10">
+                                                <AppLogoIcon className="h-5 w-5" alt="" aria-hidden />
+                                            </div>
+                                            <span className="bg-gradient-to-r from-primary to-primary/80 bg-clip-text font-display text-lg font-bold tracking-tight text-transparent">
+                                                SwiftPay
+                                            </span>
+                                        </div>
                                     </SheetHeader>
-                                    <div className="flex flex-col gap-1">
+                                    <nav className="relative flex shrink-0 flex-col gap-3 px-3 py-3">
                                         <Link
                                             href="/"
                                             onClick={() => setMobileOpen(false)}
-                                            className="block rounded-md px-3 py-2 text-base font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+                                            className="group flex items-center gap-3 rounded-lg border border-white/10 bg-white/50 px-3 py-2.5 transition-all hover:border-primary/20 hover:bg-white/80 dark:border-white/5 dark:bg-white/5 dark:hover:border-primary/30 dark:hover:bg-white/10"
                                         >
-                                            Home
+                                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 dark:bg-white/15">
+                                                <Home className="h-4 w-4 text-primary" />
+                                            </div>
+                                            <span className="font-display text-sm font-semibold text-foreground">Home</span>
+                                            <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
                                         </Link>
-                                        <NavLinks onNavigate={() => setMobileOpen(false)} mobile />
-                                    </div>
-                                    <div className="mt-auto flex flex-col gap-2 border-t pt-4">
-                                        {user ? (
-                                            <Link
-                                                href={isAdmin ? adminDashboardUrl : dashboard()}
-                                                onClick={() => setMobileOpen(false)}
-                                            >
-                                                <Button variant="gradient" className="w-full">
-                                                    {isAdmin ? 'Go To Admin' : 'Go To Dashboard'}
-                                                </Button>
-                                            </Link>
-                                        ) : (
-                                            <>
-                                                <Link href={login()} onClick={() => setMobileOpen(false)}>
-                                                    <Button variant="outline" className="w-full">
-                                                        Log in
+                                        <div className="space-y-0.5">
+                                            <p className="px-2 font-display text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                                Product
+                                            </p>
+                                            <div className="space-y-px rounded-lg border border-white/10 bg-white/40 p-1 dark:border-white/5 dark:bg-white/5">
+                                                {productLinks.map(({ href, label, icon: Icon }) => (
+                                                    <Link
+                                                        key={href}
+                                                        href={href}
+                                                        onClick={() => setMobileOpen(false)}
+                                                        className="group flex items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors hover:bg-primary/10 dark:hover:bg-white/10"
+                                                    >
+                                                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 dark:bg-white/10">
+                                                            <Icon className="h-3.5 w-3.5 text-primary" />
+                                                        </div>
+                                                        <span className="text-sm font-medium text-foreground">{label}</span>
+                                                        <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                                                    </Link>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <p className="px-2 font-display text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                                Company
+                                            </p>
+                                            <div className="space-y-px rounded-lg border border-white/10 bg-white/40 p-1 dark:border-white/5 dark:bg-white/5">
+                                                {companyLinks.map(({ href, label, icon: Icon }) => (
+                                                    <Link
+                                                        key={href}
+                                                        href={href}
+                                                        onClick={() => setMobileOpen(false)}
+                                                        className="group flex items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors hover:bg-primary/10 dark:hover:bg-white/10"
+                                                    >
+                                                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 dark:bg-white/10">
+                                                            <Icon className="h-3.5 w-3.5 text-primary" />
+                                                        </div>
+                                                        <span className="text-sm font-medium text-foreground">{label}</span>
+                                                        <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                                                    </Link>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="mt-auto flex flex-col gap-2 border-t border-border/80 pt-3">
+                                            {user ? (
+                                                <Link
+                                                    href={isAdmin ? adminDashboardUrl : dashboard()}
+                                                    onClick={() => setMobileOpen(false)}
+                                                >
+                                                    <Button variant="gradient" size="sm" className="w-full">
+                                                        {isAdmin ? 'Go To Admin' : 'Go To Dashboard'}
                                                     </Button>
                                                 </Link>
-                                                <Link href={register()} onClick={() => setMobileOpen(false)}>
-                                                    <Button variant="gradient" className="w-full">
-                                                        Get Started
-                                                    </Button>
-                                                </Link>
-                                            </>
-                                        )}
-                                    </div>
+                                            ) : (
+                                                <>
+                                                    <Link href={login()} onClick={() => setMobileOpen(false)}>
+                                                        <Button variant="outline" size="sm" className="w-full">
+                                                            Log in
+                                                        </Button>
+                                                    </Link>
+                                                    <Link href={register()} onClick={() => setMobileOpen(false)}>
+                                                        <Button variant="gradient" size="sm" className="w-full">
+                                                            Get Started
+                                                        </Button>
+                                                    </Link>
+                                                </>
+                                            )}
+                                        </div>
+                                    </nav>
                                 </SheetContent>
                             </Sheet>
                         </div>
