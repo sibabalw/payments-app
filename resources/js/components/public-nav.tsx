@@ -29,6 +29,7 @@ import {
 import { useState } from 'react';
 import { dashboard, login, register } from '@/routes';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { trackEvent } from '@/lib/umami';
 import { type SharedData } from '@/types';
 import AppLogoIcon from './app-logo-icon';
 import AppearanceToggleDropdown from './appearance-dropdown';
@@ -166,7 +167,13 @@ export function PublicNav() {
                                                             Log in
                                                         </Button>
                                                     </Link>
-                                                    <Link href={register()} onClick={() => setMobileOpen(false)}>
+                                                    <Link
+                                                        href={register()}
+                                                        onClick={() => {
+                                                            trackEvent('Get Started clicked', { location: 'nav_mobile' });
+                                                            setMobileOpen(false);
+                                                        }}
+                                                    >
                                                         <Button variant="gradient" size="sm" className="w-full">
                                                             Get Started
                                                         </Button>
@@ -239,7 +246,10 @@ export function PublicNav() {
                                             Log in
                                         </Button>
                                     </Link>
-                                    <Link href={register()}>
+                                    <Link
+                                        href={register()}
+                                        onClick={() => trackEvent('Get Started clicked', { location: 'nav' })}
+                                    >
                                         <Button variant="gradient" size="sm">
                                             Get Started
                                         </Button>

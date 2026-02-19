@@ -88,4 +88,22 @@ return [
         'cache_ttl' => env('GEOLOCATION_CACHE_TTL', 3600),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Umami Analytics
+    |--------------------------------------------------------------------------
+    |
+    | Privacy-first analytics. Set UMAMI_WEBSITE_ID and UMAMI_SCRIPT_URL to
+    | enable. Script URL: https://cloud.umami.is/script.js (cloud) or your
+    | self-hosted instance URL + /umami.js.
+    |
+    */
+
+    'umami' => [
+        'website_id' => env('UMAMI_WEBSITE_ID'),
+        'script_url' => env('UMAMI_SCRIPT_URL', 'https://cloud.umami.is/script.js'),
+        'do_not_track' => env('UMAMI_DO_NOT_TRACK', true),
+        'host_url' => env('UMAMI_HOST_URL'),
+    ],
+
 ];
