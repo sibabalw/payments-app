@@ -46,7 +46,7 @@ class EmailConfigurationController extends Controller
         ]);
 
         try {
-            Mail::to($validated['email'])->queue(new AdminTestEmail);
+            Mail::to($validated['email'])->send(new AdminTestEmail);
 
             $this->auditService->log(
                 'email.test_sent',
