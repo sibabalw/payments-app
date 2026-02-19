@@ -5,6 +5,7 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeTheme } from './hooks/use-appearance';
+import { initializeUmami } from './lib/umami';
 
 const rawName = import.meta.env.VITE_APP_NAME || 'SwiftPay';
 const appName = ['Swift Pay', 'swift pay', 'Swift pay'].includes(rawName) ? 'SwiftPay' : rawName;
@@ -24,6 +25,8 @@ createInertiaApp({
                 <App {...props} />
             </StrictMode>,
         );
+
+        initializeUmami();
     },
     progress: {
         color: '#2563eb',
