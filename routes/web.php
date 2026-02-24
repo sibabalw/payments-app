@@ -29,11 +29,12 @@ Route::get('/sitemap.xml', function () {
         \App\Http\Middleware\SetUserBusinessContext::class,
         \App\Http\Middleware\HandleAppearance::class,
         \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
-    ]);
+    ]); 
 
 Route::get('/', function () {
     return Inertia::render('public/home');
 })->name('home');
+
 
 Route::get('/features', function () {
     return Inertia::render('public/features');
