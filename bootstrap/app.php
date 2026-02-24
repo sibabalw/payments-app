@@ -38,8 +38,22 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->report(function (\Throwable $e) {
-            // Get the current request and user
             $request = request();
+
+            // Skip database error logging for stateless routes (sitemap, health, etc.)
+            // These can fail when DB/context assumptions don't apply
+            if ($request && (
+                $request->is('sitemap.xml') ||
+                $request->route()?->getName() === 'sitemap'
+            )) {
+                \Illuminate\Support\Facades\Log::error($e->getMessage(), [
+                    'exception' => get_class($e),
+                    'url' => $request->fullUrl(),
+                ]);
+
+                return;
+            }
+
             $user = $request?->user();
 
             // Log error to database and notify admins
