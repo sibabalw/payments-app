@@ -22,7 +22,14 @@ Route::get('/sitemap.xml', function () {
         200,
         ['Content-Type' => 'application/xml']
     );
-})->name('sitemap');
+})
+    ->name('sitemap')
+    ->withoutMiddleware([
+        \App\Http\Middleware\HandleInertiaRequests::class,
+        \App\Http\Middleware\SetUserBusinessContext::class,
+        \App\Http\Middleware\HandleAppearance::class,
+        \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
+    ]);
 
 Route::get('/', function () {
     return Inertia::render('public/home');
