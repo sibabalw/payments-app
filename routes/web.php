@@ -2,6 +2,27 @@
 
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use Spatie\Sitemap\Sitemap;
+use Spatie\Sitemap\Tags\Url;
+
+Route::get('/sitemap.xml', function () {
+    return response(
+        Sitemap::create()
+            ->add(Url::create('/'))
+            ->add(Url::create('/pricing'))
+            ->add(Url::create('/features'))
+            ->add(Url::create('/about'))
+            ->add(Url::create('/contact'))
+            ->add(Url::create('/how-it-works'))
+            ->add(Url::create('/overview'))
+            ->add(Url::create('/faq'))
+            ->add(Url::create('/privacy'))
+            ->add(Url::create('/terms'))
+            ->render(),
+        200,
+        ['Content-Type' => 'application/xml']
+    );
+})->name('sitemap');
 
 Route::get('/', function () {
     return Inertia::render('public/home');
