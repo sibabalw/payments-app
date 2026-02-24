@@ -6,18 +6,20 @@ use Spatie\Sitemap\Sitemap;
 use Spatie\Sitemap\Tags\Url;
 
 Route::get('/sitemap.xml', function () {
+    $now = now();
+
     return response(
         Sitemap::create()
-            ->add(Url::create('/'))
-            ->add(Url::create('/pricing'))
-            ->add(Url::create('/features'))
-            ->add(Url::create('/about'))
-            ->add(Url::create('/contact'))
-            ->add(Url::create('/how-it-works'))
-            ->add(Url::create('/overview'))
-            ->add(Url::create('/faq'))
-            ->add(Url::create('/privacy'))
-            ->add(Url::create('/terms'))
+            ->add(Url::create(url('/'))->setLastModificationDate($now))
+            ->add(Url::create(url('/pricing'))->setLastModificationDate($now))
+            ->add(Url::create(url('/features'))->setLastModificationDate($now))
+            ->add(Url::create(url('/about'))->setLastModificationDate($now))
+            ->add(Url::create(url('/contact'))->setLastModificationDate($now))
+            ->add(Url::create(url('/how-it-works'))->setLastModificationDate($now))
+            ->add(Url::create(url('/overview'))->setLastModificationDate($now))
+            ->add(Url::create(url('/faq'))->setLastModificationDate($now))
+            ->add(Url::create(url('/privacy'))->setLastModificationDate($now))
+            ->add(Url::create(url('/terms'))->setLastModificationDate($now))
             ->render(),
         200,
         ['Content-Type' => 'application/xml']
